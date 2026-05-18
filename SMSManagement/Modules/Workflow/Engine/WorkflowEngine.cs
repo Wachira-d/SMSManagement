@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Core.Security;
 using SMSManagement.Modules.Shortlink.Services;
@@ -19,6 +20,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
     private readonly FieldEncryptor _crypto;
     private readonly ISmsDispatcher _sms;
     private readonly IShortlinkService _shortlinks;
+    private readonly ShortlinkOptions _shortlinkOpts;
     private readonly TimeProvider _clock;
     private readonly ILogger<WorkflowEngine> _log;
 
@@ -29,6 +31,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
         FieldEncryptor crypto,
         ISmsDispatcher sms,
         IShortlinkService shortlinks,
+        IOptions<ShortlinkOptions> shortlinkOpts,
         TimeProvider clock,
         ILogger<WorkflowEngine> log)
     {
@@ -36,6 +39,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
         _crypto = crypto;
         _sms = sms;
         _shortlinks = shortlinks;
+        _shortlinkOpts = shortlinkOpts.Value;
         _clock = clock;
         _log = log;
     }
@@ -182,6 +186,14 @@ public sealed class WorkflowEngine : IWorkflowEngine
     private async Task<string> ReplaceUrlsWithShortlinksAsync(
         string body, WorkflowInstance instance, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(_shortlinkOpts.PublicBaseUrl))
+        {
+            _log.LogWarning(
+                "Shortlink:PublicBaseUrl not configured — leaving URLs as-is.");
+            return body;
+        }
+        var baseUrl = _shortlinkOpts.PublicBaseUrl.TrimEnd('/');
+
         // Cheap URL detection; production should use a vetted Regex with timeout.
         var tokens = body.Split(' ');
         for (var i = 0; i < tokens.Length; i++)
@@ -193,7 +205,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
                 var slug = await _shortlinks.CreateAsync(
                     await ProjectIdForAsync(instance.DefinitionId, ct),
                     tokens[i], instance.Id, TimeSpan.FromDays(60), null, ct);
-                tokens[i] = $"https://s.example/{slug}"; // base from config in real impl
+                tokens[i] = $"{baseUrl}/{slug}";
             }
         }
         return string.Join(' ', tokens);

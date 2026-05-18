@@ -35,7 +35,9 @@ public sealed class ProjectsController : ControllerBase
 
     public sealed record UpdateProjectRequest(
         string Name,
-        string? DefaultProvider);
+        string? DefaultProvider,
+        short? ShortlinkSlugLength,
+        string? NotificationEmails);
 
     public sealed record ShareRequest(Guid UserId, ProjectAccessLevel Level);
 
@@ -137,11 +139,23 @@ public sealed class ProjectsController : ControllerBase
         var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct);
         if (project is null) return NotFound();
 
-        var before = new { project.Name, project.DefaultProvider };
+        var before = new { project.Name, project.DefaultProvider,
+            project.ShortlinkSlugLength, project.NotificationEmails };
 
         if (!string.IsNullOrWhiteSpace(req.Name)) project.Name = req.Name.Trim();
         if (!string.IsNullOrWhiteSpace(req.DefaultProvider))
             project.DefaultProvider = req.DefaultProvider.Trim().ToLowerInvariant();
+
+        // Per-project slug length override. Range 4..16; null clears.
+        if (req.ShortlinkSlugLength is { } len)
+        {
+            if (len < 4 || len > 16)
+                return BadRequest("ShortlinkSlugLength must be between 4 and 16.");
+            project.ShortlinkSlugLength = len;
+        }
+        if (req.NotificationEmails is not null)
+            project.NotificationEmails = string.IsNullOrWhiteSpace(req.NotificationEmails)
+                ? null : req.NotificationEmails.Trim();
 
         await _db.SaveChangesAsync(ct);
 
@@ -151,7 +165,8 @@ public sealed class ProjectsController : ControllerBase
             Request.Headers.UserAgent.ToString(),
             HttpContext.TraceIdentifier,
             Before: before,
-            After: new { project.Name, project.DefaultProvider }), ct);
+            After: new { project.Name, project.DefaultProvider,
+                project.ShortlinkSlugLength, project.NotificationEmails }), ct);
 
         return NoContent();
     }

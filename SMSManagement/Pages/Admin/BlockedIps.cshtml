@@ -1,0 +1,77 @@
+@page "/admin/blocked-ips"
+@model SMSManagement.Pages.Admin.BlockedIpsModel
+@{ ViewData["Title"] = "Blocked IPs"; }
+<style>
+    body { font-family: system-ui, sans-serif; margin: 24px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 8px; font-size: 14px; }
+    th { background: #f3f3f3; text-align: left; }
+    .active { background: #fff3f3; }
+    .expired { color: #888; }
+    button { padding: 4px 10px; cursor: pointer; }
+    .filter { margin-bottom: 12px; }
+    .toast { padding: 8px 12px; background: #eef; margin-bottom: 12px; border: 1px solid #ccd; }
+</style>
+
+<h1>Blocked IPs</h1>
+<p>Read-only fingerprint is the first 4 bytes of the salted-SHA256(IP).
+   Raw IPs are never persisted.</p>
+
+@if (!string.IsNullOrEmpty(Model.Message))
+{
+    <div class="toast">@Model.Message</div>
+}
+
+<form method="get" class="filter">
+    <label>
+        <input type="checkbox" name="includeExpired"
+               value="true" @(Model.IncludeExpired ? "checked" : "")
+               onchange="this.form.submit()" />
+        Include expired / unblocked
+    </label>
+</form>
+
+<table>
+    <thead>
+        <tr>
+            <th>Fingerprint</th>
+            <th>Reason</th>
+            <th>Failures</th>
+            <th>First failure</th>
+            <th>Last failure</th>
+            <th>Blocked until</th>
+            <th>Status</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+    @foreach (var row in Model.Rows)
+    {
+        var active = row.IsActive;
+        <tr class="@(active ? "active" : "expired")">
+            <td><code>@row.FingerprintHex</code></td>
+            <td>@row.Reason</td>
+            <td style="text-align:right">@row.FailureCount</td>
+            <td>@row.FirstFailureAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+            <td>@row.LastFailureAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+            <td>@row.BlockedUntil.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+            <td>@(active ? "Active" : (row.UnblockedAt.HasValue ? "Unblocked" : "Expired"))</td>
+            <td>
+                @if (active)
+                {
+                    <form method="post" style="display:inline">
+                        <input type="hidden" name="id" value="@row.Id"/>
+                        <input type="text" name="reason" required placeholder="reason"
+                               style="width:140px;padding:2px"/>
+                        <button type="submit">Unblock</button>
+                    </form>
+                }
+            </td>
+        </tr>
+    }
+    @if (Model.Rows.Count == 0)
+    {
+        <tr><td colspan="8" style="text-align:center;color:#888;padding:24px">No matching rows.</td></tr>
+    }
+    </tbody>
+</table>

@@ -23,6 +23,13 @@ public sealed class Project
     /// Empty disables notifications for this project.
     /// </summary>
     public string? NotificationEmails { get; set; }
+
+    /// <summary>
+    /// Per-project shortlink slug length override. Null = use global
+    /// <c>Shortlink:SlugLength</c> from configuration.
+    /// Range enforced at the controller: 4..16.
+    /// </summary>
+    public short? ShortlinkSlugLength { get; set; }
 }
 
 public sealed class ColumnMapping

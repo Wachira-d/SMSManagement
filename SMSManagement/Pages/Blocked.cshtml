@@ -1,0 +1,23 @@
+@page "/blocked"
+@model SMSManagement.Pages.BlockedModel
+@{ ViewData["Title"] = "Access blocked"; }
+<div style="max-width:560px;margin:64px auto;font-family:system-ui,sans-serif;line-height:1.5">
+    <h1 style="color:#c00">Access blocked</h1>
+    <p>Your network has been temporarily blocked because of unusual activity on
+       this site (too many requests for non-existent links in a short time).</p>
+    @if (Model.BlockedUntil.HasValue)
+    {
+        <p>The block will lift automatically at
+           <strong>@Model.BlockedUntil.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz")</strong>.</p>
+    }
+    else
+    {
+        <p>The block lifts automatically within an hour.</p>
+    }
+    <p>If you believe this is a mistake, contact your platform administrator
+       and quote the time above.</p>
+    <hr/>
+    <p style="color:#666;font-size:0.875rem">
+        Your IP address is not stored — only a salted hash for abuse tracking.
+    </p>
+</div>

@@ -112,6 +112,17 @@ builder.Services.AddRateLimiter(o =>
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0
         }));
+
+    // Shortlink redirect: 60 req/min per IP. Combined with the IP-block
+    // tracker, this stops rapid enumeration of unknown slugs.
+    o.AddPolicy("shortlink", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 60,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        }));
 });
 
 builder.Services.AddControllers();

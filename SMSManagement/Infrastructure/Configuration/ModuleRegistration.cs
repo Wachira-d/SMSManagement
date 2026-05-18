@@ -11,6 +11,7 @@ using SMSManagement.Modules.Identity.Services;
 using SMSManagement.Modules.Ingestion.Services;
 using SMSManagement.Modules.Notifications;
 using SMSManagement.Modules.Reporting.Services;
+using SMSManagement.Modules.Shortlink.Abuse;
 using SMSManagement.Modules.Shortlink.Services;
 using SMSManagement.Modules.Sms.Providers;
 using SMSManagement.Modules.Sms.Services;
@@ -84,7 +85,9 @@ public static class ModuleRegistration
 
         // ---------- Shortlink ----------
         services.Configure<ShortlinkOptions>(cfg.GetSection("Shortlink"));
+        services.Configure<ShortlinkAbuseOptions>(cfg.GetSection("Shortlink:Abuse"));
         services.AddScoped<IShortlinkService, ShortlinkService>();
+        services.AddScoped<IShortlinkAbuseTracker, ShortlinkAbuseTracker>();
 
         // ---------- Workflow ----------
         services.AddScoped<IWorkflowEngine, WorkflowEngine>();

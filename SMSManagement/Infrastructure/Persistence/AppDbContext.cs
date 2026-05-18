@@ -43,6 +43,8 @@ public sealed class AppDbContext : DbContext
     public DbSet<SMSManagement.Modules.Shortlink.Domain.Shortlink> Shortlinks =>
         Set<SMSManagement.Modules.Shortlink.Domain.Shortlink>();
     public DbSet<ShortlinkClick> ShortlinkClicks => Set<ShortlinkClick>();
+    public DbSet<BlockedIp> BlockedIps => Set<BlockedIp>();
+    public DbSet<IpAccessFailure> IpAccessFailures => Set<IpAccessFailure>();
 
     public DbSet<User> Users => Set<User>();
     public DbSet<ProjectMembership> ProjectMemberships => Set<ProjectMembership>();
@@ -113,6 +115,22 @@ public sealed class AppDbContext : DbContext
 
         b.Entity<ShortlinkClick>(e =>
             e.HasIndex(x => new { x.ShortlinkId, x.ClickedAt }));
+
+        b.Entity<BlockedIp>(e =>
+        {
+            e.HasIndex(x => new { x.IpHash, x.BlockedUntil });
+            e.HasIndex(x => x.BlockedUntil);
+            e.Property(x => x.Reason).HasMaxLength(64);
+            e.Property(x => x.UnblockReason).HasMaxLength(256);
+        });
+
+        b.Entity<IpAccessFailure>(e =>
+        {
+            e.HasIndex(x => new { x.IpHash, x.OccurredAt });
+            e.HasIndex(x => x.OccurredAt); // for retention purge
+            e.Property(x => x.Reason).HasMaxLength(64);
+            e.Property(x => x.Slug).HasMaxLength(32);
+        });
 
         // ---------- Identity ----------
         b.Entity<User>(e =>
