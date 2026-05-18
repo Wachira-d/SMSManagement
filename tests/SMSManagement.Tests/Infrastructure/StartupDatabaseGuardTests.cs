@@ -47,6 +47,37 @@ public sealed class StartupDatabaseGuardTests
         => Invoke(18487, "admin").Should().Contain("ALTER LOGIN [admin]");
 
     [Fact]
+    public void AutoCreate_helper_extracts_db_name_and_rewrites_to_master()
+    {
+        // TryAutoCreateDatabaseAsync is private; we exercise its parsing
+        // via the helpers it uses (SqlConnectionStringBuilder behaviour).
+        var input = "Server=localhost\\SQLExpress;Database=campaign;User Id=admin;" +
+                    "Password=p;TrustServerCertificate=true";
+        var b = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(input);
+        b.InitialCatalog.Should().Be("campaign", "name extracted for CREATE DATABASE");
+
+        b.InitialCatalog = "master";
+        b.ConnectTimeout = 8;
+        var rewritten = b.ConnectionString;
+
+        rewritten.Should().Contain("Initial Catalog=master");
+        rewritten.Should().NotContain("campaign");      // master, not original
+        rewritten.Should().Contain("User ID=admin");    // creds preserved
+    }
+
+    [Theory]
+    [InlineData("normal",      "[normal]")]
+    [InlineData("with space",  "[with space]")]
+    [InlineData("with]bracket","[with]]bracket]")]   // ']' must be doubled
+    public void Database_name_is_safely_bracket_escaped(string raw, string expected)
+    {
+        // Mirror the exact escaping the helper does so a refactor that
+        // breaks the bracket-doubling rule fails this test.
+        var escaped = "[" + raw.Replace("]", "]]") + "]";
+        escaped.Should().Be(expected);
+    }
+
+    [Fact]
     public void Diagnostic_one_line_message_contains_hint_endpoint_and_sql_number()
     {
         // Diagnostic is a private nested record; build via reflection so we

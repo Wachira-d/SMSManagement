@@ -1,5 +1,7 @@
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using SMSManagement.Infrastructure.Persistence;
 
 namespace SMSManagement.Infrastructure.Bootstrap;
@@ -21,6 +23,8 @@ public static class StartupDatabaseGuard
         IServiceProvider services, CancellationToken ct = default)
     {
         var log = services.GetRequiredService<ILogger<Program>>();
+        var env = services.GetRequiredService<IHostEnvironment>();
+        var config = services.GetRequiredService<IConfiguration>();
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var connStr = db.Database.GetConnectionString();
@@ -31,6 +35,41 @@ public static class StartupDatabaseGuard
         {
             await OpenWithTimeoutAsync(connStr!, TimeSpan.FromSeconds(8), ct);
             log.LogInformation("Database probe OK.");
+            return;
+        }
+        catch (SqlException ex) when (ex.Number == 4060
+                                   && env.IsDevelopment()
+                                   && config.GetValue<bool>("Database:AutoCreateDatabaseInDev"))
+        {
+            // Dev-only convenience: connect to master, CREATE DATABASE,
+            // then retry the probe. Production must pre-create the DB so
+            // the app login doesn't need CREATE DATABASE on master.
+            log.LogWarning(
+                "SQL #4060 caught and Database:AutoCreateDatabaseInDev = true. " +
+                "Attempting auto-create via master connection (Development only).");
+
+            if (await TryAutoCreateDatabaseAsync(log, connStr!, ct))
+            {
+                try
+                {
+                    await OpenWithTimeoutAsync(connStr!, TimeSpan.FromSeconds(8), ct);
+                    log.LogInformation("Database probe OK after auto-create.");
+                    return;
+                }
+                catch (SqlException retryEx)
+                {
+                    // Auto-create succeeded but retry still fails — probably
+                    // the user doesn't exist in the new DB. Surface with the
+                    // standard hint flow.
+                    var d = BuildDiagnostic(retryEx, connStr);
+                    LogFriendly(log, d, retryEx);
+                    throw new ApplicationException(d.OneLineMessage, retryEx);
+                }
+            }
+            // Auto-create failed → fall through to the standard error path.
+            var diag = BuildDiagnostic(ex, connStr);
+            LogFriendly(log, diag, ex);
+            throw new ApplicationException(diag.OneLineMessage, ex);
         }
         catch (SqlException ex)
         {
@@ -48,6 +87,70 @@ public static class StartupDatabaseGuard
                 "Unexpected error probing the database. ConnectionString (redacted): {Conn}",
                 Redact(connStr));
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Connects to the <c>master</c> database with the same credentials and
+    /// runs <c>CREATE DATABASE</c>. Returns false (and logs a warning) if
+    /// anything goes wrong — the caller surfaces the original 4060 error.
+    /// </summary>
+    private static async Task<bool> TryAutoCreateDatabaseAsync(
+        ILogger log, string connectionString, CancellationToken ct)
+    {
+        string dbName;
+        string masterCs;
+        try
+        {
+            var b = new SqlConnectionStringBuilder(connectionString);
+            dbName = b.InitialCatalog;
+            if (string.IsNullOrEmpty(dbName))
+            {
+                log.LogWarning(
+                    "Auto-create skipped: connection string has no Initial Catalog.");
+                return false;
+            }
+            b.InitialCatalog = "master";
+            b.ConnectTimeout = 8;
+            masterCs = b.ConnectionString;
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Auto-create skipped: cannot parse connection string.");
+            return false;
+        }
+
+        // SQL identifiers can't be parameterised — escape ']' for the brackets
+        // and ''' for the N'literal'. dbName comes from the operator's config
+        // (not user input), but defence-in-depth.
+        var bracketed = "[" + dbName.Replace("]", "]]") + "]";
+        var literal = "N'" + dbName.Replace("'", "''") + "'";
+
+        try
+        {
+            await using var conn = new SqlConnection(masterCs);
+            await conn.OpenAsync(ct);
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"IF DB_ID({literal}) IS NULL CREATE DATABASE {bracketed};";
+            cmd.CommandTimeout = 30;
+            await cmd.ExecuteNonQueryAsync(ct);
+
+            log.LogWarning(
+                "Auto-created database {Database} via master. This is a " +
+                "Development convenience — production must pre-create the DB " +
+                "(CREATE DATABASE {Database};).",
+                bracketed, bracketed);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex,
+                "Auto-create of database {Database} failed (login may lack " +
+                "CREATE DATABASE on master). Fix manually: " +
+                "USE master; CREATE DATABASE {Database};",
+                bracketed, bracketed);
+            return false;
         }
     }
 

@@ -81,6 +81,21 @@ CREATE DATABASE [campaign];
 
 …or fix `Database=` in the connection string to point to the right DB.
 
+**Dev shortcut**: set `Database:AutoCreateDatabaseInDev = true` (default
+for `appsettings.Development.json`) — the startup probe will catch SQL
+#4060 and try to `CREATE DATABASE` via a master-database connection
+before re-running the probe. Only honoured when
+`ASPNETCORE_ENVIRONMENT = Development` (production ignores the flag for
+security — the app login should not have `CREATE DATABASE` on master).
+The fallback requires:
+- The same SQL login to have access to `master`
+- `CREATE DATABASE` permission on the server (default for sysadmin /
+  `dbcreator` role members)
+
+If the auto-create attempt itself fails (no permission on master), the
+log records a warning and the standard #4060 hint surfaces. See
+`StartupDatabaseGuard.TryAutoCreateDatabaseAsync`.
+
 ### `53` / `11001` / `233` — Network / TLS
 
 - `53` / `11001`: host unreachable. Check the `Server=` host:port. From
