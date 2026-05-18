@@ -103,7 +103,7 @@ public sealed class EtrackerSmsProvider : ISmsProvider
         // Provider returns either an ID line or "OK <id>" — keep it tolerant.
         var trimmed = body.Trim();
         if (string.IsNullOrEmpty(trimmed)) return null;
-        var parts = trimmed.Split([' ', '\t', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries);
+        var parts = trimmed.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
         return parts.LastOrDefault();
     }
 }

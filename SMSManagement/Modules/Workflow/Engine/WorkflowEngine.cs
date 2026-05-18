@@ -160,14 +160,14 @@ public sealed class WorkflowEngine : IWorkflowEngine
                     WorkflowInstanceId: instance.Id), ct);
 
                 instance.State = WorkflowState.AwaitingAction;
-                instance.NextCheckAt = step.Wait is { } w ? _clock.GetUtcNow().Add(w) : null;
+                instance.NextCheckAt = step.Wait is { } sendWait ? _clock.GetUtcNow().Add(sendWait) : null;
                 instance.StepRepeatCount++;
                 await _db.SaveChangesAsync(ct);
                 break;
             }
             case "wait":
                 instance.State = WorkflowState.AwaitingAction;
-                instance.NextCheckAt = step.Wait is { } w ? _clock.GetUtcNow().Add(w) : null;
+                instance.NextCheckAt = step.Wait is { } waitDur ? _clock.GetUtcNow().Add(waitDur) : null;
                 await _db.SaveChangesAsync(ct);
                 break;
 

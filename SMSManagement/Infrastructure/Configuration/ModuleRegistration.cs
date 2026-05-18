@@ -24,7 +24,7 @@ public static class ModuleRegistration
         // ---------- Persistence ----------
         // AddDbContext (not Pool) — context has scoped dependency IUserContext.
         services.AddDbContext<AppDbContext>(opts =>
-            opts.UseNpgsql(cfg.GetConnectionString("Default")));
+            opts.UseSqlServer(cfg.GetConnectionString("Default")));
 
         // ---------- Core ----------
         services.Configure<EncryptionOptions>(cfg.GetSection("Encryption"));
