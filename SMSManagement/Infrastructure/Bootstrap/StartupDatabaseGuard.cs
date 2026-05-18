@@ -29,6 +29,15 @@ public static class StartupDatabaseGuard
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var connStr = db.Database.GetConnectionString();
 
+        // Announce the auto-create policy explicitly so the operator can see
+        // why auto-create did or didn't fire when a 4060 surfaces later.
+        var autoCreateEnabled = config.GetValue<bool>("Database:AutoCreateDatabaseInDev");
+        var autoCreateActive = env.IsDevelopment() && autoCreateEnabled;
+        log.LogInformation(
+            "Database auto-create policy: {Status} (env={Environment}, flag Database:AutoCreateDatabaseInDev={Flag})",
+            autoCreateActive ? "ENABLED — will CREATE DATABASE on SQL #4060" : "DISABLED",
+            env.EnvironmentName, autoCreateEnabled);
+
         log.LogInformation("Probing database connectivity at startup…");
 
         try
@@ -37,9 +46,7 @@ public static class StartupDatabaseGuard
             log.LogInformation("Database probe OK.");
             return;
         }
-        catch (SqlException ex) when (ex.Number == 4060
-                                   && env.IsDevelopment()
-                                   && config.GetValue<bool>("Database:AutoCreateDatabaseInDev"))
+        catch (SqlException ex) when (ex.Number == 4060 && autoCreateActive)
         {
             // Dev-only convenience: connect to master, CREATE DATABASE,
             // then retry the probe. Production must pre-create the DB so
@@ -61,19 +68,19 @@ public static class StartupDatabaseGuard
                     // Auto-create succeeded but retry still fails — probably
                     // the user doesn't exist in the new DB. Surface with the
                     // standard hint flow.
-                    var d = BuildDiagnostic(retryEx, connStr);
+                    var d = BuildDiagnostic(retryEx, connStr, autoCreateEnabled, env.IsDevelopment());
                     LogFriendly(log, d, retryEx);
                     throw new ApplicationException(d.OneLineMessage, retryEx);
                 }
             }
             // Auto-create failed → fall through to the standard error path.
-            var diag = BuildDiagnostic(ex, connStr);
+            var diag = BuildDiagnostic(ex, connStr, autoCreateEnabled, env.IsDevelopment());
             LogFriendly(log, diag, ex);
             throw new ApplicationException(diag.OneLineMessage, ex);
         }
         catch (SqlException ex)
         {
-            var diag = BuildDiagnostic(ex, connStr);
+            var diag = BuildDiagnostic(ex, connStr, autoCreateEnabled, env.IsDevelopment());
             LogFriendly(log, diag, ex);
             // Carry the full diagnostic in the exception message — anyone
             // who only sees the exception (debugger, crash dump, unhandled-
@@ -157,6 +164,8 @@ public static class StartupDatabaseGuard
     public static async Task MigrateAsync(IServiceProvider services, CancellationToken ct = default)
     {
         var log = services.GetRequiredService<ILogger<Program>>();
+        var env = services.GetRequiredService<IHostEnvironment>();
+        var config = services.GetRequiredService<IConfiguration>();
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         try
@@ -166,7 +175,9 @@ public static class StartupDatabaseGuard
         }
         catch (SqlException ex)
         {
-            var diag = BuildDiagnostic(ex, db.Database.GetConnectionString());
+            var diag = BuildDiagnostic(ex, db.Database.GetConnectionString(),
+                config.GetValue<bool>("Database:AutoCreateDatabaseInDev"),
+                env.IsDevelopment());
             LogFriendly(log, diag, ex);
             throw new ApplicationException(diag.OneLineMessage, ex);
         }
@@ -188,10 +199,12 @@ public static class StartupDatabaseGuard
             $"as [{User}]/[{Database}]: {OriginalMessage} | HINT: {Hint}";
     }
 
-    private static Diagnostic BuildDiagnostic(SqlException ex, string? connectionString)
+    private static Diagnostic BuildDiagnostic(
+        SqlException ex, string? connectionString,
+        bool autoCreateFlag = false, bool isDevelopment = false)
     {
         var (server, user, db) = ExtractEndpoint(connectionString);
-        var hint = HintFor(ex.Number, user);
+        var hint = HintFor(ex.Number, user, autoCreateFlag, isDevelopment);
         return new Diagnostic(ex.Number, server, user, db, hint,
             ex.Message.TrimEnd('.'));
     }
@@ -227,8 +240,15 @@ public static class StartupDatabaseGuard
     }
 
     /// <summary>Map well-known SqlException Number → actionable advice.
-    /// Numbers from https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors</summary>
-    private static string HintFor(int sqlErrorNumber, string? user) => sqlErrorNumber switch
+    /// Numbers from https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors
+    /// The <paramref name="autoCreateFlag"/> + <paramref name="isDevelopment"/>
+    /// pair lets the 4060 hint tell the operator the live config state — so
+    /// if they thought auto-create was on but it didn't fire, the hint
+    /// shows them which precondition failed.</summary>
+    private static string HintFor(
+        int sqlErrorNumber, string? user,
+        bool autoCreateFlag = false, bool isDevelopment = false)
+        => sqlErrorNumber switch
     {
         18486 => $"Account [{user}] is LOCKED. Unlock with:\n" +
                  $"  ALTER LOGIN [{user}] WITH PASSWORD = '<new-pwd>' UNLOCK;",
@@ -245,8 +265,7 @@ public static class StartupDatabaseGuard
                  $"  USE [<db>]; CREATE USER [{user}] FOR LOGIN [{user}]; " +
                  $"ALTER ROLE db_owner ADD MEMBER [{user}];",
 
-        4060 => "Database does not exist OR the login has no access to it. " +
-                "Create it (CREATE DATABASE [<db>];) or fix the Database= in the connection string.",
+        4060 => BuildHint4060(autoCreateFlag, isDevelopment),
 
         40615 => "Azure SQL firewall is blocking this IP. Add the IP to the server firewall in the Azure portal.",
 
@@ -266,6 +285,37 @@ public static class StartupDatabaseGuard
         _ => "Look up SQL error number " + sqlErrorNumber +
              " in the Microsoft docs. The text of the original exception is above."
     };
+
+    private static string BuildHint4060(bool autoCreateFlag, bool isDevelopment)
+    {
+        var baseHint =
+            "Database does not exist OR the login has no access to it.\n" +
+            "  Manual fix:   USE master; CREATE DATABASE [<db>];\n" +
+            "                USE [<db>]; CREATE USER [<login>] FOR LOGIN [<login>];\n" +
+            "                ALTER ROLE db_owner ADD MEMBER [<login>];";
+
+        // Tell the operator the LIVE state of the dev auto-create flag.
+        // If it shows "ENABLED" but the create didn't happen, the build
+        // they're running is older than the auto-create feature — rebuild.
+        var policy = (isDevelopment, autoCreateFlag) switch
+        {
+            (true, true) =>
+                "\n  Auto-create policy: ENABLED in this build but did not fire. " +
+                "This means either (a) the binary running predates the auto-create " +
+                "feature — rebuild + restart; (b) the app login lacks CREATE " +
+                "DATABASE on master — check the previous log line for the master " +
+                "connection error.",
+            (true, false) =>
+                "\n  Auto-create policy: DISABLED (Database:AutoCreateDatabaseInDev=false). " +
+                "Set it to true in appsettings.Development.json to have the app " +
+                "auto-create on next start.",
+            (false, _) =>
+                "\n  Auto-create policy: DISABLED — only honoured when " +
+                "ASPNETCORE_ENVIRONMENT=Development. Production must pre-create."
+        };
+
+        return baseHint + policy;
+    }
 
     private static (string Server, string User, string Database) ExtractEndpoint(string? connectionString)
     {
