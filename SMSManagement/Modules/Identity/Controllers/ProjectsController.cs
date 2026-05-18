@@ -124,7 +124,8 @@ public sealed class ProjectsController : ControllerBase
             HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
             Request.Headers.UserAgent.ToString(),
             HttpContext.TraceIdentifier,
-            After: new { project.Code, project.Name, project.DefaultProvider }), ct);
+            After: new { project.Code, project.Name, project.DefaultProvider },
+            ProjectId: project.Id), ct);
 
         return CreatedAtAction(nameof(Get), new { projectId = project.Id },
             new { project.Id, project.Code, project.Name, project.DefaultProvider });
@@ -166,7 +167,8 @@ public sealed class ProjectsController : ControllerBase
             HttpContext.TraceIdentifier,
             Before: before,
             After: new { project.Name, project.DefaultProvider,
-                project.ShortlinkSlugLength, project.NotificationEmails }), ct);
+                project.ShortlinkSlugLength, project.NotificationEmails },
+            ProjectId: projectId), ct);
 
         return NoContent();
     }
@@ -210,6 +212,33 @@ public sealed class ProjectsController : ControllerBase
 
         project.ArchivedAt = DateTimeOffset.UtcNow;
         project.ArchivedByUserId = _me.UserId;
+
+        // Cascade: terminate non-terminal workflow instances + cancel queued
+        // SMS for this project. Without this, reminder SMS keeps dispatching
+        // after the project is archived. Single bulk UPDATE — atomic.
+        var defIds = await _db.WorkflowDefinitions
+            .Where(d => d.ProjectId == projectId).Select(d => d.Id).ToListAsync(ct);
+        int cancelledInstances = 0;
+        int cancelledSms = 0;
+        if (defIds.Count > 0)
+        {
+            cancelledInstances = await _db.WorkflowInstances
+                .Where(i => defIds.Contains(i.DefinitionId)
+                         && i.State != Modules.Workflow.Domain.WorkflowState.Completed
+                         && i.State != Modules.Workflow.Domain.WorkflowState.Failed
+                         && i.State != Modules.Workflow.Domain.WorkflowState.Expired)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(x => x.State, Modules.Workflow.Domain.WorkflowState.Expired)
+                    .SetProperty(x => x.NextCheckAt, (DateTimeOffset?)null), ct);
+
+            cancelledSms = await _db.SmsMessages
+                .Where(m => m.ProjectId == projectId
+                         && m.Status == Modules.Sms.Domain.SmsStatus.Queued)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(x => x.Status, Modules.Sms.Domain.SmsStatus.Failed)
+                    .SetProperty(x => x.ErrorCode, "PROJECT_ARCHIVED"), ct);
+        }
+
         await _db.SaveChangesAsync(ct);
 
         await _audit.WriteAsync(new AuditEntry(
@@ -217,7 +246,13 @@ public sealed class ProjectsController : ControllerBase
             HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
             Request.Headers.UserAgent.ToString(),
             HttpContext.TraceIdentifier,
-            After: new { ArchivedAt = project.ArchivedAt }), ct);
+            After: new
+            {
+                ArchivedAt = project.ArchivedAt,
+                CancelledInstances = cancelledInstances,
+                CancelledSms = cancelledSms
+            },
+            ProjectId: projectId), ct);
         return NoContent();
     }
 
@@ -243,7 +278,8 @@ public sealed class ProjectsController : ControllerBase
             HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
             Request.Headers.UserAgent.ToString(),
             HttpContext.TraceIdentifier,
-            After: new { RestoredBy = _me.UserId }), ct);
+            After: new { RestoredBy = _me.UserId },
+            ProjectId: projectId), ct);
         return NoContent();
     }
 }

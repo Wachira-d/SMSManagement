@@ -25,6 +25,9 @@ public interface IReportingService
     Task<IReadOnlyList<AuditRow>> AuditTrailAsync(
         Guid projectId, DateRange range, int take, CancellationToken ct = default);
 
+    Task<IReadOnlyList<UserActivityRow>> UserActivityAsync(
+        DateRange range, int take, CancellationToken ct = default);
+
     /// <summary>Stream any of the above as a CSV for download.</summary>
     Task ExportCsvAsync<TRow>(IEnumerable<TRow> rows, Stream destination, CancellationToken ct = default);
 }

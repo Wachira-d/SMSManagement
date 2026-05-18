@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SMSManagement.Modules.Core.Logging;
 using SMSManagement.Modules.Identity.Domain;
 using SMSManagement.Modules.Identity.Services;
 using SMSManagement.Modules.Ingestion.Domain;
@@ -45,6 +46,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<ShortlinkClick> ShortlinkClicks => Set<ShortlinkClick>();
     public DbSet<BlockedIp> BlockedIps => Set<BlockedIp>();
     public DbSet<IpAccessFailure> IpAccessFailures => Set<IpAccessFailure>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     public DbSet<User> Users => Set<User>();
     public DbSet<ProjectMembership> ProjectMemberships => Set<ProjectMembership>();
@@ -130,6 +132,21 @@ public sealed class AppDbContext : DbContext
             e.HasIndex(x => x.OccurredAt); // for retention purge
             e.Property(x => x.Reason).HasMaxLength(64);
             e.Property(x => x.Slug).HasMaxLength(32);
+        });
+
+        b.Entity<AuditLog>(e =>
+        {
+            e.HasIndex(x => x.CreatedAt);
+            e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasIndex(x => new { x.ProjectId, x.CreatedAt });
+            e.HasIndex(x => new { x.Action, x.CreatedAt });
+            e.HasIndex(x => new { x.EntityType, x.EntityId });
+            e.Property(x => x.Action).HasMaxLength(100);
+            e.Property(x => x.EntityType).HasMaxLength(64);
+            e.Property(x => x.EntityId).HasMaxLength(128);
+            e.Property(x => x.IpAddress).HasMaxLength(64);
+            e.Property(x => x.UserAgent).HasMaxLength(500);
+            e.Property(x => x.CorrelationId).HasMaxLength(100);
         });
 
         // ---------- Identity ----------

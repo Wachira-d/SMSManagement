@@ -14,4 +14,5 @@ public sealed record AuditEntry(
     string UserAgent,
     string CorrelationId,
     object? Before = null,
-    object? After = null);
+    object? After = null,
+    Guid? ProjectId = null);

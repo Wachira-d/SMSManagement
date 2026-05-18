@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SMSManagement.Infrastructure.Persistence;
+using SMSManagement.Modules.Core.Observability;
 using SMSManagement.Modules.Core.Security;
 using SMSManagement.Modules.Shortlink.Services;
 using SMSManagement.Modules.Sms.Domain;
@@ -21,6 +22,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
     private readonly ISmsDispatcher _sms;
     private readonly IShortlinkService _shortlinks;
     private readonly ShortlinkOptions _shortlinkOpts;
+    private readonly CampaignMetrics _metrics;
     private readonly TimeProvider _clock;
     private readonly ILogger<WorkflowEngine> _log;
 
@@ -32,6 +34,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
         ISmsDispatcher sms,
         IShortlinkService shortlinks,
         IOptions<ShortlinkOptions> shortlinkOpts,
+        CampaignMetrics metrics,
         TimeProvider clock,
         ILogger<WorkflowEngine> log)
     {
@@ -40,6 +43,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
         _sms = sms;
         _shortlinks = shortlinks;
         _shortlinkOpts = shortlinkOpts.Value;
+        _metrics = metrics;
         _clock = clock;
         _log = log;
     }
@@ -230,6 +234,10 @@ public sealed class WorkflowEngine : IWorkflowEngine
             Trigger = trigger,
             At = _clock.GetUtcNow()
         });
+        _metrics.WorkflowTransitions.Add(1,
+            KeyValuePair.Create<string, object?>("from", from.ToString()),
+            KeyValuePair.Create<string, object?>("to", to.ToString()),
+            KeyValuePair.Create<string, object?>("trigger", trigger));
         await _db.SaveChangesAsync(ct);
     }
 

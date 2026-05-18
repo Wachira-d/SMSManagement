@@ -73,11 +73,25 @@ public sealed record IngestionQualityRow(
     string Status,
     DateTimeOffset IngestedAt);
 
-// ---------- 7. Audit / user activity ----------
+// ---------- 7. Audit Trail ----------
 public sealed record AuditRow(
     DateTimeOffset At,
     Guid UserId,
+    string? UserEmail,
     string Action,
     string EntityType,
     string EntityId,
-    string IpAddress);
+    string? IpAddress,
+    string? CorrelationId);
+
+// ---------- 8. User Activity ----------
+public sealed record UserActivityRow(
+    Guid UserId,
+    string? Email,
+    string? DisplayName,
+    int TotalActions,
+    int Logins,
+    int SmsDispatchInitiated,
+    int IngestionUploads,
+    int ProjectsCreated,
+    DateTimeOffset? LastActiveAt);

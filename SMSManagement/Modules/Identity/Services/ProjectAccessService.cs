@@ -72,7 +72,8 @@ public sealed class ProjectAccessService : IProjectAccessService
             _user.UserId, "project.share", "Project", projectId.ToString(),
             string.Empty, string.Empty, string.Empty,
             Before: before,
-            After: new { existing.AccessLevel, TargetUserId = targetUserId }), ct);
+            After: new { existing.AccessLevel, TargetUserId = targetUserId },
+            ProjectId: projectId), ct);
 
         return existing;
     }
@@ -95,7 +96,8 @@ public sealed class ProjectAccessService : IProjectAccessService
         await _audit.WriteAsync(new AuditEntry(
             _user.UserId, "project.revoke", "Project", projectId.ToString(),
             string.Empty, string.Empty, string.Empty,
-            Before: new { membership.AccessLevel, TargetUserId = targetUserId }), ct);
+            Before: new { membership.AccessLevel, TargetUserId = targetUserId },
+            ProjectId: projectId), ct);
     }
 
     public async Task TransferOwnershipAsync(Guid projectId, Guid newOwnerUserId, CancellationToken ct = default)
@@ -136,6 +138,7 @@ public sealed class ProjectAccessService : IProjectAccessService
         await _audit.WriteAsync(new AuditEntry(
             _user.UserId, "project.transfer_ownership", "Project", projectId.ToString(),
             string.Empty, string.Empty, string.Empty,
-            After: new { NewOwnerUserId = newOwnerUserId }), ct);
+            After: new { NewOwnerUserId = newOwnerUserId },
+            ProjectId: projectId), ct);
     }
 }

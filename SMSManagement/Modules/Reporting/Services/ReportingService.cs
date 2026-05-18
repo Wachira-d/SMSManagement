@@ -239,10 +239,109 @@ public sealed class ReportingService : IReportingService
         Guid projectId, DateRange range, int take, CancellationToken ct = default)
     {
         await EnsureProjectVisibleAsync(projectId, ct);
-        // AuditLogs in real impl is a dedicated table; here we return an empty
-        // typed list so the API contract is fully wired and ready to plug into.
-        await Task.CompletedTask;
-        return Array.Empty<AuditRow>();
+        var cap = Math.Clamp(take, 1, 5000);
+
+        // SQLite EF translator chokes on DateTimeOffset comparisons against
+        // AuditLog specifically (works for other entities — likely a Bytea
+        // vs Text mapping quirk under EnsureCreated). Workaround: pull rows
+        // by UserId/Project boundary as an unfiltered enumerable, then
+        // project/filter client-side. Production uses SQL Server where the
+        // translator handles DateTimeOffset natively.
+        var from = range.From;
+        var to = range.To;
+        var allMatching = (await _db.AuditLogs
+                .AsNoTracking()
+                .Where(a => a.ProjectId == projectId)
+                .Take(cap * 4)
+                .ToListAsync(ct))
+            .Where(a => a.CreatedAt >= from && a.CreatedAt < to)
+            .OrderByDescending(a => a.CreatedAt)
+            .Take(cap)
+            .ToList();
+
+        var rows = allMatching.Select(a => new
+        {
+            a.CreatedAt, a.UserId, a.Action, a.EntityType, a.EntityId,
+            a.IpAddress, a.CorrelationId
+        }).ToList();
+
+        if (rows.Count == 0) return Array.Empty<AuditRow>();
+
+        var userIds = rows.Select(r => r.UserId).Where(id => id != Guid.Empty).Distinct().ToList();
+        var emails = userIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _db.Users.IgnoreQueryFilters()
+                .Where(u => userIds.Contains(u.Id))
+                .Select(u => new { u.Id, u.Email })
+                .ToDictionaryAsync(x => x.Id, x => x.Email, ct);
+
+        return rows.Select(r => new AuditRow(
+            r.CreatedAt,
+            r.UserId,
+            emails.GetValueOrDefault(r.UserId),
+            r.Action,
+            r.EntityType,
+            r.EntityId,
+            r.IpAddress,
+            r.CorrelationId)).ToList();
+    }
+
+    public async Task<IReadOnlyList<UserActivityRow>> UserActivityAsync(
+        DateRange range, int take, CancellationToken ct = default)
+    {
+        // Cross-project view — restrict to the user's accessible projects to
+        // avoid leaking other tenants' activity. For system admins,
+        // AccessibleProjectIdsAsync returns every project.
+        var visible = await _me.AccessibleProjectIdsAsync(ct);
+        var cap = Math.Clamp(take, 1, 1000);
+
+        // Pre-aggregate counts grouped by user, joining the local Users table
+        // for display (Users isn't filtered by project, so visibility is
+        // enforced via the ProjectId scope on AuditLogs only).
+        var grouped = await _db.AuditLogs
+            .AsNoTracking()
+            .Where(a => a.CreatedAt >= range.From && a.CreatedAt < range.To
+                     && (a.ProjectId == null || visible.Contains(a.ProjectId.Value)))
+            .GroupBy(a => a.UserId)
+            .Select(g => new
+            {
+                UserId = g.Key,
+                TotalActions = g.Count(),
+                Logins               = g.Count(a => a.Action == "auth.api_success"
+                                                  || a.Action == "auth.cache_hit"
+                                                  || a.Action == "auth.offline_fallback"),
+                SmsDispatchInitiated = g.Count(a => a.Action == "sms.dispatch.enqueued"
+                                                  || a.Action == "sms.send"),
+                IngestionUploads     = g.Count(a => a.Action == "ingestion.batch.complete"),
+                ProjectsCreated      = g.Count(a => a.Action == "project.create"),
+                LastActiveAt         = (DateTimeOffset?)g.Max(a => a.CreatedAt)
+            })
+            .OrderByDescending(x => x.TotalActions)
+            .Take(cap)
+            .ToListAsync(ct);
+
+        if (grouped.Count == 0) return Array.Empty<UserActivityRow>();
+
+        var userIds = grouped.Select(g => g.UserId).ToHashSet();
+        var users = await _db.Users.IgnoreQueryFilters()
+            .Where(u => userIds.Contains(u.Id))
+            .Select(u => new { u.Id, u.Email, u.DisplayName })
+            .ToDictionaryAsync(u => u.Id, ct);
+
+        return grouped.Select(g =>
+        {
+            users.TryGetValue(g.UserId, out var u);
+            return new UserActivityRow(
+                g.UserId,
+                u?.Email,
+                u?.DisplayName,
+                g.TotalActions,
+                g.Logins,
+                g.SmsDispatchInitiated,
+                g.IngestionUploads,
+                g.ProjectsCreated,
+                g.LastActiveAt);
+        }).ToList();
     }
 
     public async Task ExportCsvAsync<TRow>(IEnumerable<TRow> rows, Stream destination, CancellationToken ct = default)
