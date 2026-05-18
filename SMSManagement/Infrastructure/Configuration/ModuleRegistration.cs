@@ -12,6 +12,7 @@ using SMSManagement.Modules.Reporting.Services;
 using SMSManagement.Modules.Shortlink.Services;
 using SMSManagement.Modules.Sms.Providers;
 using SMSManagement.Modules.Sms.Services;
+using SMSManagement.Modules.Sms.Webhooks;
 using SMSManagement.Modules.Workflow.Engine;
 
 namespace SMSManagement.Infrastructure.Configuration;
@@ -75,6 +76,7 @@ public static class ModuleRegistration
         services.AddScoped<ISmsProvider>(sp => sp.GetRequiredService<InfobipSmsProvider>());
         services.AddScoped<IProviderRouter, ProviderRouter>();
         services.AddScoped<ISmsDispatcher, SmsDispatcher>();
+        services.Configure<DlrWebhookOptions>(cfg.GetSection("Sms:Webhooks"));
 
         // ---------- Shortlink ----------
         services.Configure<ShortlinkOptions>(cfg.GetSection("Shortlink"));

@@ -7,14 +7,16 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
+using SMSManagement.Infrastructure.Bootstrap;
 using SMSManagement.Infrastructure.Configuration;
+using SMSManagement.Infrastructure.Middleware;
 using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Core.Logging;
 using SMSManagement.Modules.Workflow.Engine;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ---------- DataProtection: persist keys so cookies survive restarts / multi-instance ----------
+// ---------- DataProtection: persist keys across restarts / instances ----------
 var keyDir = builder.Configuration["DataProtection:KeyDirectory"];
 if (!string.IsNullOrWhiteSpace(keyDir))
 {
@@ -33,10 +35,6 @@ builder.Host.UseSerilog((ctx, services, lc) => lc
     .WriteTo.Console(formatter: new Serilog.Formatting.Compact.CompactJsonFormatter()));
 
 // ---------- AuthN: JWT bearer ----------
-// Supports both:
-//   1. Tokens issued by the local AuthController (HMAC-signed with Auth:LocalJwt:SigningKeyBase64)
-//   2. Tokens issued by an external OIDC IdP (configured via Auth:Authority)
-// Whichever sections are populated wins; both can coexist for migration windows.
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
@@ -50,7 +48,7 @@ builder.Services
         o.Audience = audience;
 
         if (!string.IsNullOrWhiteSpace(authority))
-            o.Authority = authority; // external IdP path (OIDC discovery)
+            o.Authority = authority;
 
         o.TokenValidationParameters = new TokenValidationParameters
         {
@@ -76,6 +74,18 @@ builder.Services.AddAuthorization(o =>
     o.AddPolicy("audit.read",       p => p.RequireClaim("perm", "audit.read"));
 });
 
+// ---------- CORS (off by default; opt-in via Cors:AllowedOrigins) ----------
+var corsOpts = builder.Configuration.GetSection("Cors").Get<CorsAppOptions>() ?? new CorsAppOptions();
+var corsOrigins = corsOpts.Parse();
+if (corsOrigins.Length > 0)
+{
+    builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
+        .WithOrigins(corsOrigins)
+        .AllowCredentials()
+        .AllowAnyHeader()
+        .AllowAnyMethod()));
+}
+
 // ---------- Login rate limiting (defence-in-depth on top of per-account lockout) ----------
 builder.Services.AddRateLimiter(o =>
 {
@@ -92,9 +102,14 @@ builder.Services.AddRateLimiter(o =>
 
 builder.Services.AddControllers();
 builder.Services.AddRazorPages();
+builder.Services.Configure<BootstrapOptions>(builder.Configuration.GetSection("Bootstrap"));
 builder.Services.AddCampaignPlatform(builder.Configuration);
 
-// ---------- Background work: Hangfire on Postgres ----------
+// ---------- Health checks ----------
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<AppDbContext>("database", tags: ["ready"]);
+
+// ---------- Background work: Hangfire on SQL Server ----------
 builder.Services.AddHangfire(c => c
     .UseSqlServerStorage(builder.Configuration.GetConnectionString("Default"),
         new SqlServerStorageOptions
@@ -109,8 +124,7 @@ builder.Services.AddHangfireServer();
 
 var app = builder.Build();
 
-// ---------- Apply EF migrations at startup ----------
-// Idempotent — Migrate() is a no-op if the schema is current.
+// ---------- Apply EF migrations at startup (idempotent) ----------
 using (var scope = app.Services.CreateScope())
 {
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
@@ -127,22 +141,44 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
+// ---------- Bootstrap admin (idempotent; skipped unless configured) ----------
+await Bootstrapper.RunAsync(app.Services);
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error");
     app.UseHsts();
 }
 app.UseHttpsRedirection();
+app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseStaticFiles();
 app.UseRouting();
+
+if (corsOrigins.Length > 0) app.UseCors();
+
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseSerilogRequestLogging();
 
+// Health endpoints.
+app.MapHealthChecks("/health/live", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = _ => false // liveness = process alive, no dependency probes
+});
+app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = c => c.Tags.Contains("ready")
+});
+
 app.MapRazorPages();
 app.MapControllers();
-app.MapHangfireDashboard("/jobs");
+
+// Hangfire dashboard — gated by the dashboard filter (perm=audit.read or system_admin).
+app.MapHangfireDashboard("/jobs", new DashboardOptions
+{
+    Authorization = new[] { new HangfireAuthFilter() }
+});
 
 RecurringJob.AddOrUpdate<IWorkflowEngine>(
     "workflow-tick",
@@ -150,3 +186,6 @@ RecurringJob.AddOrUpdate<IWorkflowEngine>(
     "* * * * *");
 
 app.Run();
+
+// Exposed for WebApplicationFactory in tests.
+public partial class Program { }
