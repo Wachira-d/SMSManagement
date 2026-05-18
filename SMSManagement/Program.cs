@@ -17,6 +17,7 @@ using OpenTelemetry.Trace;
 using SMSManagement.Modules.Core.Logging;
 using SMSManagement.Modules.Core.Observability;
 using SMSManagement.Modules.Ingestion.Services;
+using SMSManagement.Modules.Sms.Services;
 using SMSManagement.Modules.Workflow.Engine;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -232,6 +233,14 @@ if (!testingEnabled)
         "ingestion-poll",
         poller => poller.PollAllAsync(CancellationToken.None),
         "*/5 * * * *");
+
+    // Drain Queued / Scheduled / Batch SMS every minute. Without this,
+    // anything with a future ScheduledFor (or anything enqueued by the
+    // workflow engine without immediate dispatch) sits forever.
+    RecurringJob.AddOrUpdate<IScheduledSmsDispatcher>(
+        "sms-scheduled-dispatch",
+        worker => worker.DispatchDueAsync(CancellationToken.None),
+        "* * * * *");
 }
 
 app.Run();

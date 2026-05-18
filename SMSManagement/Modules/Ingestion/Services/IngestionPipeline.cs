@@ -1,10 +1,12 @@
 using System.Security.Cryptography;
+using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Core.Logging;
 using SMSManagement.Modules.Ingestion.Domain;
 using SMSManagement.Modules.Ingestion.Processors;
 using SMSManagement.Modules.Ingestion.Sources;
+using SMSManagement.Modules.Notifications;
 using SMSManagement.Modules.Workflow.Engine;
 
 namespace SMSManagement.Modules.Ingestion.Services;
@@ -109,7 +111,7 @@ public sealed class IngestionPipeline : IIngestionPipeline
             await TryMoveAsync(filePath, settings.RejectedDirectory, ".rejected", ct);
 
         await _audit.WriteAsync(new AuditEntry(
-            Guid.Empty, // populated by audit middleware with caller's ID in real impl
+            Guid.Empty,
             "ingestion.batch.complete",
             "IngestionBatch", batch.Id.ToString(),
             string.Empty, string.Empty, string.Empty,
@@ -118,6 +120,21 @@ public sealed class IngestionPipeline : IIngestionPipeline
                 batch.FileHash, batch.TotalRows, batch.AcceptedRows,
                 batch.RejectedRows, batch.Status, ForceReingest = forceReingest
             }), ct);
+
+        // Fire-and-forget stakeholder email. Tolerant of missing recipients /
+        // SMTP misconfig (see SmtpEmailSender). Enqueued via Hangfire so SMTP
+        // latency doesn't block the API response, and so the email goes out
+        // even if the current request fails after this point.
+        try
+        {
+            BackgroundJob.Enqueue<IIngestionBatchNotifier>(
+                n => n.NotifyBatchCompleteAsync(batch.Id, CancellationToken.None));
+        }
+        catch (Exception ex)
+        {
+            // Hangfire storage not configured (e.g. test mode) — log + continue.
+            _log.LogWarning(ex, "Could not enqueue batch notification for {BatchId}", batch.Id);
+        }
 
         return new IngestionOutcome(batch.Id, result,
             batch.TotalRows, batch.AcceptedRows, batch.RejectedRows, null);
@@ -143,7 +160,12 @@ public sealed class IngestionPipeline : IIngestionPipeline
             throw new InvalidOperationException(
                 $"Project {projectId} has no active workflow definition.");
 
-        var source = new CsvUploadSource();
+        // Pick the parser by extension — controller already whitelists .csv/.xlsx.
+        IIngestionSource source = Path.GetExtension(filePath).ToLowerInvariant() switch
+        {
+            ".xlsx" or ".xls" => new ExcelUploadSource(),
+            _                 => new CsvUploadSource()
+        };
         var context = new IngestionContext(projectId, batchId, filePath,
             new Dictionary<string, string>());
 

@@ -9,6 +9,7 @@ using SMSManagement.Modules.Core.Security;
 using SMSManagement.Modules.Identity.Auth;
 using SMSManagement.Modules.Identity.Services;
 using SMSManagement.Modules.Ingestion.Services;
+using SMSManagement.Modules.Notifications;
 using SMSManagement.Modules.Reporting.Services;
 using SMSManagement.Modules.Shortlink.Services;
 using SMSManagement.Modules.Sms.Providers;
@@ -78,6 +79,7 @@ public static class ModuleRegistration
         services.AddScoped<ISmsProvider>(sp => sp.GetRequiredService<InfobipSmsProvider>());
         services.AddScoped<IProviderRouter, ProviderRouter>();
         services.AddScoped<ISmsDispatcher, SmsDispatcher>();
+        services.AddScoped<IScheduledSmsDispatcher, ScheduledSmsDispatcher>();
         services.Configure<DlrWebhookOptions>(cfg.GetSection("Sms:Webhooks"));
 
         // ---------- Shortlink ----------
@@ -90,6 +92,11 @@ public static class ModuleRegistration
         // ---------- Ingestion ----------
         services.AddScoped<IIngestionPipeline, IngestionPipeline>();
         services.AddScoped<IIngestionPoller, IngestionPoller>();
+
+        // ---------- Notifications ----------
+        services.Configure<SmtpOptions>(cfg.GetSection("Smtp"));
+        services.AddSingleton<IEmailSender, SmtpEmailSender>();
+        services.AddScoped<IIngestionBatchNotifier, IngestionBatchNotifier>();
 
         // ---------- Reporting ----------
         services.AddScoped<IReportingService, ReportingService>();

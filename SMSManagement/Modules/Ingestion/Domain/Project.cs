@@ -16,6 +16,13 @@ public sealed class Project
     /// </summary>
     public DateTimeOffset? ArchivedAt { get; set; }
     public Guid? ArchivedByUserId { get; set; }
+
+    /// <summary>
+    /// Comma-separated stakeholder email addresses that receive the
+    /// "ingestion batch complete" and "campaign summary" alerts.
+    /// Empty disables notifications for this project.
+    /// </summary>
+    public string? NotificationEmails { get; set; }
 }
 
 public sealed class ColumnMapping
