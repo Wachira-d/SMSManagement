@@ -150,9 +150,12 @@ stateDiagram-v2
 erDiagram
     PROJECTS ||--o{ COLUMN_MAPPINGS : "configures"
     PROJECTS ||--o{ INGESTION_BATCHES : "owns"
+    PROJECTS ||--o{ INGESTION_SOURCE_SETTINGS : "binds"
     PROJECTS ||--o{ WORKFLOW_DEFINITIONS : "defines"
     PROJECTS ||--o{ SMS_MESSAGES : "scopes"
     PROJECTS ||--o{ SHORTLINKS : "scopes"
+    PROJECTS ||--o{ PROJECT_MEMBERSHIPS : "shared via"
+    USERS ||--o{ PROJECT_MEMBERSHIPS : "has access through"
 
     INGESTION_BATCHES ||--o{ WORKFLOW_INSTANCES : "spawns"
     WORKFLOW_DEFINITIONS ||--o{ WORKFLOW_INSTANCES : "instantiated as"
@@ -296,6 +299,26 @@ erDiagram
         jsonb after
         timestamptz at
     }
+    PROJECT_MEMBERSHIPS {
+        uuid id PK
+        uuid project_id FK
+        uuid user_id FK
+        int access_level "0=Viewer 1=Member 2=Admin 3=Owner"
+        timestamptz granted_at
+        uuid granted_by_user_id FK
+    }
+    INGESTION_SOURCE_SETTINGS {
+        uuid id PK
+        uuid project_id FK
+        string source_type
+        bytea encrypted_config
+        string archive_directory
+        string rejected_directory
+        int action "0=Archive 1=Delete 2=Leave"
+        int duplicate_policy "0=Skip 1=Fail 2=Reprocess"
+        bool enabled
+        string polling_schedule
+    }
 ```
 
 ### 3.1 Indexing & retention notes
@@ -347,3 +370,163 @@ The three modules share **only** the `Core` library (security primitives, audit 
 | Core security / logging primitives | `SMSManagement/Modules/Core/**` |
 | EF Core schema (matches ERD) | `SMSManagement/Infrastructure/Persistence/AppDbContext.cs` |
 | DI / startup wiring | `SMSManagement/Program.cs` |
+| User & project-sharing module | `SMSManagement/Modules/Identity/**` |
+| File-lifecycle ingestion pipeline | `SMSManagement/Modules/Ingestion/Services/IngestionPipeline.cs` |
+| Reports + CSV export | `SMSManagement/Modules/Reporting/**` |
+| Multi-provider router + Infobip impl | `SMSManagement/Modules/Sms/Providers/{ProviderRouter,InfobipSmsProvider}.cs` |
+
+---
+
+## 7. User & Project Sharing
+
+### 7.1 Model
+
+| Entity | Purpose |
+|---|---|
+| `User` | Local mirror of the IdP record (`ExternalSubject` = OIDC `sub`). Lets us FK from audit/membership rows. |
+| `ProjectMembership` | Many-to-many between User ↔ Project with an explicit `AccessLevel` (`Viewer` < `Member` < `Admin` < `Owner`). |
+| `Project.DefaultProvider` | Per-project provider override consumed by `ProviderRouter`. |
+
+Every project has **exactly one Owner** (enforced by `TransferOwnershipAsync` running in a transaction). Sharing creates additional `Admin` / `Member` / `Viewer` rows.
+
+### 7.2 Scoping — how a user only sees their projects
+
+Two layers, deliberately redundant:
+
+1. **EF Core global query filter** on `Project` (`AppDbContext.OnModelCreating`):
+   ```csharp
+   e.HasQueryFilter(p => _user.IsSystemAdmin
+       || ProjectMemberships.Any(m => m.ProjectId == p.Id && m.UserId == _user.UserId));
+   ```
+   Any `_db.Projects.ToList()` is naturally restricted — a forgotten `WHERE` clause cannot leak data.
+2. **Explicit `IProjectAccessService.EnsureAsync(projectId, level)`** at every write endpoint (`Share`, `Revoke`, `Upload`, `DispatchSms`, etc.) — fails fast with `UnauthorizedAccessException` when the caller lacks the required `AccessLevel`.
+
+Background jobs (Hangfire) resolve a `SystemUserContext` (`IsSystemAdmin = true`) so the filter is bypassed for orchestration work that must touch every project.
+
+### 7.3 API surface
+
+```
+GET    /api/projects                                   list visible projects (+ my level)
+POST   /api/projects/{id}/members                      body: { userId, level }     (Admin+)
+DELETE /api/projects/{id}/members/{userId}                                          (Admin+)
+POST   /api/projects/{id}/transfer-ownership           body: newOwnerId            (Owner)
+```
+
+---
+
+## 8. File Lifecycle & Idempotency
+
+### 8.1 Where the guarantees live
+
+| Guarantee | Mechanism |
+|---|---|
+| Same file content is **never processed twice by accident** | `IngestionBatches.FileHash` has a UNIQUE index, computed as SHA-256 of the file bytes. |
+| Re-uploading is **safe to retry** when a network blip aborted the upload | `SmsMessages.DedupKey` (`SHA-256(projectId | recipient | bodyHash)`) UNIQUE — re-enqueue of the same logical message is a no-op. |
+| Operators can **force a re-run** when needed (e.g. wrong template, wrong workflow active at first ingest) | `POST /api/projects/{id}/ingest?force=true` — the pipeline persists a new `IngestionBatch` with a suffixed hash (`{hash}#{ticks}`), and the row-level dedup key is unchanged, so already-sent recipients are still not re-sent unless their workflow definition has been rotated. |
+| Original files are **traceable** | `IngestionSourceSettings.Action`: `Archive` (default), `Delete`, or `Leave` (read-only mount). On failure the file is always moved to `RejectedDirectory` with a timestamp suffix. |
+
+### 8.2 Configurable per source
+
+`IngestionSourceSettings` (one row per project × source binding):
+
+| Field | Example | Meaning |
+|---|---|---|
+| `ArchiveDirectory` | `/data/honda/archive` | Successful files moved here. Filenames suffixed `…{yyyyMMddHHmmss}.csv`. |
+| `RejectedDirectory` | `/data/honda/rejected` | Files that failed validation moved here with `.rejected` marker. |
+| `Action` | `Archive` / `Delete` / `Leave` | Post-process strategy. `Leave` is for SharePoint / S3 read-only mounts; the unique `FileHash` index prevents re-pickup. |
+| `DuplicatePolicy` | `Skip` (default) / `Fail` / `Reprocess` | What to do when the content hash matches a prior batch. |
+| `PollingSchedule` | `*/5 * * * *` | Cron for polled sources (SFTP / SharePoint). |
+| `Enabled` | `true` | Lets ops disable a binding without deleting it. |
+
+### 8.3 Force-rerun procedure
+
+```bash
+# 1. From the portal: "Reprocess" button calls
+POST /api/projects/{id}/ingest?force=true   (multipart: settingsId, file)
+
+# 2. SMS dispatcher still sees the original DedupKey for each row and
+#    refuses to re-send the same body to the same recipient.
+#    To genuinely re-send the same template, bump the workflow definition
+#    version — this changes the body template and therefore the DedupKey.
+```
+
+This split between **file-level** dedup (idempotent retries) and **row-level** dedup (anti-spam) is intentional — the most common operator mistake is double-uploading the same export, and we silently absorb that without re-billing thousands of SMS.
+
+---
+
+## 9. Reports
+
+### 9.1 Catalogue (eight built-in reports)
+
+| # | Report | Source tables | Primary metrics | Operational value |
+|---|---|---|---|---|
+| 1 | **SMS Campaign Summary** | `sms_messages` | per-day per-provider Queued / Sent / Delivered / Failed / Rejected, **delivery rate**, **failure rate** | Marketing/CRM team sees daily campaign health at a glance; flags days where provider quality dropped. |
+| 2 | **Provider Performance** *(global, admin-only)* | `sms_messages` | volume, delivery rate, avg attempts, avg dispatch latency, circuit-breaker trips | Drives provider contract negotiation and the Etracker→Infobip migration decision. |
+| 3 | **Delivery Funnel** | `workflow_instances`, `sms_messages`, `shortlink_clicks` | Targeted → Sent → Delivered → Clicked → Converted, with rate at each stage | Identifies *where* drop-off occurs (dispatch? carrier? message itself? landing page?). |
+| 4 | **Shortlink Performance** | `shortlinks`, `shortlink_clicks` | clicks, unique IP-hash count, first/last click, top device, top country | Content/UX team optimises CTAs; flags fraudulent click patterns (single IP). |
+| 5 | **Reminder Effectiveness** | `workflow_instances` | conversions split by reminder number (0/1/2/3+), expiration count | Answers "is the 3rd reminder worth the cost?" — directly cuts SMS spend. |
+| 6 | **Ingestion Quality** | `ingestion_batches` | per-batch total/accepted/rejected rows, acceptance rate, status | Data team sees which sources produce dirty data; catches mapping regressions early. |
+| 7 | **Audit Trail** | `audit_logs` | every Action × Entity × User × IP × Correlation ID | Compliance + incident response (who shared which project to whom, when). |
+| 8 | **User Activity** *(derived from audit_logs)* | `audit_logs` | logins, dispatches initiated, exports downloaded | Detects compromised accounts via anomaly (e.g. weekend bulk export). |
+
+### 9.2 Common rules
+
+- **All project-scoped reports** go through `IReportingService.EnsureProjectVisibleAsync` → reuses the same `IUserContext` as the EF query filter.
+- **No raw PII columns** are projected — only counts, rates, and masked identifiers (`MaskedTo`, `IpHash`).
+- **CSV export** streams via `CsvHelper` (no in-memory buffering of full result).
+- **Cross-project endpoints** (e.g. Provider Performance) require the `audit.read` permission and are surfaced under `/api/reports/*`.
+
+### 9.3 API surface
+
+```
+GET /api/projects/{id}/reports/sms-campaign?from&to
+GET /api/projects/{id}/reports/delivery-funnel?from&to
+GET /api/projects/{id}/reports/shortlinks?from&to&top=50
+GET /api/projects/{id}/reports/reminder-effectiveness
+GET /api/projects/{id}/reports/ingestion-quality?from&to
+GET /api/projects/{id}/reports/sms-campaign/export.csv?from&to
+GET /api/reports/provider-performance?from&to                    # admin only
+```
+
+---
+
+## 10. Multi-provider SMS abstraction (Etracker → Infobip)
+
+### 10.1 The contract
+
+Every provider implements:
+
+```csharp
+public interface ISmsProvider {
+    string Name { get; }
+    Task<ProviderDispatchResult> DispatchAsync(SmsRequest request, CancellationToken ct);
+}
+```
+
+Callers (`SmsDispatcher`, `WorkflowEngine`) never see a concrete provider — they go through `IProviderRouter`:
+
+```csharp
+public interface IProviderRouter {
+    ISmsProvider Resolve(SmsRequest request);
+    ISmsProvider? Fallback(SmsRequest request, string failedProviderName);
+}
+```
+
+### 10.2 Resolution order
+
+1. **`Projects.DefaultProvider`** — Admin sets this in the UI; takes precedence over everything else.
+2. **Canary split** — `Sms:Routing:CandidateProvider` + `CandidateTrafficPercent` route a deterministic % of traffic (hashed on recipient so the same user always lands on the same provider) to the candidate.
+3. **Global default** — `Sms:Routing:DefaultProvider`.
+
+Failover (`IProviderRouter.Fallback`) walks `FailoverChain`, skipping the failed provider. `SmsDispatcher` calls it automatically when the primary throws after Polly's retry budget is exhausted.
+
+### 10.3 Migration playbook — Etracker → Infobip
+
+1. **Add Infobip credentials** to Key Vault (`Sms:Providers:Infobip:ApiKey`, `BaseUrl`, `DefaultSenderId`). No code change required — `InfobipSmsProvider` is already registered.
+2. **Smoke test**: temporarily set one pilot project's `DefaultProvider = "infobip"` via the Projects admin endpoint. Validate delivery + DLR webhook end-to-end. Roll back instantly by clearing the override.
+3. **Canary**: set `Sms:Routing:CandidateProvider = "infobip"`, `CandidateTrafficPercent = 5`. Watch the **Provider Performance report** for 24–48 h. Ramp 5 → 25 → 50 → 100.
+4. **Cutover**: flip `Sms:Routing:DefaultProvider` to `"infobip"`. Keep `FailoverChain = ["infobip","etracker"]` so a sudden Infobip outage falls back to Etracker until the contract ends.
+5. **Decommission**: once Etracker contract ends, drop `EtrackerSmsProvider` from DI registration. No other code changes needed.
+
+The router pattern means **switching providers is a config-only operation** — no caller of `ISmsDispatcher` is aware of the change.
+

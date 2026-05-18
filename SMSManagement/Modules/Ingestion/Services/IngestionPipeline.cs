@@ -1,0 +1,209 @@
+using System.Security.Cryptography;
+using Microsoft.EntityFrameworkCore;
+using SMSManagement.Infrastructure.Persistence;
+using SMSManagement.Modules.Core.Logging;
+using SMSManagement.Modules.Ingestion.Domain;
+using SMSManagement.Modules.Ingestion.Processors;
+using SMSManagement.Modules.Ingestion.Sources;
+using SMSManagement.Modules.Workflow.Engine;
+
+namespace SMSManagement.Modules.Ingestion.Services;
+
+/// <summary>
+/// The single authoritative entry point for moving a file from "found on disk"
+/// to "rows enqueued + file archived". Handles:
+///   - content-hash deduplication (IngestionBatches.FileHash UNIQUE constraint)
+///   - per-source duplicate policy (Skip / Fail / Reprocess)
+///   - force re-ingest override
+///   - post-process action (Archive / Delete / Leave)
+///   - row-level mapping + validation, with rejected rows separated for review
+/// </summary>
+public sealed class IngestionPipeline : IIngestionPipeline
+{
+    private readonly AppDbContext _db;
+    private readonly IWorkflowEngine _workflow;
+    private readonly IAuditLogger _audit;
+    private readonly ILogger<IngestionPipeline> _log;
+
+    public IngestionPipeline(
+        AppDbContext db,
+        IWorkflowEngine workflow,
+        IAuditLogger audit,
+        ILogger<IngestionPipeline> log)
+    {
+        _db = db;
+        _workflow = workflow;
+        _audit = audit;
+        _log = log;
+    }
+
+    public async Task<IngestionOutcome> IngestFileAsync(
+        Guid projectId,
+        Guid settingsId,
+        string filePath,
+        bool forceReingest,
+        CancellationToken ct = default)
+    {
+        var settings = await _db.Set<IngestionSourceSettings>().FindAsync([settingsId], ct)
+                       ?? throw new InvalidOperationException($"Settings {settingsId} not found");
+
+        var hash = await ComputeFileHashAsync(filePath, ct);
+
+        // 1) Dedup decision
+        var prior = await _db.IngestionBatches
+            .AsNoTracking()
+            .FirstOrDefaultAsync(b => b.FileHash == hash, ct);
+
+        if (prior is not null && !forceReingest)
+        {
+            switch (settings.DuplicatePolicy)
+            {
+                case DuplicatePolicy.Skip:
+                    _log.LogInformation("Duplicate file skipped hash={Hash} priorBatch={BatchId}",
+                        hash, prior.Id);
+                    await TryMoveAsync(filePath, settings.ArchiveDirectory, ".duplicate", ct);
+                    return new IngestionOutcome(prior.Id, IngestionResult.SkippedDuplicate,
+                        prior.TotalRows, prior.AcceptedRows, prior.RejectedRows,
+                        $"duplicate of batch {prior.Id}");
+
+                case DuplicatePolicy.Fail:
+                    await TryMoveAsync(filePath, settings.RejectedDirectory, ".rejected", ct);
+                    return new IngestionOutcome(prior.Id, IngestionResult.Rejected,
+                        0, 0, 0, "duplicate file rejected by policy");
+
+                case DuplicatePolicy.Reprocess:
+                    // Falls through to a fresh batch — note "reprocess" in audit.
+                    _log.LogWarning("Reprocessing duplicate file (policy=Reprocess) hash={Hash}", hash);
+                    break;
+            }
+        }
+
+        // 2) Open a fresh batch (the FileHash UNIQUE index requires we suffix re-runs)
+        var batch = new IngestionBatch
+        {
+            ProjectId = projectId,
+            SourceType = settings.SourceType,
+            SourceRef = Path.GetFileName(filePath),
+            FileHash = forceReingest || prior is not null
+                ? $"{hash}#{DateTimeOffset.UtcNow.Ticks}"   // forced re-ingest keeps a distinct row
+                : hash,
+            Status = "Processing"
+        };
+        _db.IngestionBatches.Add(batch);
+        await _db.SaveChangesAsync(ct);
+
+        // 3) Read + map + dispatch
+        var (accepted, rejected) = await ProcessRowsAsync(projectId, batch.Id, filePath, ct);
+
+        batch.TotalRows = accepted + rejected;
+        batch.AcceptedRows = accepted;
+        batch.RejectedRows = rejected;
+        batch.Status = rejected > 0 && accepted == 0 ? "Failed" : "Completed";
+        await _db.SaveChangesAsync(ct);
+
+        // 4) Post-process: move/delete/leave
+        var result = forceReingest ? IngestionResult.Reprocessed : IngestionResult.Ingested;
+        if (batch.Status == "Completed")
+            await ApplyPostProcessAsync(filePath, settings, ct);
+        else
+            await TryMoveAsync(filePath, settings.RejectedDirectory, ".rejected", ct);
+
+        await _audit.WriteAsync(new AuditEntry(
+            Guid.Empty, // populated by audit middleware with caller's ID in real impl
+            "ingestion.batch.complete",
+            "IngestionBatch", batch.Id.ToString(),
+            string.Empty, string.Empty, string.Empty,
+            After: new
+            {
+                batch.FileHash, batch.TotalRows, batch.AcceptedRows,
+                batch.RejectedRows, batch.Status, ForceReingest = forceReingest
+            }), ct);
+
+        return new IngestionOutcome(batch.Id, result,
+            batch.TotalRows, batch.AcceptedRows, batch.RejectedRows, null);
+    }
+
+    // ---------------- helpers ----------------
+
+    private async Task<(int accepted, int rejected)> ProcessRowsAsync(
+        Guid projectId, Guid batchId, string filePath, CancellationToken ct)
+    {
+        var mappings = await _db.ColumnMappings
+            .Where(m => m.ProjectId == projectId)
+            .ToListAsync(ct);
+        var mapper = new ColumnMapper(mappings);
+
+        var defaultDefinition = await _db.WorkflowDefinitions
+            .Where(d => d.ProjectId == projectId && d.Active)
+            .OrderByDescending(d => d.Version)
+            .Select(d => (Guid?)d.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (defaultDefinition is null)
+            throw new InvalidOperationException(
+                $"Project {projectId} has no active workflow definition.");
+
+        var source = new CsvUploadSource();
+        var context = new IngestionContext(projectId, batchId, filePath,
+            new Dictionary<string, string>());
+
+        var accepted = 0; var rejected = 0;
+        await foreach (var raw in source.ReadAsync(context, ct))
+        {
+            var mapped = mapper.Map(raw);
+            if (!mapped.IsValid)
+            {
+                rejected++;
+                _log.LogWarning("Row rejected batch={BatchId} errors={Errors}",
+                    batchId, string.Join(',', mapped.Errors));
+                continue;
+            }
+
+            await _workflow.StartAsync(defaultDefinition.Value, mapped.Row, batchId, ct);
+            accepted++;
+        }
+        return (accepted, rejected);
+    }
+
+    private async Task ApplyPostProcessAsync(
+        string filePath, IngestionSourceSettings settings, CancellationToken ct)
+    {
+        switch (settings.Action)
+        {
+            case PostProcessAction.Archive:
+                if (string.IsNullOrEmpty(settings.ArchiveDirectory))
+                    throw new InvalidOperationException("ArchiveDirectory not configured.");
+                await TryMoveAsync(filePath, settings.ArchiveDirectory, string.Empty, ct);
+                break;
+
+            case PostProcessAction.Delete:
+                File.Delete(filePath);
+                break;
+
+            case PostProcessAction.Leave:
+                // Intentional no-op; dedup table prevents re-pickup of the same content hash.
+                break;
+        }
+    }
+
+    private static Task TryMoveAsync(string filePath, string? destDir, string suffix, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(destDir) || !File.Exists(filePath))
+            return Task.CompletedTask;
+
+        Directory.CreateDirectory(destDir);
+        var name = Path.GetFileName(filePath);
+        // Suffix + timestamp guarantees no clobber if the same filename arrives twice.
+        var ts = DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss");
+        var dest = Path.Combine(destDir, $"{Path.GetFileNameWithoutExtension(name)}.{ts}{suffix}{Path.GetExtension(name)}");
+        File.Move(filePath, dest, overwrite: false);
+        return Task.CompletedTask;
+    }
+
+    private static async Task<string> ComputeFileHashAsync(string filePath, CancellationToken ct)
+    {
+        await using var fs = File.OpenRead(filePath);
+        var hash = await SHA256.HashDataAsync(fs, ct);
+        return Convert.ToHexString(hash);
+    }
+}

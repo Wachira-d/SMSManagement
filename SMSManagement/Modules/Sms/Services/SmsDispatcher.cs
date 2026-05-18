@@ -16,7 +16,7 @@ public sealed class SmsDispatcher : ISmsDispatcher
 {
     private readonly AppDbContext _db;
     private readonly FieldEncryptor _crypto;
-    private readonly IReadOnlyDictionary<string, ISmsProvider> _providers;
+    private readonly IProviderRouter _router;
     private readonly ILogger<SmsDispatcher> _log;
     private readonly TimeProvider _clock;
 
@@ -25,13 +25,13 @@ public sealed class SmsDispatcher : ISmsDispatcher
     public SmsDispatcher(
         AppDbContext db,
         FieldEncryptor crypto,
-        IEnumerable<ISmsProvider> providers,
+        IProviderRouter router,
         TimeProvider clock,
         ILogger<SmsDispatcher> log)
     {
         _db = db;
         _crypto = crypto;
-        _providers = providers.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+        _router = router;
         _clock = clock;
         _log = log;
     }
@@ -57,7 +57,7 @@ public sealed class SmsDispatcher : ISmsDispatcher
             ProjectId = request.ProjectId,
             WorkflowInstanceId = request.WorkflowInstanceId,
             DedupKey = dedup,
-            Provider = _providers.Keys.First(), // routing rules live in a separate ProviderRouter in real impl
+            Provider = _router.Resolve(request).Name,
             MaskedTo = PiiMasking.MaskPhone(request.Recipient),
             EncryptedTo = _crypto.Encrypt(request.Recipient),
             EncryptedBody = _crypto.Encrypt(request.Body),
@@ -88,13 +88,13 @@ public sealed class SmsDispatcher : ISmsDispatcher
             return;
         }
 
-        if (!_providers.TryGetValue(msg.Provider, out var provider))
-            throw new InvalidOperationException($"No provider registered: {msg.Provider}");
-
         var recipient = _crypto.Decrypt(msg.EncryptedTo);
         var body = _crypto.Decrypt(msg.EncryptedBody);
         var req = new SmsRequest(msg.ProjectId, recipient, body, null,
             msg.Priority, msg.ScheduledFor, msg.WorkflowInstanceId);
+
+        var provider = _router.Resolve(req);
+        msg.Provider = provider.Name;
 
         msg.Attempts++;
         msg.Status = SmsStatus.Sending;
@@ -118,7 +118,32 @@ public sealed class SmsDispatcher : ISmsDispatcher
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Polly already exhausted retries / opened the circuit.
+            // Polly already exhausted retries / opened the circuit on the primary.
+            // Try the failover chain once before marking the message for re-queue.
+            var fallback = _router.Fallback(req, provider.Name);
+            if (fallback is not null)
+            {
+                try
+                {
+                    var fbResult = await fallback.DispatchAsync(req, ct).ConfigureAwait(false);
+                    if (fbResult.Success)
+                    {
+                        msg.Provider = fallback.Name;
+                        msg.Status = SmsStatus.Sent;
+                        msg.SentAt = _clock.GetUtcNow();
+                        msg.ProviderMessageId = fbResult.ProviderMessageId;
+                        msg.ErrorCode = null;
+                        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+                        return;
+                    }
+                }
+                catch (Exception fbEx) when (fbEx is not OperationCanceledException)
+                {
+                    _log.LogWarning(fbEx, "SMS failover provider {Fallback} also failed",
+                        fallback.Name);
+                }
+            }
+
             msg.Status = msg.Attempts >= MaxAttempts ? SmsStatus.Failed : SmsStatus.Queued;
             msg.ErrorCode = ex.GetType().Name;
             _log.LogWarning(ex, "SMS dispatch attempt {Attempt} failed for {Id}", msg.Attempts, msg.Id);

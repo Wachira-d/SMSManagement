@@ -1,5 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using SMSManagement.Modules.Identity.Domain;
+using SMSManagement.Modules.Identity.Services;
 using SMSManagement.Modules.Ingestion.Domain;
+#pragma warning disable CS1591
 using SMSManagement.Modules.Shortlink.Domain;
 using SMSManagement.Modules.Sms.Domain;
 using SMSManagement.Modules.Workflow.Domain;
@@ -10,14 +13,26 @@ namespace SMSManagement.Infrastructure.Persistence;
 /// Single EF Core context covering all modules — appropriate for the modular-monolith
 /// deployment. When modules are extracted into separate services each owns its own context;
 /// the entity classes already live in module folders so the split is mechanical.
+///
+/// Project-scoped entities have a global query filter so any query the current user
+/// runs is automatically restricted to projects they have a membership on. This is
+/// belt-and-braces against forgotten WHERE clauses; explicit authorization in
+/// services still applies for write paths.
 /// </summary>
 public sealed class AppDbContext : DbContext
 {
-    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+    private readonly IUserContext _user;
+
+    public AppDbContext(DbContextOptions<AppDbContext> options, IUserContext user)
+        : base(options)
+    {
+        _user = user;
+    }
 
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<ColumnMapping> ColumnMappings => Set<ColumnMapping>();
     public DbSet<IngestionBatch> IngestionBatches => Set<IngestionBatch>();
+    public DbSet<IngestionSourceSettings> IngestionSourceSettings => Set<IngestionSourceSettings>();
 
     public DbSet<WorkflowDefinition> WorkflowDefinitions => Set<WorkflowDefinition>();
     public DbSet<WorkflowInstance> WorkflowInstances => Set<WorkflowInstance>();
@@ -29,17 +44,21 @@ public sealed class AppDbContext : DbContext
         Set<SMSManagement.Modules.Shortlink.Domain.Shortlink>();
     public DbSet<ShortlinkClick> ShortlinkClicks => Set<ShortlinkClick>();
 
+    public DbSet<User> Users => Set<User>();
+    public DbSet<ProjectMembership> ProjectMemberships => Set<ProjectMembership>();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
+        // ---------- Project & ingestion ----------
         b.Entity<Project>(e =>
         {
             e.HasIndex(x => x.Code).IsUnique();
+            e.HasQueryFilter(p => _user.IsSystemAdmin
+                || ProjectMemberships.Any(m => m.ProjectId == p.Id && m.UserId == _user.UserId));
         });
 
         b.Entity<ColumnMapping>(e =>
-        {
-            e.HasIndex(x => new { x.ProjectId, x.SourceColumn }).IsUnique();
-        });
+            e.HasIndex(x => new { x.ProjectId, x.SourceColumn }).IsUnique());
 
         b.Entity<IngestionBatch>(e =>
         {
@@ -47,22 +66,28 @@ public sealed class AppDbContext : DbContext
             e.HasIndex(x => new { x.ProjectId, x.IngestedAt });
         });
 
-        b.Entity<WorkflowDefinition>(e =>
+        b.Entity<IngestionSourceSettings>(e =>
         {
-            e.HasIndex(x => new { x.ProjectId, x.Name, x.Version }).IsUnique();
+            e.HasIndex(x => new { x.ProjectId, x.SourceType });
+            e.Property(x => x.Action).HasConversion<int>();
+            e.Property(x => x.DuplicatePolicy).HasConversion<int>();
         });
+
+        // ---------- Workflow ----------
+        b.Entity<WorkflowDefinition>(e =>
+            e.HasIndex(x => new { x.ProjectId, x.Name, x.Version }).IsUnique());
 
         b.Entity<WorkflowInstance>(e =>
         {
             e.HasIndex(x => new { x.State, x.NextCheckAt });
             e.HasIndex(x => x.ExpiresAt);
+            e.Property(x => x.State).HasConversion<int>();
         });
 
         b.Entity<WorkflowTransition>(e =>
-        {
-            e.HasIndex(x => new { x.InstanceId, x.At });
-        });
+            e.HasIndex(x => new { x.InstanceId, x.At }));
 
+        // ---------- SMS ----------
         b.Entity<SmsMessage>(e =>
         {
             e.HasIndex(x => x.DedupKey).IsUnique();
@@ -72,6 +97,7 @@ public sealed class AppDbContext : DbContext
             e.Property(x => x.Priority).HasConversion<int>();
         });
 
+        // ---------- Shortlink ----------
         b.Entity<SMSManagement.Modules.Shortlink.Domain.Shortlink>(e =>
         {
             e.HasIndex(x => x.Slug).IsUnique();
@@ -79,8 +105,20 @@ public sealed class AppDbContext : DbContext
         });
 
         b.Entity<ShortlinkClick>(e =>
+            e.HasIndex(x => new { x.ShortlinkId, x.ClickedAt }));
+
+        // ---------- Identity ----------
+        b.Entity<User>(e =>
         {
-            e.HasIndex(x => new { x.ShortlinkId, x.ClickedAt });
+            e.HasIndex(x => x.ExternalSubject).IsUnique();
+            e.HasIndex(x => x.Email).IsUnique();
+        });
+
+        b.Entity<ProjectMembership>(e =>
+        {
+            e.HasIndex(x => new { x.ProjectId, x.UserId }).IsUnique();
+            e.HasIndex(x => x.UserId);
+            e.Property(x => x.AccessLevel).HasConversion<int>();
         });
     }
 }
