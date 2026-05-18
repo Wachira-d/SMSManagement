@@ -16,6 +16,14 @@ using SMSManagement.Modules.Workflow.Engine;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ---------- Test-mode flag ----------
+// Run with ASPNETCORE_ENVIRONMENT=Testing to skip startup paths that need a real
+// database (migrations / bootstrap / Hangfire server). Test fixtures use this so
+// WebApplicationFactory<Program> can boot against SQLite in-memory.
+// The environment name is read before user-supplied config is applied, so this
+// works even when the test factory injects IConfiguration via ConfigureAppConfiguration.
+var testingEnabled = builder.Environment.IsEnvironment("Testing");
+
 // ---------- DataProtection: persist keys across restarts / instances ----------
 var keyDir = builder.Configuration["DataProtection:KeyDirectory"];
 if (!string.IsNullOrWhiteSpace(keyDir))
@@ -110,23 +118,27 @@ builder.Services.AddHealthChecks()
     .AddDbContextCheck<AppDbContext>("database", tags: ["ready"]);
 
 // ---------- Background work: Hangfire on SQL Server ----------
-builder.Services.AddHangfire(c => c
-    .UseSqlServerStorage(builder.Configuration.GetConnectionString("Default"),
-        new SqlServerStorageOptions
-        {
-            CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
-            SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
-            QueuePollInterval = TimeSpan.Zero,
-            UseRecommendedIsolationLevel = true,
-            DisableGlobalLocks = true
-        }));
-builder.Services.AddHangfireServer();
+if (!testingEnabled)
+{
+    builder.Services.AddHangfire(c => c
+        .UseSqlServerStorage(builder.Configuration.GetConnectionString("Default"),
+            new SqlServerStorageOptions
+            {
+                CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
+                SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
+                QueuePollInterval = TimeSpan.Zero,
+                UseRecommendedIsolationLevel = true,
+                DisableGlobalLocks = true
+            }));
+    builder.Services.AddHangfireServer();
+}
 
 var app = builder.Build();
 
 // ---------- Apply EF migrations at startup (idempotent) ----------
-using (var scope = app.Services.CreateScope())
+if (!testingEnabled)
 {
+    using var scope = app.Services.CreateScope();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     try
     {
@@ -139,10 +151,10 @@ using (var scope = app.Services.CreateScope())
         logger.LogCritical(ex, "Database migration failed. Aborting startup.");
         throw;
     }
-}
 
-// ---------- Bootstrap admin (idempotent; skipped unless configured) ----------
-await Bootstrapper.RunAsync(app.Services);
+    // Bootstrap admin (idempotent; skipped unless configured) — only outside test mode.
+    await Bootstrapper.RunAsync(app.Services);
+}
 
 if (!app.Environment.IsDevelopment())
 {
@@ -174,16 +186,19 @@ app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.Health
 app.MapRazorPages();
 app.MapControllers();
 
-// Hangfire dashboard — gated by the dashboard filter (perm=audit.read or system_admin).
-app.MapHangfireDashboard("/jobs", new DashboardOptions
+if (!testingEnabled)
 {
-    Authorization = new[] { new HangfireAuthFilter() }
-});
+    // Hangfire dashboard — gated by the dashboard filter (perm=audit.read or system_admin).
+    app.MapHangfireDashboard("/jobs", new DashboardOptions
+    {
+        Authorization = new[] { new HangfireAuthFilter() }
+    });
 
-RecurringJob.AddOrUpdate<IWorkflowEngine>(
-    "workflow-tick",
-    engine => engine.TickAsync(CancellationToken.None),
-    "* * * * *");
+    RecurringJob.AddOrUpdate<IWorkflowEngine>(
+        "workflow-tick",
+        engine => engine.TickAsync(CancellationToken.None),
+        "* * * * *");
+}
 
 app.Run();
 
