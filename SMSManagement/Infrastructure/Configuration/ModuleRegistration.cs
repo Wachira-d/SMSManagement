@@ -5,6 +5,7 @@ using Polly;
 using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Core.Logging;
 using SMSManagement.Modules.Core.Security;
+using SMSManagement.Modules.Identity.Auth;
 using SMSManagement.Modules.Identity.Services;
 using SMSManagement.Modules.Ingestion.Services;
 using SMSManagement.Modules.Reporting.Services;
@@ -43,6 +44,20 @@ public static class ModuleRegistration
         });
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddScoped<IProjectAccessService, ProjectAccessService>();
+
+        // ---------- Cache-first authentication ----------
+        services.Configure<UserCacheAuthOptions>(cfg.GetSection("UserCacheAuth"));
+        services.Configure<AuthenApiOptions>(cfg.GetSection("AuthenApi"));
+        services.Configure<LocalJwtOptions>(cfg.GetSection("Auth:LocalJwt"));
+        services.AddSingleton<IPasswordHasher, Sha256PasswordHasher>();
+        services.AddHttpClient<IAuthenApiClient, AuthenApiClient>((sp, http) =>
+        {
+            var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AuthenApiOptions>>().Value;
+            if (opts.TimeoutSeconds > 0)
+                http.Timeout = TimeSpan.FromSeconds(opts.TimeoutSeconds);
+        }).AddStandardResilienceHandler(ConfigureResilience);
+        services.AddScoped<IUserCacheAuthenticator, UserCacheAuthenticator>();
+        services.AddScoped<IJwtTokenIssuer, JwtTokenIssuer>();
 
         // ---------- SMS providers ----------
         services.Configure<EtrackerOptions>(cfg.GetSection("Sms:Providers:Etracker"));

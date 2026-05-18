@@ -46,6 +46,7 @@ public sealed class AppDbContext : DbContext
 
     public DbSet<User> Users => Set<User>();
     public DbSet<ProjectMembership> ProjectMemberships => Set<ProjectMembership>();
+    public DbSet<UserCache> UserCaches => Set<UserCache>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -119,6 +120,20 @@ public sealed class AppDbContext : DbContext
             e.HasIndex(x => new { x.ProjectId, x.UserId }).IsUnique();
             e.HasIndex(x => x.UserId);
             e.Property(x => x.AccessLevel).HasConversion<int>();
+        });
+
+        b.Entity<UserCache>(e =>
+        {
+            e.HasIndex(x => x.Username).IsUnique();
+            e.HasIndex(x => x.CacheExpires);
+            e.Property(x => x.Username).HasMaxLength(100);
+            e.Property(x => x.PasswordHash).HasMaxLength(64);
+            e.Property(x => x.Salt).HasMaxLength(64);
+            e.Property(x => x.DisplayName).HasMaxLength(200);
+            e.Property(x => x.Email).HasMaxLength(200);
+            e.Property(x => x.Department).HasMaxLength(200);
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.EmployeeId).HasMaxLength(50);
         });
     }
 }
