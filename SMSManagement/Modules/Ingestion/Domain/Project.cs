@@ -7,6 +7,15 @@ public sealed class Project
     public string Name { get; set; } = string.Empty;
     public string DefaultProvider { get; set; } = "etracker";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>
+    /// Soft-delete marker. When set, the project is hidden from the global
+    /// query filter and most endpoints reject access; an Owner can Restore
+    /// to clear it. We never hard-delete because audit logs, SMS history
+    /// and shortlinks reference the project_id forever.
+    /// </summary>
+    public DateTimeOffset? ArchivedAt { get; set; }
+    public Guid? ArchivedByUserId { get; set; }
 }
 
 public sealed class ColumnMapping

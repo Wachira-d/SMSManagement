@@ -56,8 +56,12 @@ public sealed class AppDbContext : DbContext
         b.Entity<Project>(e =>
         {
             e.HasIndex(x => x.Code).IsUnique();
-            e.HasQueryFilter(p => _user.IsSystemAdmin
-                || ProjectMemberships.Any(m => m.ProjectId == p.Id && m.UserId == _user.UserId));
+            // Soft-delete + scope filter combined. Archived projects are
+            // invisible to everyone (system admins use IgnoreQueryFilters
+            // to restore). Non-archived projects scope by membership.
+            e.HasQueryFilter(p => p.ArchivedAt == null
+                && (_user.IsSystemAdmin
+                    || ProjectMemberships.Any(m => m.ProjectId == p.Id && m.UserId == _user.UserId)));
         });
 
         b.Entity<ColumnMapping>(e =>

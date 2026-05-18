@@ -178,4 +178,57 @@ public sealed class ProjectsController : ControllerBase
         await _access.TransferOwnershipAsync(projectId, newOwnerId, ct);
         return NoContent();
     }
+
+    /// <summary>
+    /// Soft-delete (archive). Project disappears from list endpoints and is
+    /// rejected by access checks. Never hard-deleted — child rows (SMS, audit,
+    /// shortlinks) keep their FKs valid for compliance retention.
+    /// </summary>
+    [HttpDelete("{projectId:guid}")]
+    public async Task<IActionResult> Archive(Guid projectId, CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Owner, ct);
+
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct);
+        if (project is null) return NotFound();
+        if (project.ArchivedAt is not null) return NoContent();
+
+        project.ArchivedAt = DateTimeOffset.UtcNow;
+        project.ArchivedByUserId = _me.UserId;
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.WriteAsync(new AuditEntry(
+            _me.UserId, "project.archive", "Project", projectId.ToString(),
+            HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            Request.Headers.UserAgent.ToString(),
+            HttpContext.TraceIdentifier,
+            After: new { ArchivedAt = project.ArchivedAt }), ct);
+        return NoContent();
+    }
+
+    /// <summary>Restore an archived project. System-admin only — owners can't
+    /// see their archived projects via the filter, so they can't request this
+    /// path on their own.</summary>
+    [HttpPost("{projectId:guid}/restore")]
+    [Authorize(Policy = "audit.read")]
+    public async Task<IActionResult> Restore(Guid projectId, CancellationToken ct)
+    {
+        var project = await _db.Projects
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.Id == projectId, ct);
+        if (project is null) return NotFound();
+        if (project.ArchivedAt is null) return NoContent();
+
+        project.ArchivedAt = null;
+        project.ArchivedByUserId = null;
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.WriteAsync(new AuditEntry(
+            _me.UserId, "project.restore", "Project", projectId.ToString(),
+            HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            Request.Headers.UserAgent.ToString(),
+            HttpContext.TraceIdentifier,
+            After: new { RestoredBy = _me.UserId }), ct);
+        return NoContent();
+    }
 }
