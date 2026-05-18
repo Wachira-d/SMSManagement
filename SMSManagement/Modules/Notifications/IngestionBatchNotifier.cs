@@ -13,6 +13,8 @@ public interface IIngestionBatchNotifier
 /// <summary>
 /// Builds the per-batch summary email and ships it to the project's
 /// NotificationEmails distribution list. Fully tolerant of misconfig:
+///   - email feature disabled on the project => skip
+///   - per-event toggle off (e.g. NotifyOnIngestSuccess=false) => skip
 ///   - no recipients => skip silently
 ///   - SMTP not wired => sender logs a warning and returns
 /// </summary>
@@ -46,24 +48,65 @@ public sealed class IngestionBatchNotifier : IIngestionBatchNotifier
             || string.IsNullOrWhiteSpace(project.NotificationEmails))
             return;
 
-        var recipients = project.NotificationEmails
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(s => s.Contains('@'))
-            .Distinct()
-            .ToArray();
+        // Per-event filter. The notifier deliberately does the filtering here
+        // rather than at enqueue time — operators can flip a toggle and have
+        // it take effect for already-in-flight batches without redeploying.
+        var category = ClassifyBatch(batch);
+        var wantsThisEvent = category switch
+        {
+            EventCategory.Success => project.NotifyOnIngestSuccess,
+            EventCategory.Partial => project.NotifyOnIngestPartial,
+            EventCategory.Failure => project.NotifyOnIngestFailure,
+            _                     => false
+        };
+        if (!wantsThisEvent)
+        {
+            _log.LogDebug("Skipping notify: project {Id} has NotifyOn{Category}=false.",
+                project.Id, category);
+            return;
+        }
+
+        var recipients = ParseRecipients(project.NotificationEmails);
         if (recipients.Length == 0) return;
 
-        var (subject, html, text) = Render(project.Name, batch);
+        var prefix = string.IsNullOrWhiteSpace(project.NotificationSubjectPrefix)
+            ? $"[{project.Name}]"
+            : project.NotificationSubjectPrefix.Trim();
+
+        var (subject, html, text) = Render(prefix, project.Name, batch, category);
 
         await _email.SendAsync(new EmailMessage(recipients, subject, html, text), ct);
     }
 
-    private static (string Subject, string Html, string Text) Render(
-        string projectName,
-        Modules.Ingestion.Domain.IngestionBatch b)
+    public static string[] ParseRecipients(string? csv) =>
+        csv?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(s => s.Contains('@'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? Array.Empty<string>();
+
+    private enum EventCategory { Success, Partial, Failure }
+
+    private static EventCategory ClassifyBatch(Modules.Ingestion.Domain.IngestionBatch b)
     {
-        var status = b.Status; // "Completed" | "Failed" | "Processing"
-        var subject = $"[{projectName}] Ingestion batch {status}: " +
+        if (b.Status == "Failed" || b.AcceptedRows == 0) return EventCategory.Failure;
+        if (b.RejectedRows > 0) return EventCategory.Partial;
+        return EventCategory.Success;
+    }
+
+    private static (string Subject, string Html, string Text) Render(
+        string subjectPrefix,
+        string projectName,
+        Modules.Ingestion.Domain.IngestionBatch b,
+        EventCategory category)
+    {
+        var label = category switch
+        {
+            EventCategory.Success => "Completed",
+            EventCategory.Partial => "Partial",
+            EventCategory.Failure => "Failed",
+            _                     => b.Status
+        };
+        var subject = $"{subjectPrefix} Ingestion batch {label}: " +
                       $"{b.AcceptedRows}/{b.TotalRows} accepted";
 
         var html = $"""
@@ -72,7 +115,7 @@ public sealed class IngestionBatchNotifier : IIngestionBatchNotifier
             <table border="1" cellpadding="6" cellspacing="0">
               <tr><td>Batch</td><td>{b.Id}</td></tr>
               <tr><td>Source</td><td>{System.Net.WebUtility.HtmlEncode(b.SourceType)} — {System.Net.WebUtility.HtmlEncode(b.SourceRef)}</td></tr>
-              <tr><td>Status</td><td><strong>{status}</strong></td></tr>
+              <tr><td>Outcome</td><td><strong>{label}</strong></td></tr>
               <tr><td>Total rows</td><td>{b.TotalRows}</td></tr>
               <tr style="color:green"><td>Accepted</td><td>{b.AcceptedRows}</td></tr>
               <tr style="color:#c00"><td>Rejected</td><td>{b.RejectedRows}</td></tr>
@@ -85,7 +128,7 @@ public sealed class IngestionBatchNotifier : IIngestionBatchNotifier
             Project: {projectName}
             Batch:   {b.Id}
             Source:  {b.SourceType} — {b.SourceRef}
-            Status:  {status}
+            Outcome: {label}
             Rows:    {b.AcceptedRows} accepted / {b.RejectedRows} rejected / {b.TotalRows} total
             At:      {b.IngestedAt:O}
             """;

@@ -25,6 +25,24 @@ public sealed class Project
     public string? NotificationEmails { get; set; }
 
     /// <summary>
+    /// Optional prefix prepended to every notification subject.
+    /// Null/blank => uses the project name in square brackets,
+    /// e.g. "[Honda Survey] Ingestion batch Completed: 1200/1250 accepted".
+    /// </summary>
+    public string? NotificationSubjectPrefix { get; set; }
+
+    // ---- Per-event notification toggles ----
+    // Default true (notify on everything) so a freshly-created project gets
+    // visibility into ingestion outcomes without extra setup.
+
+    /// <summary>Send an email when an ingestion batch completes with 0 rejected rows.</summary>
+    public bool NotifyOnIngestSuccess { get; set; } = true;
+    /// <summary>Send an email when an ingestion batch completes with some rejected rows.</summary>
+    public bool NotifyOnIngestPartial { get; set; } = true;
+    /// <summary>Send an email when an ingestion batch fails outright (status=Failed or 0 accepted).</summary>
+    public bool NotifyOnIngestFailure { get; set; } = true;
+
+    /// <summary>
     /// Per-project shortlink slug length override. Null = use global
     /// <c>Shortlink:SlugLength</c> from configuration.
     /// Range enforced at the controller: 4..16.

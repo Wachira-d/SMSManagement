@@ -80,8 +80,13 @@ builder.Services
     });
 
 // ---------- AuthZ: RBAC ----------
+// Cross-project permissions enforced by [Authorize(Policy = "...")]. These
+// gate the ABILITY to use a feature; per-project membership level (Viewer /
+// Member / Admin / Owner) on top decides which projects the user can use it
+// in. See Modules/Identity/Auth/JwtTokenIssuer.MapGroupsToPermissions.
 builder.Services.AddAuthorization(o =>
 {
+    o.AddPolicy("project.create",   p => p.RequireClaim("perm", "project.create"));
     o.AddPolicy("sms.dispatch",     p => p.RequireClaim("perm", "sms.dispatch"));
     o.AddPolicy("workflow.author",  p => p.RequireClaim("perm", "workflow.author"));
     o.AddPolicy("ingestion.upload", p => p.RequireClaim("perm", "ingestion.upload"));

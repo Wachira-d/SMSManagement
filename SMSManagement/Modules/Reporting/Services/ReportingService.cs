@@ -241,29 +241,44 @@ public sealed class ReportingService : IReportingService
         await EnsureProjectVisibleAsync(projectId, ct);
         var cap = Math.Clamp(take, 1, 5000);
 
-        // SQLite EF translator chokes on DateTimeOffset comparisons against
-        // AuditLog specifically (works for other entities — likely a Bytea
-        // vs Text mapping quirk under EnsureCreated). Workaround: pull rows
-        // by UserId/Project boundary as an unfiltered enumerable, then
-        // project/filter client-side. Production uses SQL Server where the
-        // translator handles DateTimeOffset natively.
-        var from = range.From;
-        var to = range.To;
-        var allMatching = (await _db.AuditLogs
-                .AsNoTracking()
-                .Where(a => a.ProjectId == projectId)
-                .Take(cap * 4)
-                .ToListAsync(ct))
-            .Where(a => a.CreatedAt >= from && a.CreatedAt < to)
-            .OrderByDescending(a => a.CreatedAt)
-            .Take(cap)
-            .ToList();
-
-        var rows = allMatching.Select(a => new
+        // PRODUCTION (SQL Server): single indexed query — uses the
+        // (ProjectId, CreatedAt) composite index we declared in AppDbContext.
+        // TEST (SQLite): the same expression fails to translate because
+        // SQLite can't handle the combined nullable-Guid + DateTimeOffset
+        // predicate, so we bounded-fetch by ProjectId and filter time-range
+        // client-side. The Take cap keeps the working set tiny.
+        List<AuditProjection> rows;
+        if (_db.Database.IsSqlServer())
         {
-            a.CreatedAt, a.UserId, a.Action, a.EntityType, a.EntityId,
-            a.IpAddress, a.CorrelationId
-        }).ToList();
+            rows = await _db.AuditLogs
+                .AsNoTracking()
+                .Where(a => a.ProjectId == projectId
+                         && a.CreatedAt >= range.From
+                         && a.CreatedAt < range.To)
+                .OrderByDescending(a => a.CreatedAt)
+                .Take(cap)
+                .Select(a => new AuditProjection(
+                    a.CreatedAt, a.UserId, a.Action, a.EntityType,
+                    a.EntityId, a.IpAddress, a.CorrelationId))
+                .ToListAsync(ct);
+        }
+        else
+        {
+            var from = range.From;
+            var to = range.To;
+            rows = (await _db.AuditLogs
+                    .AsNoTracking()
+                    .Where(a => a.ProjectId == projectId)
+                    .Take(cap * 4)
+                    .ToListAsync(ct))
+                .Where(a => a.CreatedAt >= from && a.CreatedAt < to)
+                .OrderByDescending(a => a.CreatedAt)
+                .Take(cap)
+                .Select(a => new AuditProjection(
+                    a.CreatedAt, a.UserId, a.Action, a.EntityType,
+                    a.EntityId, a.IpAddress, a.CorrelationId))
+                .ToList();
+        }
 
         if (rows.Count == 0) return Array.Empty<AuditRow>();
 
@@ -285,6 +300,12 @@ public sealed class ReportingService : IReportingService
             r.IpAddress,
             r.CorrelationId)).ToList();
     }
+
+    /// <summary>Intermediate projection shared between the SQL-Server and
+    /// SQLite branches of <see cref="AuditTrailAsync"/>.</summary>
+    private sealed record AuditProjection(
+        DateTimeOffset CreatedAt, Guid UserId, string Action,
+        string EntityType, string EntityId, string? IpAddress, string? CorrelationId);
 
     public async Task<IReadOnlyList<UserActivityRow>> UserActivityAsync(
         DateRange range, int take, CancellationToken ct = default)

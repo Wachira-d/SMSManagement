@@ -39,6 +39,10 @@ public sealed class ProjectsController : ControllerBase
         short? ShortlinkSlugLength = null,
         string? ShortlinkAlphabet = null,
         string? NotificationEmails = null,
+        string? NotificationSubjectPrefix = null,
+        bool? NotifyOnIngestSuccess = null,
+        bool? NotifyOnIngestPartial = null,
+        bool? NotifyOnIngestFailure = null,
         bool? SmsEnabled = null,
         bool? ShortlinkEnabled = null,
         bool? WorkflowEnabled = null,
@@ -94,16 +98,32 @@ public sealed class ProjectsController : ControllerBase
                 Ingestion = p.IngestionEnabled,
                 EmailAlerts = p.EmailAlertsEnabled
             },
-            p.NotificationEmails,
+            Notifications = new
+            {
+                Recipients = SMSManagement.Modules.Notifications
+                    .IngestionBatchNotifier.ParseRecipients(p.NotificationEmails),
+                SubjectPrefix = string.IsNullOrWhiteSpace(p.NotificationSubjectPrefix)
+                    ? $"[{p.Name}]"
+                    : p.NotificationSubjectPrefix,
+                Triggers = new
+                {
+                    OnIngestSuccess = p.NotifyOnIngestSuccess,
+                    OnIngestPartial = p.NotifyOnIngestPartial,
+                    OnIngestFailure = p.NotifyOnIngestFailure
+                }
+            },
             Members = members
         });
     }
 
     /// <summary>
-    /// Create a new project. The caller automatically becomes its Owner.
+    /// Create a new project. Requires the cross-project <c>project.create</c>
+    /// permission (granted to the CampaignAdmin AD group by default).
+    /// The caller automatically becomes the project's Owner.
     /// Project code is unique — repeat requests with the same code return 409.
     /// </summary>
     [HttpPost]
+    [Authorize(Policy = "project.create")]
     public async Task<IActionResult> Create(
         [FromBody] CreateProjectRequest req, CancellationToken ct)
     {
@@ -206,6 +226,12 @@ public sealed class ProjectsController : ControllerBase
         if (req.NotificationEmails is not null)
             project.NotificationEmails = string.IsNullOrWhiteSpace(req.NotificationEmails)
                 ? null : req.NotificationEmails.Trim();
+        if (req.NotificationSubjectPrefix is not null)
+            project.NotificationSubjectPrefix = string.IsNullOrWhiteSpace(req.NotificationSubjectPrefix)
+                ? null : req.NotificationSubjectPrefix.Trim();
+        if (req.NotifyOnIngestSuccess is { } nis) project.NotifyOnIngestSuccess = nis;
+        if (req.NotifyOnIngestPartial is { } nip) project.NotifyOnIngestPartial = nip;
+        if (req.NotifyOnIngestFailure is { } nif) project.NotifyOnIngestFailure = nif;
 
         // Feature kill switches — explicit nulls leave them untouched.
         if (req.SmsEnabled        is { } s)  project.SmsEnabled        = s;

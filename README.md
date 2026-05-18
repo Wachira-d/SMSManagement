@@ -97,13 +97,85 @@ Workflow Engine ──► SMS Dispatcher ──► Provider (Etracker | Infobip 
 | Cookies | Refresh tokens stored as SHA-256 hash only; cookie is `HttpOnly; Secure; SameSite=Lax; Path=/api/auth`; rotation on every refresh; reuse-detection revokes the family |
 | At-rest | SQL Server TDE (production) + EF migrations idempotently applied at startup |
 | In-transit | TLS 1.2+; `UseHsts()` in non-dev; HTTPS redirect always on |
+| **DB target** | **SQL Server** (production). SQLite is used only by `WebApplicationFactory` integration tests; a handful of report queries detect the provider and use a bounded fetch + in-memory filter on SQLite, single indexed query on SQL Server. |
+
+## Permission matrix
+
+Two layers stacked: **cross-project permissions** (JWT `perm` claims, granted by AD group) AND **per-project access level** (`ProjectMembership.AccessLevel`).
+
+### Cross-project permissions (AD group → JWT claims)
+
+| Permission | What it gates | Granted to |
+|---|---|---|
+| `project.create` | `POST /api/projects` | CampaignAdmin |
+| `sms.dispatch` | `POST /…/sms/send`, SMS-triggering workflow steps | CampaignAdmin, CampaignOperator |
+| `ingestion.upload` | `POST /…/ingest` | CampaignAdmin, CampaignOperator |
+| `workflow.author` | Create/activate workflow definitions | CampaignAdmin |
+| `audit.read` | Audit Trail report, `/jobs` Hangfire dashboard, `/admin/blocked-ips`, restore archived projects | CampaignAdmin, CampaignAuditor |
+| `*` / `role=system_admin` | Bypass per-project membership filter — sees every project | Break-glass admins (manual grant) |
+
+### Per-project access level
+
+| Level | Can do |
+|---|---|
+| **Viewer** | See project, read all 8 reports (CSV export). **"Data puller" persona — read-only, cannot change any config.** |
+| **Member** | Viewer + use enabled features: dispatch SMS, upload files, create shortlinks. |
+| **Admin** | Member + configure features (column mappings, ingestion sources, workflow definitions, project settings), share project, revoke memberships. |
+| **Owner** | Admin + archive project, transfer ownership. Exactly one Owner per project. |
+
+Common personas:
+
+| Persona | AD group | Per-project level | What they can do |
+|---|---|---|---|
+| **Data puller / BI analyst** | (none) | Viewer | Read reports & CSV exports. Any `POST` → 403 Forbidden. |
+| **Campaign operator** | CampaignOperator | Member | Dispatch SMS, upload files, but can't change wiring. |
+| **Project manager** | CampaignAdmin | Admin / Owner | Full control of own projects. |
+| **SecOps / auditor** | CampaignAuditor | Viewer | Read reports + cross-project audit; no writes. |
+| **System admin** | (manual) | (bypasses) | Restore archived projects, view `/jobs`, manage blocks. |
+
+## Email notifications
+
+Per-project, fully configurable via `PUT /api/projects/{id}`:
+
+| Field | Purpose |
+|---|---|
+| `notificationEmails` | Comma-separated recipient list. Dedup + `@`-format filter applied server-side. |
+| `notificationSubjectPrefix` | Prefix prepended to every subject. Null → `[{ProjectName}]`. |
+| `notifyOnIngestSuccess` | Send when batch completes with 0 rejected rows. Default true. |
+| `notifyOnIngestPartial` | Send when batch completes with some rejected rows. Default true. |
+| `notifyOnIngestFailure` | Send when batch fails (status=Failed or 0 accepted). Default true. |
+| `emailAlertsEnabled` | Master kill-switch. False → no emails at all for this project. |
+
+Current event: **ingestion batch complete**. Triggered via Hangfire fire-and-forget right after `IIngestionPipeline.IngestFileAsync` finishes, so SMTP latency never blocks the API response. From-address is system-wide (`Smtp:FromAddress`). Body is HTML + plaintext multipart with batch summary. See `Modules/Notifications/IngestionBatchNotifier.cs`.
+
+Example subjects:
+```
+[Honda Q3 Survey] Ingestion batch Completed: 1200/1200 accepted
+[Honda Q3 Survey] Ingestion batch Partial:   1180/1200 accepted
+[Honda Q3 Survey] Ingestion batch Failed:    0/1200 accepted
+```
+
+`GET /api/projects/{id}` returns the resolved recipient list + active prefix + triggers under `notifications`, so the SPA can render the config UI without parsing the CSV itself.
+
+## SQL Server post-install (recommended)
+
+After the first `Migrate()` run, execute once per database:
+
+```sql
+-- Make shortlink slug lookups case-sensitive at the DB layer.
+-- C# also re-verifies in ShortlinkService.ResolveAndRecordAsync,
+-- so this is belt-and-braces but eliminates a wasted index lookup.
+ALTER TABLE Shortlinks
+ALTER COLUMN Slug NVARCHAR(64)
+COLLATE Latin1_General_BIN2 NOT NULL;
+```
 
 ## Development
 
 ```bash
 dotnet restore
 dotnet build
-dotnet test                                    # 42 tests covering security-critical paths
+dotnet test                                    # 72 tests covering security-critical paths
 dotnet ef migrations script -o init.sql        # generate T-SQL for DBA review
 dotnet run --project SMSManagement             # needs SQL Server reachable
 ```

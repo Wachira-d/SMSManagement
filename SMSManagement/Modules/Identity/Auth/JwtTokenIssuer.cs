@@ -121,14 +121,35 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
         catch { return Array.Empty<string>(); }
     }
 
+    /// <summary>
+    /// Maps AD groups → bearer-token "perm" claims. These are *cross-project*
+    /// permissions (e.g. "may create a new project at all"). Per-project
+    /// authorization is layered on top via ProjectMembership.AccessLevel
+    /// (Viewer / Member / Admin / Owner) checked by IProjectAccessService.
+    ///
+    /// Reference matrix:
+    ///
+    ///   AD Group           Perms granted
+    ///   ─────────────────────────────────────────────────────────────────────
+    ///   CampaignAdmin      project.create, sms.dispatch, workflow.author,
+    ///                      ingestion.upload, audit.read
+    ///   CampaignOperator   sms.dispatch, ingestion.upload          (no create)
+    ///   CampaignAuditor    audit.read                              (read-only)
+    ///   (no group)         (none — can only see projects shared to them as a
+    ///                       Viewer/Member; "data puller" persona)
+    ///
+    /// Replace this hard-coded switch with a DB-driven mapping in production
+    /// (PermissionMapping table + admin UI). Kept inline here so the token
+    /// issuer has no extra dependencies.
+    /// </summary>
     private static IEnumerable<string> MapGroupsToPermissions(IReadOnlyList<string> groups)
     {
-        // Replace with a DB-driven mapping in production.
         foreach (var g in groups)
         {
             switch (g)
             {
                 case "CampaignAdmin":
+                    yield return "project.create";
                     yield return "sms.dispatch";
                     yield return "workflow.author";
                     yield return "ingestion.upload";
