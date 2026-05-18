@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using SMSManagement.Infrastructure.Persistence;
+using SMSManagement.Modules.Core.Observability;
 using SMSManagement.Modules.Identity.Auth;
 using SMSManagement.Modules.Identity.Domain;
 
@@ -19,6 +20,7 @@ public sealed class AuthController : ControllerBase
     private readonly IJwtTokenIssuer _jwt;
     private readonly IRefreshTokenStore _refreshStore;
     private readonly ILoginAuditWriter _audit;
+    private readonly CampaignMetrics _metrics;
     private readonly AppDbContext _db;
 
     public AuthController(
@@ -26,12 +28,14 @@ public sealed class AuthController : ControllerBase
         IJwtTokenIssuer jwt,
         IRefreshTokenStore refreshStore,
         ILoginAuditWriter audit,
+        CampaignMetrics metrics,
         AppDbContext db)
     {
         _auth = auth;
         _jwt = jwt;
         _refreshStore = refreshStore;
         _audit = audit;
+        _metrics = metrics;
         _db = db;
     }
 
@@ -56,6 +60,10 @@ public sealed class AuthController : ControllerBase
             req.Username, result.Success, result.Source.ToString(),
             result.Success ? null : result.Message,
             ip, ua, cid, ct);
+
+        _metrics.LoginAttempts.Add(1,
+            KeyValuePair.Create<string, object?>("outcome", result.Outcome.ToString()),
+            KeyValuePair.Create<string, object?>("source", result.Source.ToString()));
 
         if (!result.Success)
         {

@@ -11,7 +11,11 @@ using SMSManagement.Infrastructure.Bootstrap;
 using SMSManagement.Infrastructure.Configuration;
 using SMSManagement.Infrastructure.Middleware;
 using SMSManagement.Infrastructure.Persistence;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using SMSManagement.Modules.Core.Logging;
+using SMSManagement.Modules.Core.Observability;
 using SMSManagement.Modules.Ingestion.Services;
 using SMSManagement.Modules.Workflow.Engine;
 
@@ -118,6 +122,26 @@ builder.Services.AddCampaignPlatform(builder.Configuration);
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AppDbContext>("database", tags: ["ready"]);
 
+// ---------- OpenTelemetry — Prometheus exporter + ASP.NET Core, HTTP, SQL, runtime ----------
+// Skipped in tests because the AspNetCore instrumentation needs the host
+// pipeline and the Prometheus scraping endpoint isn't useful in xUnit runs.
+if (!testingEnabled)
+{
+    var serviceVersion = typeof(Program).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+    builder.Services.AddOpenTelemetry()
+        .ConfigureResource(r => r.AddService("campaign-platform", serviceVersion: serviceVersion))
+        .WithMetrics(m => m
+            .AddMeter(CampaignMetrics.MeterName)
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddPrometheusExporter())
+        .WithTracing(t => t
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddSqlClientInstrumentation());
+}
+
 // ---------- Background work: Hangfire on SQL Server ----------
 if (!testingEnabled)
 {
@@ -183,6 +207,9 @@ app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.Health
 {
     Predicate = c => c.Tags.Contains("ready")
 });
+
+if (!testingEnabled)
+    app.MapPrometheusScrapingEndpoint("/metrics");
 
 app.MapRazorPages();
 app.MapControllers();

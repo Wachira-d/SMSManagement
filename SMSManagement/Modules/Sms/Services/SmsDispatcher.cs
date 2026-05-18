@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using SMSManagement.Infrastructure.Persistence;
+using SMSManagement.Modules.Core.Observability;
 using SMSManagement.Modules.Core.Security;
 using SMSManagement.Modules.Sms.Domain;
 using SMSManagement.Modules.Sms.Providers;
@@ -17,6 +18,7 @@ public sealed class SmsDispatcher : ISmsDispatcher
     private readonly AppDbContext _db;
     private readonly FieldEncryptor _crypto;
     private readonly IProviderRouter _router;
+    private readonly CampaignMetrics _metrics;
     private readonly ILogger<SmsDispatcher> _log;
     private readonly TimeProvider _clock;
 
@@ -26,12 +28,14 @@ public sealed class SmsDispatcher : ISmsDispatcher
         AppDbContext db,
         FieldEncryptor crypto,
         IProviderRouter router,
+        CampaignMetrics metrics,
         TimeProvider clock,
         ILogger<SmsDispatcher> log)
     {
         _db = db;
         _crypto = crypto;
         _router = router;
+        _metrics = metrics;
         _clock = clock;
         _log = log;
     }
@@ -100,6 +104,7 @@ public sealed class SmsDispatcher : ISmsDispatcher
         msg.Status = SmsStatus.Sending;
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        var startedAt = _clock.GetUtcNow();
         try
         {
             var result = await provider.DispatchAsync(req, ct).ConfigureAwait(false);
@@ -109,11 +114,16 @@ public sealed class SmsDispatcher : ISmsDispatcher
                 msg.SentAt = _clock.GetUtcNow();
                 msg.ProviderMessageId = result.ProviderMessageId;
                 msg.ErrorCode = null;
+                _metrics.SmsDispatched.Add(1,
+                    KeyValuePair.Create<string, object?>("provider", provider.Name), KeyValuePair.Create<string, object?>("result", "sent"));
             }
             else
             {
                 msg.Status = SmsStatus.Rejected;
                 msg.ErrorCode = result.ErrorCode;
+                _metrics.SmsDispatched.Add(1,
+                    KeyValuePair.Create<string, object?>("provider", provider.Name), KeyValuePair.Create<string, object?>("result", "rejected"));
+                _metrics.SmsFailed.Add(1, KeyValuePair.Create<string, object?>("provider", provider.Name));
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -146,10 +156,17 @@ public sealed class SmsDispatcher : ISmsDispatcher
 
             msg.Status = msg.Attempts >= MaxAttempts ? SmsStatus.Failed : SmsStatus.Queued;
             msg.ErrorCode = ex.GetType().Name;
+            _metrics.SmsDispatched.Add(1,
+                KeyValuePair.Create<string, object?>("provider", provider.Name), KeyValuePair.Create<string, object?>("result", "exception"));
+            if (msg.Status == SmsStatus.Failed)
+                _metrics.SmsFailed.Add(1, KeyValuePair.Create<string, object?>("provider", provider.Name));
             _log.LogWarning(ex, "SMS dispatch attempt {Attempt} failed for {Id}", msg.Attempts, msg.Id);
         }
         finally
         {
+            _metrics.SmsDispatchLatencyMs.Record(
+                (_clock.GetUtcNow() - startedAt).TotalMilliseconds,
+                KeyValuePair.Create<string, object?>("provider", provider.Name));
             await _db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
     }

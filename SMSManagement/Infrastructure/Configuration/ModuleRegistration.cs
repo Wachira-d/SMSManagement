@@ -4,6 +4,7 @@ using Microsoft.Extensions.Http.Resilience;
 using Polly;
 using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Core.Logging;
+using SMSManagement.Modules.Core.Observability;
 using SMSManagement.Modules.Core.Security;
 using SMSManagement.Modules.Identity.Auth;
 using SMSManagement.Modules.Identity.Services;
@@ -32,6 +33,7 @@ public static class ModuleRegistration
         services.AddSingleton<FieldEncryptor>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IAuditLogger, AuditLogger>();
+        services.AddSingleton<CampaignMetrics>();
 
         // ---------- Identity / authorization context ----------
         services.AddHttpContextAccessor();

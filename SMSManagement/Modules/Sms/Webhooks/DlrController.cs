@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SMSManagement.Infrastructure.Persistence;
+using SMSManagement.Modules.Core.Observability;
 using SMSManagement.Modules.Sms.Domain;
 
 namespace SMSManagement.Modules.Sms.Webhooks;
@@ -22,17 +23,20 @@ public sealed class DlrController : ControllerBase
     private readonly AppDbContext _db;
     private readonly DlrWebhookOptions _secrets;
     private readonly TimeProvider _clock;
+    private readonly CampaignMetrics _metrics;
     private readonly ILogger<DlrController> _log;
 
     public DlrController(
         AppDbContext db,
         IOptions<DlrWebhookOptions> secrets,
         TimeProvider clock,
+        CampaignMetrics metrics,
         ILogger<DlrController> log)
     {
         _db = db;
         _secrets = secrets.Value;
         _clock = clock;
+        _metrics = metrics;
         _log = log;
     }
 
@@ -113,7 +117,15 @@ public sealed class DlrController : ControllerBase
         }
 
         msg.Status = newStatus;
-        if (newStatus == SmsStatus.Delivered) msg.DeliveredAt = _clock.GetUtcNow();
+        if (newStatus == SmsStatus.Delivered)
+        {
+            msg.DeliveredAt = _clock.GetUtcNow();
+            _metrics.SmsDelivered.Add(1, KeyValuePair.Create<string, object?>("provider", provider));
+        }
+        else if (newStatus is SmsStatus.Failed or SmsStatus.Rejected)
+        {
+            _metrics.SmsFailed.Add(1, KeyValuePair.Create<string, object?>("provider", provider));
+        }
         if (errorCode is not null) msg.ErrorCode = errorCode;
         await _db.SaveChangesAsync(ct);
     }

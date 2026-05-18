@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SMSManagement.Infrastructure.Persistence;
+using SMSManagement.Modules.Core.Observability;
 using SMSManagement.Modules.Core.Security;
 using SMSManagement.Modules.Shortlink.Domain;
 
@@ -27,6 +28,7 @@ public sealed class ShortlinkService : IShortlinkService
     private readonly ShortlinkOptions _opts;
     private readonly byte[] _ipSalt;
     private readonly TimeProvider _clock;
+    private readonly CampaignMetrics _metrics;
     private readonly ILogger<ShortlinkService> _log;
 
     public ShortlinkService(
@@ -34,6 +36,7 @@ public sealed class ShortlinkService : IShortlinkService
         FieldEncryptor crypto,
         IOptions<ShortlinkOptions> opts,
         TimeProvider clock,
+        CampaignMetrics metrics,
         ILogger<ShortlinkService> log)
     {
         _db = db;
@@ -41,6 +44,7 @@ public sealed class ShortlinkService : IShortlinkService
         _opts = opts.Value;
         _ipSalt = Convert.FromBase64String(opts.Value.IpHashSaltBase64);
         _clock = clock;
+        _metrics = metrics;
         _log = log;
     }
 
@@ -110,6 +114,7 @@ public sealed class ShortlinkService : IShortlinkService
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         var target = _crypto.Decrypt(link.EncryptedTargetUrl);
+        _metrics.ShortlinkClicks.Add(1, KeyValuePair.Create<string, object?>("device", click.DeviceClass ?? "unknown"));
         _log.LogInformation("Shortlink {Slug} resolved (clicks={Clicks})", slug, link.ClickCount);
 
         return new ResolveResult(target, link.Id, link.WorkflowInstanceId);
