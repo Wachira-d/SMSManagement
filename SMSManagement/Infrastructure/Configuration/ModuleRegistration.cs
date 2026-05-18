@@ -87,6 +87,7 @@ public static class ModuleRegistration
 
         // ---------- Ingestion ----------
         services.AddScoped<IIngestionPipeline, IngestionPipeline>();
+        services.AddScoped<IIngestionPoller, IngestionPoller>();
 
         // ---------- Reporting ----------
         services.AddScoped<IReportingService, ReportingService>();

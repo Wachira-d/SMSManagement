@@ -12,6 +12,7 @@ using SMSManagement.Infrastructure.Configuration;
 using SMSManagement.Infrastructure.Middleware;
 using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Core.Logging;
+using SMSManagement.Modules.Ingestion.Services;
 using SMSManagement.Modules.Workflow.Engine;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -198,6 +199,12 @@ if (!testingEnabled)
         "workflow-tick",
         engine => engine.TickAsync(CancellationToken.None),
         "* * * * *");
+
+    // Poll every active ingestion source binding every 5 minutes.
+    RecurringJob.AddOrUpdate<IIngestionPoller>(
+        "ingestion-poll",
+        poller => poller.PollAllAsync(CancellationToken.None),
+        "*/5 * * * *");
 }
 
 app.Run();
