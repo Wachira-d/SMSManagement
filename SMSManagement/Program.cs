@@ -183,24 +183,19 @@ if (!testingEnabled)
 
 var app = builder.Build();
 
-// ---------- Apply EF migrations at startup (idempotent) ----------
+// ---------- Pre-flight DB probe + migrations (idempotent) ----------
 if (!testingEnabled)
 {
-    using var scope = app.Services.CreateScope();
-    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    try
-    {
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        db.Database.Migrate();
-        logger.LogInformation("EF Core migrations applied.");
-    }
-    catch (Exception ex)
-    {
-        logger.LogCritical(ex, "Database migration failed. Aborting startup.");
-        throw;
-    }
+    // 1) Fast (8s) connection probe — translates well-known SqlException
+    //    numbers (login failed, password expired, host unreachable, …)
+    //    into actionable log entries with the SQL to run to fix them.
+    await StartupDatabaseGuard.EnsureReachableAsync(app.Services);
 
-    // Bootstrap admin (idempotent; skipped unless configured) — only outside test mode.
+    // 2) Schema migration. Same friendly handler applies — if MigrateAsync
+    //    fails with a SqlException we still get the human-readable hint.
+    await StartupDatabaseGuard.MigrateAsync(app.Services);
+
+    // 3) Bootstrap admin (idempotent; skipped unless configured).
     await Bootstrapper.RunAsync(app.Services);
 }
 

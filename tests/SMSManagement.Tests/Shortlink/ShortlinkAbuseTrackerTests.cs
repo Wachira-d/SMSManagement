@@ -53,10 +53,9 @@ public sealed class ShortlinkAbuseTrackerTests
     }
 
     [Fact]
-    public async Task HashIp_is_deterministic_and_salted()
+    public void HashIp_is_deterministic_and_salted()
     {
         var (_, t1, _) = Build();
-        var (_, t2, _) = Build();
         var h1 = t1.HashIp("203.0.113.10");
         var h2 = t1.HashIp("203.0.113.10");
         h1.Should().BeEquivalentTo(h2);
