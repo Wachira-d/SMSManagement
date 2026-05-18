@@ -639,3 +639,96 @@ The same `AddJwtBearer` middleware that validates external OIDC tokens validates
 - **Algorithm pluggability** — `IPasswordHasher` lets us swap SHA-256 for Argon2id without touching the authenticator. (Recommended for any new deployment; the spec calls for SHA-256 for compatibility.)
 - **Append-only audit log** for every auth event (`auth.cache_hit`, `auth.api_success`, `auth.rejected`, `auth.locked`, `auth.offline_fallback`, …) — feeds the Audit Trail report (§9.1 #7).
 
+### 11.8 Login audit table
+
+In addition to the structured-log audit, every authentication attempt is persisted to a dedicated **`LoginAudits`** table so SecOps can query it directly:
+
+| Column | Why it matters |
+|---|---|
+| `Username` | indexed with `CreatedAt` → "show me everything for user X in the last hour" |
+| `Success` | `(Success, CreatedAt)` index for spike detection |
+| `AuthSource` | `Cache` / `AuthenApi` / `CacheFallback` / `RefreshToken` — distinguishes routine cache hits from fallback (interesting) and from cookie refresh (sus if too frequent) |
+| `FailureReason` | the exact rejection reason (`invalid credentials`, `account locked`, `HTTP_503`, …) |
+| `IpAddress`, `UserAgent` | every login attempt is geo/device-attributable |
+| `CorrelationId` | join key to the full Serilog request log |
+
+Writes happen on a **fresh DbContext scope** so an audit-write failure can never poison the auth response.
+
+### 11.9 Remember-Me (refresh tokens)
+
+`RememberMe: true` on `/api/auth/login` issues a 32-byte URL-safe random token, stored only as **SHA-256 hash** in `RefreshTokens`. The raw value lives in a cookie:
+
+```
+Set-Cookie: rt=<token>; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Expires=<+RememberMeDurationDays>
+```
+
+| Concern | Mitigation |
+|---|---|
+| Cookie theft | Cookie is `HttpOnly` (no JS access), `Secure` (TLS only), `Path=/api/auth` (never sent on business APIs that don't need it). |
+| Replay | Every `/api/auth/refresh` **rotates** the token — the old hash is marked `RevokedAt='rotated'`, a new one is issued. |
+| Reuse of a revoked token | Treated as evidence of theft: the entire token family for that user is revoked (`reuse_detected`), forcing legitimate cookie holders to re-login. |
+| DB leak | Only SHA-256 of the token is stored; an attacker with DB read access still cannot mint cookies. |
+| Account state | Refresh re-checks `UserCache.IsEnabled` and `IsLocked` — disabling a user in AD takes effect on the next refresh without waiting for the JWT to expire. |
+
+Endpoints:
+
+```
+POST /api/auth/login          username/password (+ optional RememberMe, ReturnUrl) → JWT (+ cookie)
+POST /api/auth/refresh        cookie only                                          → new JWT (+ rotated cookie)
+POST /api/auth/logout         authenticated; revokes cookie's refresh token
+GET  /api/auth/me             authenticated; returns claims for the SPA
+```
+
+### 11.10 Open-redirect protection
+
+`/api/auth/login` accepts `ReturnUrl`. The response field `return_url` is sanitised by `SafeRedirect.Resolve` — any value that
+
+- starts with `//` or `\\` (protocol-relative)
+- parses as an absolute URI (`http://evil.com/...`)
+- does not begin with a single `/`
+
+is replaced by `"/"`. The SPA echoes back exactly what the server returned, never the raw query parameter.
+
+### 11.11 AuthenAPI wire format
+
+Per spec — `AuthenApiClient` implements this exactly:
+
+```http
+POST {BaseUrl}/api/ldap/authenticate
+Content-Type: application/json
+X-API-Key: {ApiKey}
+
+{ "username": "john.doe", "password": "..." }
+```
+
+Success response (envelope shape):
+```json
+{
+  "success": true, "message": "Authentication successful",
+  "data": {
+    "samAccountName": "john.doe", "displayName": "John Doe",
+    "email": "john.doe@company.com", "department": "IT",
+    "title": "Developer", "employeeId": "EMP001",
+    "groups": ["Domain Users","IT Team"], "isEnabled": true
+  }
+}
+```
+
+Failure response → translated to a non-success `AuthenApiResult`:
+```json
+{ "success": false, "message": "Invalid username or password" }
+```
+
+Both the path and the API-key header name are config-driven (`AuthenApi:AuthenticatePath`) so a future IdP migration is a settings change.
+
+### 11.12 Sessions in a JWT world
+
+The spec lists ASP.NET WebForms `Session["…"]` storage. In this stateless JWT API, the equivalents are:
+
+| WebForms concept | JWT API equivalent |
+|---|---|
+| `Session["Username"]`, `Session["DisplayName"]`, … | Claims (`sub`, `name`, `email`, `group`, `perm`) in the bearer token; SPA reads via `GET /api/auth/me`. |
+| `Session.Timeout = 8h` | `UserCacheAuth:SessionTimeoutHours = 8` → drives the JWT `exp` claim. |
+| `Session.Abandon()` on logout | `POST /api/auth/logout` revokes the refresh-token cookie; the SPA drops the bearer; the JWT itself expires naturally (or is blocklisted in a future iteration if early revocation is required). |
+| Per-page `ValidateSession()` | `[Authorize]` attribute + the standard `AddJwtBearer` middleware on every controller. |
+

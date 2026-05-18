@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
@@ -6,9 +5,17 @@ using Microsoft.Extensions.Options;
 namespace SMSManagement.Modules.Identity.Auth;
 
 /// <summary>
-/// HTTP client for the upstream AuthenAPI. Transport errors throw
-/// <see cref="AuthenApiException"/> so the authenticator can trigger fallback;
-/// 401/403 are translated into a structured non-success result.
+/// HTTP client for the upstream AuthenAPI. Per spec:
+///   POST {BaseUrl}/api/ldap/authenticate
+///   Headers: X-API-Key: &lt;ApiKey&gt;
+///   Body:    { "username": "...", "password": "..." }
+///   Reply:   { "success": bool, "message": "...",
+///              "data": { samAccountName, displayName, email, department,
+///                        title, employeeId, groups[], isEnabled } }
+///
+/// Transport-level errors (timeout, DNS, 5xx) throw <see cref="AuthenApiException"/>
+/// so the authenticator can trigger offline fallback. 401/403/4xx are translated
+/// into a non-success <see cref="AuthenApiResult"/> (= wrong password).
 /// </summary>
 public sealed class AuthenApiClient : IAuthenApiClient
 {
@@ -29,13 +36,14 @@ public sealed class AuthenApiClient : IAuthenApiClient
         if (string.IsNullOrWhiteSpace(_opts.BaseUrl))
             throw new AuthenApiException("AuthenAPI BaseUrl not configured.");
 
-        using var req = new HttpRequestMessage(HttpMethod.Post,
-            $"{_opts.BaseUrl.TrimEnd('/')}/api/authenticate")
+        var url = $"{_opts.BaseUrl.TrimEnd('/')}{_opts.AuthenticatePath}";
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = JsonContent.Create(new { username, password })
         };
         if (!string.IsNullOrEmpty(_opts.ApiKey))
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _opts.ApiKey);
+            req.Headers.Add("X-API-Key", _opts.ApiKey);
 
         HttpResponseMessage resp;
         try
@@ -44,8 +52,7 @@ public sealed class AuthenApiClient : IAuthenApiClient
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _log.LogWarning(ex, "AuthenAPI transport failure for {Username}",
-                Core.Security.PiiMasking.ScrubText(username));
+            _log.LogWarning(ex, "AuthenAPI transport failure.");
             throw new AuthenApiException("AuthenAPI unreachable.", ex);
         }
 
@@ -54,46 +61,58 @@ public sealed class AuthenApiClient : IAuthenApiClient
             if ((int)resp.StatusCode >= 500)
                 throw new AuthenApiException($"AuthenAPI returned {(int)resp.StatusCode}.");
 
-            if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized
-                || resp.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            // Even non-2xx responses may carry a structured envelope; try to parse it.
+            ApiEnvelope? envelope = null;
+            try
             {
-                return Fail(username, "invalid credentials");
+                envelope = await resp.Content.ReadFromJsonAsync<ApiEnvelope>(cancellationToken: ct);
+            }
+            catch
+            {
+                // Non-JSON 4xx — treat as a generic rejection.
             }
 
-            if (!resp.IsSuccessStatusCode)
+            if (envelope is null)
                 return Fail(username, $"HTTP_{(int)resp.StatusCode}");
 
-            var body = await resp.Content.ReadFromJsonAsync<ApiBody>(cancellationToken: ct)
-                       ?? throw new AuthenApiException("AuthenAPI returned empty body.");
+            if (!envelope.Success || envelope.Data is null)
+                return Fail(username, envelope.Message ?? "rejected");
 
+            var d = envelope.Data;
             return new AuthenApiResult(
-                Success: body.Authenticated,
-                Username: body.Username ?? username,
-                DisplayName: body.DisplayName,
-                Email: body.Email,
-                Department: body.Department,
-                Title: body.Title,
-                EmployeeId: body.EmployeeId,
-                Groups: body.Groups ?? Array.Empty<string>(),
-                IsEnabled: body.IsEnabled,
-                ErrorMessage: body.Authenticated ? null : body.Error ?? "rejected");
+                Success: true,
+                Username: d.SamAccountName ?? username,
+                DisplayName: d.DisplayName,
+                Email: d.Email,
+                Department: d.Department,
+                Title: d.Title,
+                EmployeeId: d.EmployeeId,
+                Groups: d.Groups ?? Array.Empty<string>(),
+                IsEnabled: d.IsEnabled,
+                ErrorMessage: null);
         }
     }
 
     private static AuthenApiResult Fail(string username, string reason) =>
         new(false, username, null, null, null, null, null, Array.Empty<string>(), false, reason);
 
-    private sealed class ApiBody
+    // ---- response shape ----
+    private sealed class ApiEnvelope
     {
-        [JsonPropertyName("authenticated")] public bool Authenticated { get; set; }
-        [JsonPropertyName("username")] public string? Username { get; set; }
-        [JsonPropertyName("displayName")] public string? DisplayName { get; set; }
-        [JsonPropertyName("email")] public string? Email { get; set; }
-        [JsonPropertyName("department")] public string? Department { get; set; }
-        [JsonPropertyName("title")] public string? Title { get; set; }
-        [JsonPropertyName("employeeId")] public string? EmployeeId { get; set; }
-        [JsonPropertyName("groups")] public string[]? Groups { get; set; }
-        [JsonPropertyName("isEnabled")] public bool IsEnabled { get; set; } = true;
-        [JsonPropertyName("error")] public string? Error { get; set; }
+        [JsonPropertyName("success")] public bool Success { get; set; }
+        [JsonPropertyName("message")] public string? Message { get; set; }
+        [JsonPropertyName("data")]    public ApiData? Data { get; set; }
+    }
+
+    private sealed class ApiData
+    {
+        [JsonPropertyName("samAccountName")] public string? SamAccountName { get; set; }
+        [JsonPropertyName("displayName")]    public string? DisplayName { get; set; }
+        [JsonPropertyName("email")]          public string? Email { get; set; }
+        [JsonPropertyName("department")]     public string? Department { get; set; }
+        [JsonPropertyName("title")]          public string? Title { get; set; }
+        [JsonPropertyName("employeeId")]     public string? EmployeeId { get; set; }
+        [JsonPropertyName("groups")]         public string[]? Groups { get; set; }
+        [JsonPropertyName("isEnabled")]      public bool IsEnabled { get; set; } = true;
     }
 }

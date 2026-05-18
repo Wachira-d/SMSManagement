@@ -47,6 +47,8 @@ public sealed class AppDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<ProjectMembership> ProjectMemberships => Set<ProjectMembership>();
     public DbSet<UserCache> UserCaches => Set<UserCache>();
+    public DbSet<LoginAudit> LoginAudits => Set<LoginAudit>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -134,6 +136,29 @@ public sealed class AppDbContext : DbContext
             e.Property(x => x.Department).HasMaxLength(200);
             e.Property(x => x.Title).HasMaxLength(200);
             e.Property(x => x.EmployeeId).HasMaxLength(50);
+        });
+
+        b.Entity<LoginAudit>(e =>
+        {
+            e.HasIndex(x => new { x.Username, x.CreatedAt });
+            e.HasIndex(x => new { x.Success, x.CreatedAt });
+            e.HasIndex(x => x.CreatedAt);
+            e.Property(x => x.Username).HasMaxLength(100);
+            e.Property(x => x.AuthSource).HasMaxLength(50);
+            e.Property(x => x.FailureReason).HasMaxLength(500);
+            e.Property(x => x.IpAddress).HasMaxLength(64);
+            e.Property(x => x.UserAgent).HasMaxLength(500);
+            e.Property(x => x.CorrelationId).HasMaxLength(100);
+        });
+
+        b.Entity<RefreshToken>(e =>
+        {
+            e.HasIndex(x => x.TokenHash).IsUnique();
+            e.HasIndex(x => new { x.Username, x.ExpiresAt });
+            e.Property(x => x.Username).HasMaxLength(100);
+            e.Property(x => x.TokenHash).HasMaxLength(64);
+            e.Property(x => x.RevokedReason).HasMaxLength(64);
+            e.Property(x => x.CreatedFromIp).HasMaxLength(64);
         });
     }
 }

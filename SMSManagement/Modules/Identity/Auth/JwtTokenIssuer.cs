@@ -21,13 +21,19 @@ namespace SMSManagement.Modules.Identity.Auth;
 public sealed class JwtTokenIssuer : IJwtTokenIssuer
 {
     private readonly LocalJwtOptions _opts;
+    private readonly UserCacheAuthOptions _sessionOpts;
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
     private readonly SigningCredentials _signing;
 
-    public JwtTokenIssuer(IOptions<LocalJwtOptions> opts, AppDbContext db, TimeProvider clock)
+    public JwtTokenIssuer(
+        IOptions<LocalJwtOptions> opts,
+        IOptions<UserCacheAuthOptions> sessionOpts,
+        AppDbContext db,
+        TimeProvider clock)
     {
         _opts = opts.Value;
+        _sessionOpts = sessionOpts.Value;
         _db = db;
         _clock = clock;
 
@@ -64,7 +70,7 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
             claims.Add(new Claim("perm", perm));
 
         var now = _clock.GetUtcNow();
-        var exp = now.AddMinutes(_opts.TokenLifetimeMinutes);
+        var exp = now.AddHours(_sessionOpts.SessionTimeoutHours);
 
         var jwt = new JwtSecurityToken(
             issuer: _opts.Issuer,

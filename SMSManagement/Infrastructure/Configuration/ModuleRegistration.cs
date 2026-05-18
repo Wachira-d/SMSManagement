@@ -58,6 +58,8 @@ public static class ModuleRegistration
         }).AddStandardResilienceHandler(ConfigureResilience);
         services.AddScoped<IUserCacheAuthenticator, UserCacheAuthenticator>();
         services.AddScoped<IJwtTokenIssuer, JwtTokenIssuer>();
+        services.AddScoped<IRefreshTokenStore, RefreshTokenStore>();
+        services.AddSingleton<ILoginAuditWriter, LoginAuditWriter>();
 
         // ---------- SMS providers ----------
         services.Configure<EtrackerOptions>(cfg.GetSection("Sms:Providers:Etracker"));

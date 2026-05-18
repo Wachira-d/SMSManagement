@@ -87,7 +87,7 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
             await MarkSuccessAsync(cached, ct);
             await Audit(username, "auth.cache_hit", cached, ct);
             return new AuthResult(true, AuthOutcome.Success,
-                "Authenticated from cache.", cached, UsedCache: true, UsedFallback: false);
+                "Authenticated from cache.", cached, AuthSource.Cache);
         }
 
         // 3. Cache miss / stale / hash mismatch → call the upstream API.
@@ -122,7 +122,7 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
         await Audit(username, "auth.api_success", refreshed, ct);
         return new AuthResult(true, AuthOutcome.Success,
             "Authenticated via upstream and cache refreshed.",
-            refreshed, UsedCache: false, UsedFallback: false);
+            refreshed, AuthSource.AuthenApi);
     }
 
     // ---------------- internals ----------------
@@ -147,7 +147,7 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
                 PiiMasking.ScrubText(username), error);
             return new AuthResult(true, AuthOutcome.Success,
                 $"Authenticated from cache (API unavailable: {error}).",
-                cached, UsedCache: true, UsedFallback: true);
+                cached, AuthSource.CacheFallback);
         }
 
         await Audit(username, "auth.api_unavailable", cached, ct);
@@ -241,5 +241,5 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
             }), ct);
 
     private static AuthResult Reject(AuthOutcome outcome, string message) =>
-        new(false, outcome, message, null, UsedCache: false, UsedFallback: false);
+        new(false, outcome, message, null, AuthSource.None);
 }
