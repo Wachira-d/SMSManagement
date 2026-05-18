@@ -113,6 +113,25 @@ public sealed class AppDbContext : DbContext
         {
             e.HasIndex(x => x.Slug).IsUnique();
             e.HasIndex(x => x.WorkflowInstanceId);
+
+            // CASE-SENSITIVE slug lookup.
+            //   SQLite (tests): default TEXT comparison is binary, so
+            //     "Abc" != "abc" naturally — no hint needed.
+            //   SQL Server (prod): default collation is *_CI_AS so SQL would
+            //     match "Abc" against "abc". For full DB-layer enforcement
+            //     ops should run:
+            //
+            //         ALTER TABLE Shortlinks
+            //         ALTER COLUMN Slug NVARCHAR(64)
+            //         COLLATE Latin1_General_BIN2 NOT NULL;
+            //
+            //   ShortlinkService.ResolveAndRecordAsync re-verifies the case
+            //   in C# (StringComparison.Ordinal) regardless, so even on a
+            //   default-collation SQL Server the wrong-case slug is rejected.
+            //   Not applied via EF UseCollation because that annotation
+            //   propagates into SQLite query generation, which then errors
+            //   with "no such collation sequence" at runtime.
+            e.Property(x => x.Slug).HasMaxLength(64);
         });
 
         b.Entity<ShortlinkClick>(e =>

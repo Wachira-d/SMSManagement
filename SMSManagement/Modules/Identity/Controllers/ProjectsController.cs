@@ -34,10 +34,19 @@ public sealed class ProjectsController : ControllerBase
         string? DefaultProvider);
 
     public sealed record UpdateProjectRequest(
-        string Name,
-        string? DefaultProvider,
-        short? ShortlinkSlugLength,
-        string? NotificationEmails);
+        string? Name = null,
+        string? DefaultProvider = null,
+        short? ShortlinkSlugLength = null,
+        string? ShortlinkAlphabet = null,
+        string? NotificationEmails = null,
+        bool? SmsEnabled = null,
+        bool? ShortlinkEnabled = null,
+        bool? WorkflowEnabled = null,
+        bool? IngestionEnabled = null,
+        bool? EmailAlertsEnabled = null);
+
+    private static readonly System.Text.RegularExpressions.Regex AlphabetRegex =
+        new("^[A-Za-z0-9_-]+$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     public sealed record ShareRequest(Guid UserId, ProjectAccessLevel Level);
 
@@ -75,7 +84,17 @@ public sealed class ProjectsController : ControllerBase
 
         return Ok(new
         {
-            p.Id, p.Code, p.Name, p.DefaultProvider, p.CreatedAt,
+            p.Id, p.Code, p.Name, p.DefaultProvider, p.CreatedAt, p.ArchivedAt,
+            Shortlink = new { p.ShortlinkSlugLength, p.ShortlinkAlphabet },
+            Features = new
+            {
+                Sms = p.SmsEnabled,
+                Shortlink = p.ShortlinkEnabled,
+                Workflow = p.WorkflowEnabled,
+                Ingestion = p.IngestionEnabled,
+                EmailAlerts = p.EmailAlertsEnabled
+            },
+            p.NotificationEmails,
             Members = members
         });
     }
@@ -140,23 +159,60 @@ public sealed class ProjectsController : ControllerBase
         var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == projectId, ct);
         if (project is null) return NotFound();
 
-        var before = new { project.Name, project.DefaultProvider,
-            project.ShortlinkSlugLength, project.NotificationEmails };
+        var before = new
+        {
+            project.Name, project.DefaultProvider,
+            project.ShortlinkSlugLength, project.ShortlinkAlphabet,
+            project.NotificationEmails,
+            project.SmsEnabled, project.ShortlinkEnabled, project.WorkflowEnabled,
+            project.IngestionEnabled, project.EmailAlertsEnabled
+        };
 
         if (!string.IsNullOrWhiteSpace(req.Name)) project.Name = req.Name.Trim();
         if (!string.IsNullOrWhiteSpace(req.DefaultProvider))
             project.DefaultProvider = req.DefaultProvider.Trim().ToLowerInvariant();
 
-        // Per-project slug length override. Range 4..16; null clears.
         if (req.ShortlinkSlugLength is { } len)
         {
             if (len < 4 || len > 16)
                 return BadRequest("ShortlinkSlugLength must be between 4 and 16.");
             project.ShortlinkSlugLength = len;
         }
+
+        if (req.ShortlinkAlphabet is not null)
+        {
+            var raw = req.ShortlinkAlphabet;
+            if (raw.Length == 0)
+            {
+                project.ShortlinkAlphabet = null;   // clear → use global default
+            }
+            else
+            {
+                if (raw.Length > 80)
+                    return BadRequest("ShortlinkAlphabet must be at most 80 characters.");
+                if (!AlphabetRegex.IsMatch(raw))
+                    return BadRequest("ShortlinkAlphabet must contain only A-Z a-z 0-9 _ -");
+                var unique = new HashSet<char>(raw);   // CASE-SENSITIVE on purpose
+                if (unique.Count < 10)
+                    return BadRequest(
+                        "ShortlinkAlphabet must contain at least 10 unique characters " +
+                        "(case-sensitive — 'a' and 'A' count separately).");
+                // Normalise: dedupe but preserve original order for reproducibility.
+                var deduped = new string(raw.Distinct().ToArray());
+                project.ShortlinkAlphabet = deduped;
+            }
+        }
+
         if (req.NotificationEmails is not null)
             project.NotificationEmails = string.IsNullOrWhiteSpace(req.NotificationEmails)
                 ? null : req.NotificationEmails.Trim();
+
+        // Feature kill switches — explicit nulls leave them untouched.
+        if (req.SmsEnabled        is { } s)  project.SmsEnabled        = s;
+        if (req.ShortlinkEnabled  is { } sl) project.ShortlinkEnabled  = sl;
+        if (req.WorkflowEnabled   is { } w)  project.WorkflowEnabled   = w;
+        if (req.IngestionEnabled  is { } i)  project.IngestionEnabled  = i;
+        if (req.EmailAlertsEnabled is { } e) project.EmailAlertsEnabled = e;
 
         await _db.SaveChangesAsync(ct);
 
@@ -166,8 +222,14 @@ public sealed class ProjectsController : ControllerBase
             Request.Headers.UserAgent.ToString(),
             HttpContext.TraceIdentifier,
             Before: before,
-            After: new { project.Name, project.DefaultProvider,
-                project.ShortlinkSlugLength, project.NotificationEmails },
+            After: new
+            {
+                project.Name, project.DefaultProvider,
+                project.ShortlinkSlugLength, project.ShortlinkAlphabet,
+                project.NotificationEmails,
+                project.SmsEnabled, project.ShortlinkEnabled, project.WorkflowEnabled,
+                project.IngestionEnabled, project.EmailAlertsEnabled
+            },
             ProjectId: projectId), ct);
 
         return NoContent();

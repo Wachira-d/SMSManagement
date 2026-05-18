@@ -17,12 +17,15 @@ public sealed class SmsController : ControllerBase
     private readonly ISmsDispatcher _dispatcher;
     private readonly AppDbContext _db;
     private readonly IProjectAccessService _access;
+    private readonly IProjectFeatureGuard _features;
 
-    public SmsController(ISmsDispatcher dispatcher, AppDbContext db, IProjectAccessService access)
+    public SmsController(ISmsDispatcher dispatcher, AppDbContext db,
+        IProjectAccessService access, IProjectFeatureGuard features)
     {
         _dispatcher = dispatcher;
         _db = db;
         _access = access;
+        _features = features;
     }
 
     public sealed record SendRequest(
@@ -40,6 +43,7 @@ public sealed class SmsController : ControllerBase
         Guid projectId, [FromBody] SendRequest req, CancellationToken ct)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Member, ct);
+        await _features.EnsureAsync(projectId, ProjectFeature.Sms, ct);
 
         if (string.IsNullOrWhiteSpace(req.Recipient) || string.IsNullOrWhiteSpace(req.Body))
             return BadRequest("Recipient and Body are required.");

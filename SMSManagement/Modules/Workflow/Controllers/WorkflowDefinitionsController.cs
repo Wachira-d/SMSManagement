@@ -22,11 +22,14 @@ public sealed class WorkflowDefinitionsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IProjectAccessService _access;
+    private readonly IProjectFeatureGuard _features;
 
-    public WorkflowDefinitionsController(AppDbContext db, IProjectAccessService access)
+    public WorkflowDefinitionsController(
+        AppDbContext db, IProjectAccessService access, IProjectFeatureGuard features)
     {
         _db = db;
         _access = access;
+        _features = features;
     }
 
     public sealed record SaveRequest(string Name, JsonElement Spec);
@@ -70,6 +73,7 @@ public sealed class WorkflowDefinitionsController : ControllerBase
         Guid projectId, [FromBody] SaveRequest req, CancellationToken ct)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Admin, ct);
+        await _features.EnsureAsync(projectId, ProjectFeature.Workflow, ct);
 
         if (string.IsNullOrWhiteSpace(req.Name)) return BadRequest("Name is required.");
         if (!IsValidSpec(req.Spec, out var error)) return BadRequest(error);

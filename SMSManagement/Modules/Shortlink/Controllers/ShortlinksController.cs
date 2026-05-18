@@ -16,12 +16,15 @@ public sealed class ShortlinksController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IShortlinkService _svc;
     private readonly IProjectAccessService _access;
+    private readonly IProjectFeatureGuard _features;
 
-    public ShortlinksController(AppDbContext db, IShortlinkService svc, IProjectAccessService access)
+    public ShortlinksController(AppDbContext db, IShortlinkService svc,
+        IProjectAccessService access, IProjectFeatureGuard features)
     {
         _db = db;
         _svc = svc;
         _access = access;
+        _features = features;
     }
 
     public sealed record CreateRequest(
@@ -58,6 +61,7 @@ public sealed class ShortlinksController : ControllerBase
         Guid projectId, [FromBody] CreateRequest req, CancellationToken ct)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Member, ct);
+        await _features.EnsureAsync(projectId, ProjectFeature.Shortlink, ct);
         var slug = await _svc.CreateAsync(projectId, req.TargetUrl,
             workflowInstanceId: null, req.Lifetime, req.MaxClicks, ct);
         return Ok(new { Slug = slug });

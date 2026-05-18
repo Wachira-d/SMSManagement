@@ -54,12 +54,18 @@ public sealed class ShortlinkAbuseTracker : IShortlinkAbuseTracker
     public async Task<BlockedIp?> GetActiveBlockAsync(byte[] ipHash, CancellationToken ct = default)
     {
         var now = _clock.GetUtcNow();
-        return await _db.BlockedIps
-            .Where(b => b.IpHash == ipHash
-                     && b.UnblockedAt == null
-                     && b.BlockedUntil > now)
+        // Some EF providers (SQLite) can't ORDER BY DateTimeOffset or combine
+        // byte[] equality with nullable DateTime + DateTimeOffset predicates.
+        // Fetch up to 50 rows for this IP via the IpHash index, then sort
+        // and filter client-side. Per-IP volume is tiny in practice.
+        var rows = await _db.BlockedIps
+            .Where(b => b.IpHash == ipHash)
+            .Take(50)
+            .ToListAsync(ct);
+
+        return rows
             .OrderByDescending(b => b.BlockedAt)
-            .FirstOrDefaultAsync(ct);
+            .FirstOrDefault(b => b.UnblockedAt == null && b.BlockedUntil > now);
     }
 
     public async Task<BlockedIp?> RecordFailureAsync(
@@ -76,9 +82,16 @@ public sealed class ShortlinkAbuseTracker : IShortlinkAbuseTracker
         await _db.SaveChangesAsync(ct);
 
         // Count distinct failures in the rolling window.
+        // Two-phase to keep the query SQLite-translatable (the combination of
+        // byte[] equality + DateTimeOffset comparison defeats its translator):
+        // fetch up to 200 recent failures for this IP via the IpHash index,
+        // then filter by window in memory. Threshold caps the loop short.
         var windowStart = now.AddMinutes(-_opts.WindowMinutes);
-        var count = await _db.IpAccessFailures
-            .CountAsync(f => f.IpHash == ipHash && f.OccurredAt >= windowStart, ct);
+        var recentForIp = await _db.IpAccessFailures
+            .Where(f => f.IpHash == ipHash)
+            .Take(_opts.FailureThreshold * 10 + 50)
+            .ToListAsync(ct);
+        var count = recentForIp.Count(f => f.OccurredAt >= windowStart);
 
         if (count < _opts.FailureThreshold) return null;
 
@@ -92,9 +105,9 @@ public sealed class ShortlinkAbuseTracker : IShortlinkAbuseTracker
             return existing;
         }
 
-        var firstAt = await _db.IpAccessFailures
-            .Where(f => f.IpHash == ipHash && f.OccurredAt >= windowStart)
-            .MinAsync(f => (DateTimeOffset?)f.OccurredAt, ct) ?? now;
+        var firstAt = recentForIp
+            .Where(f => f.OccurredAt >= windowStart)
+            .Min(f => (DateTimeOffset?)f.OccurredAt) ?? now;
 
         var block = new BlockedIp
         {

@@ -49,6 +49,7 @@ public static class ModuleRegistration
         });
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddScoped<IProjectAccessService, ProjectAccessService>();
+        services.AddScoped<IProjectFeatureGuard, ProjectFeatureGuard>();
 
         // ---------- Cache-first authentication ----------
         services.Configure<UserCacheAuthOptions>(cfg.GetSection("UserCacheAuth"));

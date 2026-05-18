@@ -28,7 +28,12 @@ public sealed class ShortlinkOptions
 
 public sealed class ShortlinkService : IShortlinkService
 {
-    private const string SlugAlphabet =
+    /// <summary>
+    /// Default URL-safe alphabet — excludes the confusable characters
+    /// I L O 0 1 (paired with their lower-case variants).
+    /// 57 characters * 8 chars = 57^8 ≈ 1.1e14 combinations.
+    /// </summary>
+    public const string DefaultSlugAlphabet =
         "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
     private readonly AppDbContext _db;
@@ -68,18 +73,36 @@ public sealed class ShortlinkService : IShortlinkService
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
             throw new ArgumentException("Target URL must be absolute http/https.", nameof(targetUrl));
 
-        // Resolve slug length: per-project override > global default.
-        var projectLen = await _db.Projects
+        // Resolve per-project knobs in a single trip.
+        var pcfg = await _db.Projects
             .Where(p => p.Id == projectId)
-            .Select(p => (int?)p.ShortlinkSlugLength)
-            .FirstOrDefaultAsync(ct);
-        var baseLen = projectLen ?? _opts.SlugLength;
+            .Select(p => new
+            {
+                p.ShortlinkSlugLength,
+                p.ShortlinkAlphabet,
+                p.ShortlinkEnabled
+            })
+            .FirstOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException($"Project {projectId} not found.");
+
+        if (!pcfg.ShortlinkEnabled)
+            throw new InvalidOperationException(
+                $"Shortlinks are disabled for project {projectId}.");
+
+        var baseLen = pcfg.ShortlinkSlugLength ?? _opts.SlugLength;
         if (baseLen < 4 || baseLen > 16) baseLen = _opts.SlugLength;
 
-        // Collision-resistant slug with a small retry budget.
+        var alphabet = string.IsNullOrEmpty(pcfg.ShortlinkAlphabet)
+            ? DefaultSlugAlphabet
+            : pcfg.ShortlinkAlphabet;
+
+        // Collision-resistant slug with a small retry budget. Per-project
+        // alphabet means two projects could in theory mint the same slug;
+        // the UNIQUE index on Slug is the absolute guarantee — collisions
+        // re-roll with a +1 length budget.
         for (var attempt = 0; attempt < 4; attempt++)
         {
-            var slug = GenerateSlug(baseLen + attempt);
+            var slug = GenerateSlug(baseLen + attempt, alphabet);
             var link = new ShortlinkEntity
             {
                 ProjectId = projectId,
@@ -109,11 +132,28 @@ public sealed class ShortlinkService : IShortlinkService
         string? userAgent,
         CancellationToken ct = default)
     {
-        var link = await _db.Shortlinks
+        // Reject obviously-bogus input before hitting the DB.
+        if (string.IsNullOrEmpty(slug) || slug.Length > 64) return null;
+
+        // Plain equality — collation specified per provider:
+        //   * SQLite: default TEXT comparison is binary (case-sensitive).
+        //   * SQL Server (prod): column should be altered to
+        //     COLLATE Latin1_General_BIN2 (see AppDbContext comment).
+        // Defence-in-depth: re-verify case after fetch so even on a
+        // default-collation SQL Server the wrong-case slug is rejected.
+        var candidate = await _db.Shortlinks
             .FirstOrDefaultAsync(s => s.Slug == slug, ct)
             .ConfigureAwait(false);
+        if (candidate is null) return null;
+        if (!string.Equals(candidate.Slug, slug, StringComparison.Ordinal))
+        {
+            _log.LogWarning(
+                "Shortlink slug case mismatch — DB collation may not be case-sensitive.");
+            return null;
+        }
+        var link = candidate;
 
-        if (link is null || link.Disabled) return null;
+        if (link.Disabled) return null;
         if (link.ExpiresAt is { } exp && exp < _clock.GetUtcNow()) return null;
         if (link.MaxClicks is { } cap && link.ClickCount >= cap) return null;
 
@@ -145,13 +185,21 @@ public sealed class ShortlinkService : IShortlinkService
         return SHA256.HashData(combined);
     }
 
-    private static string GenerateSlug(int length)
+    /// <summary>
+    /// Generates a slug of the given length from the given alphabet.
+    /// Uses cryptographically secure RNG; for very large alphabets (&gt;255)
+    /// we'd need multi-byte indexing — current validation caps at 80 chars
+    /// so a single random byte is enough entropy per position.
+    /// </summary>
+    private static string GenerateSlug(int length, string alphabet)
     {
+        if (string.IsNullOrEmpty(alphabet) || alphabet.Length < 2)
+            throw new ArgumentException("Alphabet must contain at least 2 characters.", nameof(alphabet));
         Span<byte> bytes = stackalloc byte[length];
         RandomNumberGenerator.Fill(bytes);
         Span<char> chars = stackalloc char[length];
         for (var i = 0; i < length; i++)
-            chars[i] = SlugAlphabet[bytes[i] % SlugAlphabet.Length];
+            chars[i] = alphabet[bytes[i] % alphabet.Length];
         return new string(chars);
     }
 

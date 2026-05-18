@@ -125,7 +125,13 @@ builder.Services.AddRateLimiter(o =>
         }));
 });
 
-builder.Services.AddControllers();
+builder.Services.AddControllers(o =>
+{
+    // Translates FeatureDisabledException into a 409 Conflict response so
+    // services can call IProjectFeatureGuard.EnsureAsync(...) without
+    // hand-rolling status-code handling everywhere.
+    o.Filters.Add<SMSManagement.Infrastructure.Middleware.FeatureDisabledFilter>();
+});
 builder.Services.AddRazorPages();
 builder.Services.Configure<BootstrapOptions>(builder.Configuration.GetSection("Bootstrap"));
 builder.Services.AddCampaignPlatform(builder.Configuration);

@@ -17,11 +17,14 @@ public sealed class UploadController : ControllerBase
 
     private readonly IIngestionPipeline _pipeline;
     private readonly IProjectAccessService _access;
+    private readonly IProjectFeatureGuard _features;
 
-    public UploadController(IIngestionPipeline pipeline, IProjectAccessService access)
+    public UploadController(IIngestionPipeline pipeline,
+        IProjectAccessService access, IProjectFeatureGuard features)
     {
         _pipeline = pipeline;
         _access = access;
+        _features = features;
     }
 
     /// <summary>
@@ -38,6 +41,7 @@ public sealed class UploadController : ControllerBase
         CancellationToken ct = default)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Member, ct);
+        await _features.EnsureAsync(projectId, ProjectFeature.Ingestion, ct);
 
         if (file.Length == 0) return BadRequest("Empty file.");
         if (file.Length > MaxFileSize) return BadRequest("File too large.");

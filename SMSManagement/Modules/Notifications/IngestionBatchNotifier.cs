@@ -42,7 +42,8 @@ public sealed class IngestionBatchNotifier : IIngestionBatchNotifier
         var project = await _db.Projects
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(p => p.Id == batch.ProjectId, ct);
-        if (project is null || string.IsNullOrWhiteSpace(project.NotificationEmails))
+        if (project is null || !project.EmailAlertsEnabled
+            || string.IsNullOrWhiteSpace(project.NotificationEmails))
             return;
 
         var recipients = project.NotificationEmails

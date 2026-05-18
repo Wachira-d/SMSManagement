@@ -30,6 +30,30 @@ public sealed class Project
     /// Range enforced at the controller: 4..16.
     /// </summary>
     public short? ShortlinkSlugLength { get; set; }
+
+    /// <summary>
+    /// Per-project alphabet for slug generation. Null = use the global
+    /// default (URL-safe, anti-confusable: <c>A-Z</c> minus I/L/O, <c>a-z</c>
+    /// minus i/l/o, <c>2-9</c>).
+    ///
+    /// Validation: when set, must be 10..80 unique characters drawn from
+    /// <c>[A-Za-z0-9_-]</c>. Slug LOOKUPS are case-sensitive
+    /// (Slug column carries a binary collation), so an alphabet mixing
+    /// "A" and "a" really does double the address space.
+    /// </summary>
+    public string? ShortlinkAlphabet { get; set; }
+
+    // ---- Per-feature kill switches ----
+    // All default ON for backwards compatibility. Setting one to false makes
+    // the relevant endpoints reject with 409 Conflict + "feature disabled"
+    // so an operator-disabled project can't accidentally dispatch SMS or
+    // accept ingestion files via a forgotten background job / webhook.
+
+    public bool SmsEnabled { get; set; } = true;
+    public bool ShortlinkEnabled { get; set; } = true;
+    public bool WorkflowEnabled { get; set; } = true;
+    public bool IngestionEnabled { get; set; } = true;
+    public bool EmailAlertsEnabled { get; set; } = true;
 }
 
 public sealed class ColumnMapping
