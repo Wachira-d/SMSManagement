@@ -47,6 +47,36 @@ public sealed class StartupDatabaseGuardTests
         => Invoke(18487, "admin").Should().Contain("ALTER LOGIN [admin]");
 
     [Fact]
+    public void Diagnostic_one_line_message_contains_hint_endpoint_and_sql_number()
+    {
+        // Diagnostic is a private nested record; build via reflection so we
+        // can assert the OneLineMessage shape that the thrown
+        // ApplicationException carries.
+        var diagType = typeof(StartupDatabaseGuard)
+            .GetNestedType("Diagnostic", BindingFlags.NonPublic)!;
+        var ctor = diagType.GetConstructors().Single();
+        var diag = ctor.Invoke(new object?[]
+        {
+            18487,
+            "mssql,1433",
+            "admin",
+            "campaign",
+            "Password for [admin] has EXPIRED. Run: ALTER LOGIN [admin] WITH ...",
+            "Login failed for user 'admin'. Reason: The password ..."
+        });
+        var msg = (string)diagType.GetProperty("OneLineMessage")!.GetValue(diag)!;
+
+        // The whole point of this commit — when the debugger or a crash
+        // report shows only the exception, the operator must see the fix.
+        msg.Should().Contain("SQL #18487");
+        msg.Should().Contain("mssql,1433");
+        msg.Should().Contain("[admin]");
+        msg.Should().Contain("[campaign]");
+        msg.Should().Contain("HINT:");
+        msg.Should().Contain("ALTER LOGIN [admin]");
+    }
+
+    [Fact]
     public void Redact_masks_password_in_connection_string()
     {
         var raw = "Server=localhost;Database=db;User Id=sa;Password=Secret!2026;TrustServerCertificate=true";

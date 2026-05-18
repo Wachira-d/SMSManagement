@@ -34,9 +34,13 @@ public static class StartupDatabaseGuard
         }
         catch (SqlException ex)
         {
-            LogFriendly(log, ex, connStr);
-            throw new ApplicationException(
-                "Database is not reachable. See the previous log entry for the fix.", ex);
+            var diag = BuildDiagnostic(ex, connStr);
+            LogFriendly(log, diag, ex);
+            // Carry the full diagnostic in the exception message — anyone
+            // who only sees the exception (debugger, crash dump, unhandled-
+            // exception dialog, CI test runner) gets the fix without
+            // having to scroll back through the log.
+            throw new ApplicationException(diag.OneLineMessage, ex);
         }
         catch (Exception ex)
         {
@@ -59,14 +63,46 @@ public static class StartupDatabaseGuard
         }
         catch (SqlException ex)
         {
-            LogFriendly(log, ex, db.Database.GetConnectionString());
-            throw;
+            var diag = BuildDiagnostic(ex, db.Database.GetConnectionString());
+            LogFriendly(log, diag, ex);
+            throw new ApplicationException(diag.OneLineMessage, ex);
         }
     }
 
     // ---------------- internals ----------------
 
-    private static async Task OpenWithTimeoutAsync(string connectionString, TimeSpan timeout, CancellationToken ct)
+    /// <summary>Bundles the parts of a friendly DB diagnostic so the logger
+    /// and the thrown exception render the same hint without duplication.</summary>
+    private sealed record Diagnostic(
+        int SqlNumber, string Server, string User, string Database,
+        string Hint, string OriginalMessage)
+    {
+        /// <summary>Compact one-liner that fits in the debugger Exception
+        /// Helper popup. Includes the hint so the operator sees the fix
+        /// without going to the log.</summary>
+        public string OneLineMessage =>
+            $"DB startup failed (SQL #{SqlNumber}) at {Server} " +
+            $"as [{User}]/[{Database}]: {OriginalMessage} | HINT: {Hint}";
+    }
+
+    private static Diagnostic BuildDiagnostic(SqlException ex, string? connectionString)
+    {
+        var (server, user, db) = ExtractEndpoint(connectionString);
+        var hint = HintFor(ex.Number, user);
+        return new Diagnostic(ex.Number, server, user, db, hint,
+            ex.Message.TrimEnd('.'));
+    }
+
+    private static void LogFriendly(ILogger log, Diagnostic d, SqlException ex)
+    {
+        log.LogCritical(ex,
+            "Database error #{Number} from {Server} (user={User}, db={Database}): " +
+            "{Message}\n→ HINT: {Hint}",
+            d.SqlNumber, d.Server, d.User, d.Database, d.OriginalMessage, d.Hint);
+    }
+
+    private static async Task OpenWithTimeoutAsync(
+        string connectionString, TimeSpan timeout, CancellationToken ct)
     {
         // Force a short Connect Timeout so the probe is fast even if the SQL
         // Server is unreachable. The provided connection string usually has
@@ -85,17 +121,6 @@ public static class StartupDatabaseGuard
         cmd.CommandText = "SELECT 1";
         cmd.CommandTimeout = (int)timeout.TotalSeconds;
         _ = await cmd.ExecuteScalarAsync(ct);
-    }
-
-    private static void LogFriendly(ILogger log, SqlException ex, string? connectionString)
-    {
-        var (server, user, db) = ExtractEndpoint(connectionString);
-        var hint = HintFor(ex.Number, user);
-
-        log.LogCritical(
-            "Database error #{Number} from {Server} (user={User}, db={Database}): {Message}\n" +
-            "→ HINT: {Hint}",
-            ex.Number, server, user, db, ex.Message.TrimEnd('.'), hint);
     }
 
     /// <summary>Map well-known SqlException Number → actionable advice.
