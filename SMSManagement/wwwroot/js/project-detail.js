@@ -1093,7 +1093,7 @@ document.getElementById('formProvEtracker').addEventListener('submit', async (ev
     try {
         await api.put(`${api_proj}/sms-providers/etracker`, body);
         document.getElementById('etPwd').value = '';
-        toast('Etracker credentials saved.');
+        toast('MacroKiosk credentials saved.');
         await loadProviderConfig('etracker');
     } catch (e) { toast(e.message, 'danger'); }
 });
@@ -1114,7 +1114,7 @@ document.getElementById('formProvInfobip').addEventListener('submit', async (ev)
 });
 
 document.getElementById('btnEtClear').addEventListener('click', async () => {
-    if (!confirm('Remove project override and revert to global Etracker defaults?')) return;
+    if (!confirm('Remove project override and revert to global MacroKiosk defaults?')) return;
     try {
         await api.delete(`${api_proj}/sms-providers/etracker`);
         toast('Override removed.');
