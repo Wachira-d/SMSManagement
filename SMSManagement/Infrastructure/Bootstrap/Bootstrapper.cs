@@ -25,6 +25,16 @@ public sealed class BootstrapOptions
     /// with a random password and log it loudly. Default true in
     /// appsettings.Development.json so a fresh clone works out of the box.</summary>
     public bool AutoFirstRunAdminInDev { get; init; } = true;
+
+    /// <summary>
+    /// Email addresses (or external-subject strings) that should be flagged
+    /// IsSystemAdmin=true on every startup. Idempotent: existing Users rows
+    /// with a matching email or ExternalSubject get the flag set; missing
+    /// rows are skipped (no auto-create — wait until they log in once).
+    /// Use this to promote AD-authenticated colleagues without giving them
+    /// an AD group.
+    /// </summary>
+    public string[] PromoteToSystemAdmin { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>
@@ -50,6 +60,11 @@ public static class Bootstrapper
         var opts = sp.GetRequiredService<IOptions<BootstrapOptions>>().Value;
         var db = sp.GetRequiredService<AppDbContext>();
         var hasher = sp.GetRequiredService<IPasswordHasher>();
+
+        // Promote-by-config runs UNCONDITIONALLY so an operator can flag an
+        // AD-authenticated colleague without owning a break-glass account.
+        // Idempotent — flips no rows that already have the flag.
+        await PromoteAsync(db, log, opts.PromoteToSystemAdmin, ct);
 
         // ---- Path 1: explicit Bootstrap config ----
         if (!string.IsNullOrWhiteSpace(opts.AdminUsername))
@@ -194,6 +209,51 @@ public static class Bootstrapper
                 "Bootstrap: SEEDED admin user '{Username}'. Rotate this credential immediately.",
                 username);
         }
+    }
+
+    private static async Task PromoteAsync(
+        AppDbContext db, ILogger log, string[] identifiers, CancellationToken ct)
+    {
+        if (identifiers is null || identifiers.Length == 0) return;
+
+        // Match against EITHER Email or ExternalSubject (username) so admins
+        // can configure the value they remember — typically the email.
+        var needles = identifiers
+            .Where(i => !string.IsNullOrWhiteSpace(i))
+            .Select(i => i.Trim().ToLowerInvariant())
+            .ToHashSet();
+        if (needles.Count == 0) return;
+
+        var rows = await db.Users
+            .Where(u => needles.Contains(u.Email.ToLower())
+                     || needles.Contains(u.ExternalSubject.ToLower()))
+            .ToListAsync(ct);
+
+        var flipped = 0;
+        foreach (var row in rows)
+        {
+            if (!row.IsSystemAdmin)
+            {
+                row.IsSystemAdmin = true;
+                flipped++;
+            }
+        }
+        if (flipped > 0) await db.SaveChangesAsync(ct);
+
+        var unmatched = needles
+            .Where(n => !rows.Any(r =>
+                string.Equals(r.Email, n, StringComparison.OrdinalIgnoreCase)
+             || string.Equals(r.ExternalSubject, n, StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
+
+        log.LogInformation(
+            "Bootstrap.PromoteToSystemAdmin: {Flipped} flipped, {Already} already admin, {Unmatched} unmatched (will retry next boot)",
+            flipped, rows.Count - flipped, unmatched.Length);
+
+        if (unmatched.Length > 0)
+            log.LogInformation(
+                "Bootstrap.PromoteToSystemAdmin: unmatched={Unmatched} — these have no Users row yet (user has never logged in).",
+                string.Join(", ", unmatched));
     }
 
     /// <summary>Strong but copy-pasteable: 16 chars from URL-safe alphabet.</summary>
