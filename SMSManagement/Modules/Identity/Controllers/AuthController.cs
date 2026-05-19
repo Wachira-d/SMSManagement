@@ -160,10 +160,12 @@ public sealed class AuthController : ControllerBase
         var user = HttpContext.User;
         return Ok(new
         {
-            username = user.FindFirstValue(ClaimTypes.NameIdentifier)
-                       ?? user.FindFirstValue("sub"),
-            name = user.FindFirstValue(ClaimTypes.Name),
-            email = user.FindFirstValue(ClaimTypes.Email),
+            username = user.FindFirstValue("sub")
+                       ?? user.FindFirstValue(ClaimTypes.NameIdentifier),
+            name = user.FindFirstValue("name")
+                   ?? user.FindFirstValue(ClaimTypes.Name),
+            email = user.FindFirstValue("email")
+                    ?? user.FindFirstValue(ClaimTypes.Email),
             groups = user.FindAll("group").Select(c => c.Value).ToArray(),
             permissions = user.FindAll("perm").Select(c => c.Value).ToArray(),
             roles = user.FindAll("role").Select(c => c.Value).ToArray(),

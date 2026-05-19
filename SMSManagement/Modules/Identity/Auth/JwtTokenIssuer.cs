@@ -65,13 +65,17 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
         var appUser = await ResolveOrCreateAppUserAsync(user, ct);
         var groups = ParseGroups(user.GroupsJson);
 
+        // Use short JWT names ("sub"/"email"/"name") rather than the long
+        // ClaimTypes.* URIs. The JwtBearer handler is configured with
+        // MapInboundClaims=false (see Program.cs), so what we put in here is
+        // what readers will see — no surprise URI remapping.
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, user.Username),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
             new("app_user_id", appUser.Id.ToString()),
-            new(ClaimTypes.Email, user.Email ?? string.Empty),
-            new(ClaimTypes.Name,  user.DisplayName ?? user.Username),
+            new("email", user.Email ?? string.Empty),
+            new("name",  user.DisplayName ?? user.Username),
         };
 
         foreach (var group in groups)

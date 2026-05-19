@@ -84,6 +84,12 @@ builder.Services
         o.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
         o.Audience = audience;
 
+        // Keep JWT claim names as-issued ("role", "group", "perm") instead of
+        // letting the handler remap them to long ClaimTypes.* URIs. We issue
+        // and check by short names everywhere; remapping breaks
+        // User.HasClaim("role", "system_admin") and similar checks.
+        o.MapInboundClaims = false;
+
         if (!string.IsNullOrWhiteSpace(authority))
             o.Authority = authority;
 
