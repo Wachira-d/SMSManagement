@@ -25,10 +25,72 @@ const SMS_STATUS_COLOR = {
         if (project.members.some(m => m.accessLevel === 'Owner')) {
             document.getElementById('dangerZone').style.display = '';
         }
+        // Don't block — run alongside; failure just hides the card.
+        renderOnboardingChecklist().catch(() => {});
     } catch (e) {
         toast('Failed to load project: ' + e.message, 'danger');
     }
 })();
+
+// Surface the prerequisites the project still needs before ingestion will
+// actually produce messages. Each row is a quick-jump to the relevant tab.
+// When every step is green the whole card hides itself.
+async function renderOnboardingChecklist() {
+    const checks = await Promise.allSettled([
+        api.get(`${api_proj}/column-mappings`),
+        api.get(`${api_proj}/workflows`),
+        api.get(`${api_proj}/ingestion-sources`),
+        api.get(`${api_proj}/sms-providers`)
+    ]);
+    const [mappings, workflows, sources, smsProviders] = checks.map(r =>
+        r.status === 'fulfilled' ? r.value : []);
+
+    const hasMapping  = Array.isArray(mappings) && mappings.length > 0;
+    const hasPhone    = hasMapping && mappings.some(m => m.canonicalField === 'phone');
+    const hasActiveWf = Array.isArray(workflows) && workflows.some(w => w.active);
+    const hasSource   = Array.isArray(sources) && sources.length > 0;
+    const hasProvider = Array.isArray(smsProviders) && smsProviders.some(p => p.hasOverride);
+
+    const items = [
+        { ok: hasMapping,  label: 'Map columns from your source file',
+          hint: 'Pick which columns are phone/name/url/... in the Mappings tab.',
+          tab: '#tab-mappings' },
+        { ok: hasPhone,    label: 'At least one mapping targets <code>phone</code>',
+          hint: 'Without phone, no SMS can be dispatched.', tab: '#tab-mappings' },
+        { ok: hasActiveWf, label: 'Have an active workflow definition',
+          hint: 'Use the Quick-start template — pick a scenario and fill 3 fields.',
+          tab: '#tab-workflows' },
+        { ok: hasSource,   label: 'Configure at least one source (SFTP / manual / etc.)',
+          hint: 'Optional if you only ever upload manually; recommended otherwise.',
+          tab: '#tab-sources', soft: true },
+        { ok: hasProvider, label: 'Per-project SMS provider credentials (optional)',
+          hint: 'Falls back to the platform-wide defaults when not set.',
+          tab: '#tab-sms', soft: true }
+    ];
+
+    const missingHard = items.filter(i => !i.ok && !i.soft);
+    const missingSoft = items.filter(i => !i.ok && i.soft);
+    if (missingHard.length === 0 && missingSoft.length === 0) {
+        // Everything green — keep card hidden.
+        return;
+    }
+
+    const list = document.getElementById('onboardingList');
+    list.innerHTML = items.map(i => {
+        const icon = i.ok
+            ? '<i class="bi bi-check-circle-fill text-success"></i>'
+            : (i.soft ? '<i class="bi bi-dash-circle text-muted"></i>'
+                      : '<i class="bi bi-circle text-warning"></i>');
+        const click = i.ok ? '' :
+            `onclick="bootstrap.Tab.getOrCreateInstance(document.querySelector('a[href=\\'${i.tab}\\']')).show();return false;"`;
+        return `<li class="py-1">
+            ${icon}
+            <a href="#" ${click} class="text-decoration-none ms-1">${i.label}</a>
+            ${i.ok ? '' : `<span class="text-muted small ms-2">— ${i.hint}</span>`}
+        </li>`;
+    }).join('');
+    document.getElementById('onboardingChecklist').style.display = '';
+}
 
 // Lazy tab loaders
 document.querySelectorAll('[data-bs-toggle="tab"]').forEach(el => {
@@ -222,7 +284,7 @@ async function loadMembers() {
         const p = await api.get(api_proj);
         const body = document.getElementById('membersBody');
         if (!p.members.length) {
-            body.innerHTML = '<tr><td colspan="5" class="text-muted">No members.</td></tr>';
+            body.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-4"><i class="bi bi-people fs-3 d-block"></i>Just you so far. Add teammates by email below to share access.</td></tr>';
             return;
         }
         body.innerHTML = p.members.map(m => `
@@ -428,7 +490,7 @@ async function loadMappings() {
         const rows = await api.get(`${api_proj}/column-mappings`);
         const body = document.getElementById('mapBody');
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="4" class="text-muted">No mappings yet.</td></tr>';
+            body.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-4"><i class="bi bi-arrow-left-right fs-3 d-block"></i>No mappings yet. <strong>Drop a sample file above</strong> to auto-detect headers, or add one manually.</td></tr>';
             return;
         }
         // Group by canonical so the operator sees "first_name + last_name → name"
@@ -635,7 +697,7 @@ async function loadSources() {
         const sel  = document.getElementById('upSrcSelect');
         sel.innerHTML = '<option value="">— pick from your bindings —</option>';
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="6" class="text-muted">No source bindings yet. Click "+ New".</td></tr>';
+            body.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-4"><i class="bi bi-cloud-download fs-3 d-block"></i>No automatic sources. Click <strong>+ New</strong> to add SFTP / SharePoint / REST, or skip this tab if you only upload manually.</td></tr>';
             return;
         }
         body.innerHTML = rows.map(s => `
@@ -1003,7 +1065,7 @@ async function loadWorkflows() {
         const rows = await api.get(`${api_proj}/workflows`);
         const body = document.getElementById('wfBody');
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="4" class="text-muted">No workflows yet.</td></tr>';
+            body.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-4"><i class="bi bi-diagram-3 fs-3 d-block"></i>No workflows yet. <strong>Try the Quick-start panel</strong> on the right &mdash; pick a scenario, fill three fields, done.</td></tr>';
         } else {
             body.innerHTML = rows.map(w => `
                 <tr>
@@ -1581,7 +1643,7 @@ async function loadShortlinks() {
         const rows = await api.get(`${api_proj}/shortlinks`);
         const body = document.getElementById('slBody');
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="5" class="text-muted">No shortlinks yet.</td></tr>';
+            body.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-4"><i class="bi bi-link-45deg fs-3 d-block"></i>No shortlinks yet. They&rsquo;re created automatically when a workflow SMS template contains a long URL (or via the form on the right).</td></tr>';
             return;
         }
         body.innerHTML = rows.map(s => `
