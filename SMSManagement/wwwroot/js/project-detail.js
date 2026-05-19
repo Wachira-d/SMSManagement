@@ -391,7 +391,7 @@ function showSrcEditor(reset) {
     if (reset) {
         document.getElementById('srcId').value = '';
         document.getElementById('srcType').value = 'SFTP';
-        document.getElementById('srcCron').value = '*/5 * * * *';
+        if (window.scheduleFromCron) window.scheduleFromCron('*/5 * * * *');
         document.getElementById('srcArchive').value = '';
         document.getElementById('srcRejected').value = '';
         document.getElementById('srcAction').value = '0';
@@ -410,11 +410,130 @@ document.getElementById('btnSrcCancel').addEventListener('click', () => {
     document.getElementById('srcEditor').style.display = 'none';
 });
 
+// ============ POLLING SCHEDULE PICKER ============
+// Bridges the friendly mode-based UI with the cron string the backend stores.
+// scheduleToCron() reads whichever sub-form is active and produces the cron.
+// scheduleFromCron() tries to recognise a preset shape and switches mode to
+// match; anything we can't recognise falls back to "advanced" and shows the
+// raw expression untouched.
+(function initSchedulePicker() {
+    const modeEl    = document.getElementById('srcSchedMode');
+    const minN      = document.getElementById('srcSchedMinN');
+    const hourN     = document.getElementById('srcSchedHourN');
+    const dailyT    = document.getElementById('srcSchedDailyTime');
+    const dow       = document.getElementById('srcSchedDow');
+    const weeklyT   = document.getElementById('srcSchedWeeklyTime');
+    const advCron   = document.getElementById('srcSchedCron');
+    const preview   = document.getElementById('srcCronPreview');
+    if (!modeEl) return;
+
+    const panes = {
+        minutes:  document.getElementById('srcSchedMinutes'),
+        hours:    document.getElementById('srcSchedHours'),
+        daily:    document.getElementById('srcSchedDaily'),
+        weekly:   document.getElementById('srcSchedWeekly'),
+        advanced: document.getElementById('srcSchedAdvanced')
+    };
+
+    function showMode(m) {
+        for (const [k, el] of Object.entries(panes))
+            el.style.display = (k === m) ? '' : 'none';
+        modeEl.value = m;
+    }
+
+    window.scheduleToCron = function () {
+        const mode = modeEl.value;
+        switch (mode) {
+            case 'minutes': {
+                const n = Math.max(1, Math.min(59, Number(minN.value) || 5));
+                return `*/${n} * * * *`;
+            }
+            case 'hours': {
+                const n = Math.max(1, Math.min(23, Number(hourN.value) || 1));
+                return n === 1 ? `0 * * * *` : `0 */${n} * * *`;
+            }
+            case 'daily': {
+                const [h, m] = (dailyT.value || '09:00').split(':').map(Number);
+                return `${m} ${h} * * *`;
+            }
+            case 'weekly': {
+                const [h, m] = (weeklyT.value || '09:00').split(':').map(Number);
+                return `${m} ${h} * * ${dow.value}`;
+            }
+            default:
+                return (advCron.value || '*/5 * * * *').trim();
+        }
+    };
+
+    // Try to recognise the cron as one of our presets so editing an existing
+    // source opens in the friendly mode it was created with. Anything outside
+    // the preset shapes falls back to Advanced — the operator sees their
+    // expression untouched.
+    window.scheduleFromCron = function (cron) {
+        cron = (cron || '*/5 * * * *').trim();
+        const parts = cron.split(/\s+/);
+        if (parts.length === 5) {
+            const [m, h, dom, mon, d] = parts;
+            const everyN = /^\*\/(\d+)$/;
+            // every N minutes:  */N * * * *
+            let mm;
+            if ((mm = m.match(everyN)) && h === '*' && dom === '*' && mon === '*' && d === '*') {
+                showMode('minutes');
+                minN.value = mm[1];
+                preview.textContent = cron;
+                return;
+            }
+            // every hour:       0 * * * *
+            if (m === '0' && h === '*' && dom === '*' && mon === '*' && d === '*') {
+                showMode('hours');
+                hourN.value = 1;
+                preview.textContent = cron;
+                return;
+            }
+            // every N hours:    0 */N * * *
+            if (m === '0' && (mm = h.match(everyN)) && dom === '*' && mon === '*' && d === '*') {
+                showMode('hours');
+                hourN.value = mm[1];
+                preview.textContent = cron;
+                return;
+            }
+            // daily at HH:MM:   M H * * *
+            if (/^\d+$/.test(m) && /^\d+$/.test(h) && dom === '*' && mon === '*' && d === '*') {
+                showMode('daily');
+                dailyT.value = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+                preview.textContent = cron;
+                return;
+            }
+            // weekly:           M H * * D
+            if (/^\d+$/.test(m) && /^\d+$/.test(h) && dom === '*' && mon === '*' && /^[0-6]$/.test(d)) {
+                showMode('weekly');
+                weeklyT.value = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+                dow.value = d;
+                preview.textContent = cron;
+                return;
+            }
+        }
+        // Fallback — show raw cron in advanced mode.
+        showMode('advanced');
+        advCron.value = cron;
+        preview.textContent = cron;
+    };
+
+    function refreshPreview() {
+        preview.textContent = window.scheduleToCron();
+    }
+    modeEl.addEventListener('change', () => { showMode(modeEl.value); refreshPreview(); });
+    [minN, hourN, dailyT, dow, weeklyT, advCron]
+        .forEach(el => el.addEventListener('input', refreshPreview));
+    // Initial state.
+    showMode('minutes'); refreshPreview();
+})();
+
 window.editSrc = function (s) {
     showSrcEditor(false);
     document.getElementById('srcId').value = s.id;
     document.getElementById('srcType').value = s.sourceType;
-    document.getElementById('srcCron').value = s.pollingSchedule || '*/5 * * * *';
+    window.scheduleFromCron(s.pollingSchedule || '*/5 * * * *');
     document.getElementById('srcArchive').value = s.archiveDirectory || '';
     document.getElementById('srcRejected').value = s.rejectedDirectory || '';
     document.getElementById('srcAction').value = String(s.action);
@@ -443,7 +562,7 @@ document.getElementById('formSrc').addEventListener('submit', async (ev) => {
             action:            parseInt(document.getElementById('srcAction').value, 10),
             duplicatePolicy:   parseInt(document.getElementById('srcDup').value, 10),
             enabled:           document.getElementById('srcEnabled').checked,
-            pollingSchedule:   document.getElementById('srcCron').value || '*/5 * * * *'
+            pollingSchedule:   window.scheduleToCron()
         };
         await api.post(`${api_proj}/ingestion-sources`, body);
         toast('Saved.');

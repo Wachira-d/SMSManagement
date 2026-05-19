@@ -275,6 +275,29 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
 
     <!-- ============ SOURCES ============ -->
     <div class="tab-pane fade" id="tab-sources">
+        <!-- How sources feed workflows. Keep this short and visual — operators read
+             it once. The detail link points to the same idea expanded in the
+             popover so they can re-find it without scrolling. -->
+        <div class="alert alert-info d-flex align-items-start gap-2 small mb-3">
+            <i class="bi bi-diagram-3 fs-5"></i>
+            <div>
+                <strong>How sources tie into workflows:</strong>
+                a source binding (SFTP / SharePoint / REST / Cloud / Manual) polls on
+                the schedule you set below. When a new file arrives, every row is
+                handed to the project's <strong>active workflow</strong> — one
+                <em>WorkflowInstance</em> per row. The workflow then drives the
+                messaging (send SMS → wait for click / reply → reminder → escalate)
+                using the column mappings to fill the SMS template.
+                <br>
+                <span class="text-muted">
+                    Required: at least one column mapping in
+                    <a href="#tab-mappings" data-bs-toggle="tab">Mappings</a>
+                    and one active workflow in
+                    <a href="#tab-workflows" data-bs-toggle="tab">Workflows</a>.
+                    Without those, ingested rows are dropped to the rejected folder.
+                </span>
+            </div>
+        </div>
         <div class="row g-3">
             <div class="col-md-6">
                 <div class="card">
@@ -305,9 +328,67 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
                                         <option value="REST">REST</option>
                                         <option value="CLOUD">CLOUD</option>
                                     </select></div>
-                                <div class="col-6"><label class="form-label small">Polling cron</label>
-                                    <input id="srcCron" class="form-control form-control-sm"
-                                           value="*/5 * * * *" /></div>
+                                <div class="col-6">
+                                    <label class="form-label small">
+                                        Polling schedule
+                                        <i class="bi bi-info-circle text-muted" tabindex="0"
+                                           data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                           data-bs-placement="right"
+                                           title="Polling schedule"
+                                           data-bs-content="How often the system checks for new files. Pick a preset — the cron expression underneath updates automatically. Switch to 'Advanced (cron)' if you need something the presets can't express.">
+                                        </i>
+                                    </label>
+                                    <select id="srcSchedMode" class="form-select form-select-sm mb-1">
+                                        <option value="minutes">Every N minutes</option>
+                                        <option value="hours">Every N hours</option>
+                                        <option value="daily">Daily at…</option>
+                                        <option value="weekly">Weekly on…</option>
+                                        <option value="advanced">Advanced (cron)</option>
+                                    </select>
+                                    <!-- Each sub-form is shown/hidden by mode. JS keeps the
+                                         hidden cron input in sync with whichever is active. -->
+                                    <div id="srcSchedMinutes" class="d-flex gap-1 align-items-center">
+                                        <span class="small text-muted">every</span>
+                                        <input id="srcSchedMinN" type="number" min="1" max="59"
+                                               value="5" class="form-control form-control-sm" style="width:70px" />
+                                        <span class="small text-muted">minutes</span>
+                                    </div>
+                                    <div id="srcSchedHours" class="d-flex gap-1 align-items-center" style="display:none">
+                                        <span class="small text-muted">every</span>
+                                        <input id="srcSchedHourN" type="number" min="1" max="23"
+                                               value="1" class="form-control form-control-sm" style="width:70px" />
+                                        <span class="small text-muted">hour(s) on the hour</span>
+                                    </div>
+                                    <div id="srcSchedDaily" class="d-flex gap-1 align-items-center" style="display:none">
+                                        <span class="small text-muted">at</span>
+                                        <input id="srcSchedDailyTime" type="time" value="09:00"
+                                               class="form-control form-control-sm" style="width:120px" />
+                                    </div>
+                                    <div id="srcSchedWeekly" style="display:none">
+                                        <div class="d-flex gap-1 align-items-center">
+                                            <select id="srcSchedDow" class="form-select form-select-sm" style="width:auto">
+                                                <option value="1">Monday</option>
+                                                <option value="2">Tuesday</option>
+                                                <option value="3">Wednesday</option>
+                                                <option value="4">Thursday</option>
+                                                <option value="5">Friday</option>
+                                                <option value="6">Saturday</option>
+                                                <option value="0">Sunday</option>
+                                            </select>
+                                            <span class="small text-muted">at</span>
+                                            <input id="srcSchedWeeklyTime" type="time" value="09:00"
+                                                   class="form-control form-control-sm" style="width:120px" />
+                                        </div>
+                                    </div>
+                                    <div id="srcSchedAdvanced" style="display:none">
+                                        <input id="srcSchedCron" class="form-control form-control-sm font-monospace"
+                                               placeholder="*/5 * * * *" value="*/5 * * * *" />
+                                        <div class="form-text">Five fields: minute, hour, day-of-month, month, day-of-week.</div>
+                                    </div>
+                                    <div class="form-text mt-1">
+                                        Cron: <code id="srcCronPreview" class="small">*/5 * * * *</code>
+                                    </div>
+                                </div>
                                 <div class="col-12"><label class="form-label small">Archive directory</label>
                                     <input id="srcArchive" class="form-control form-control-sm"
                                            placeholder="/data/honda/archive" /></div>
