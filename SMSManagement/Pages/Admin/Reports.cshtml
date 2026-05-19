@@ -1,8 +1,9 @@
 @page
 @model SMSManagement.Pages.Admin.ReportsModel
-@{ ViewData["Title"] = "Global Reports"; }
+@inject SMSManagement.Modules.Core.Localization.Localizer Loc
+@{ ViewData["Title"] = Loc.Get("admin.reports.title"); }
 
-<h1 class="h3 mb-3">Global reports</h1>
+<h1 class="h3 mb-3">@Loc.Get("admin.reports.title")</h1>
 <p class="text-muted small">
     Cross-project aggregates — requires <code>audit.read</code> permission.
     Use these to compare provider quality across all your campaigns and to
@@ -14,12 +15,12 @@
         <!-- Date-range presets backed by site.js helper. The two date inputs
              below are still the source of truth; the buttons just set them. -->
         <div class="btn-group btn-group-sm" id="rptRangeGroup" role="group" aria-label="Date range preset">
-            <button type="button" class="btn btn-outline-secondary" data-range="today">Today</button>
-            <button type="button" class="btn btn-outline-secondary" data-range="yesterday">Yesterday</button>
-            <button type="button" class="btn btn-outline-secondary active" data-range="last7">Last 7 days</button>
-            <button type="button" class="btn btn-outline-secondary" data-range="last30">Last 30 days</button>
-            <button type="button" class="btn btn-outline-secondary" data-range="mtd">MTD</button>
-            <button type="button" class="btn btn-outline-secondary" data-range="qtd">QTD</button>
+            <button type="button" class="btn btn-outline-secondary" data-range="today">@Loc.Get("range.today")</button>
+            <button type="button" class="btn btn-outline-secondary" data-range="yesterday">@Loc.Get("range.yesterday")</button>
+            <button type="button" class="btn btn-outline-secondary active" data-range="last7">@Loc.Get("range.last7")</button>
+            <button type="button" class="btn btn-outline-secondary" data-range="last30">@Loc.Get("range.last30")</button>
+            <button type="button" class="btn btn-outline-secondary" data-range="mtd">@Loc.Get("range.mtd")</button>
+            <button type="button" class="btn btn-outline-secondary" data-range="qtd">@Loc.Get("range.qtd")</button>
         </div>
     </div>
 </div>

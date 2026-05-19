@@ -1,26 +1,27 @@
 @page
 @model SMSManagement.Pages.Admin.UsersModel
-@{ ViewData["Title"] = "User management"; }
+@inject SMSManagement.Modules.Core.Localization.Localizer Loc
+@{ ViewData["Title"] = Loc.Get("admin.users.title"); }
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0">User management</h1>
+    <h1 class="h3 mb-0">@Loc.Get("admin.users.title")</h1>
     <div class="d-flex gap-2">
         <input id="usrSearch" class="form-control form-control-sm" style="width:240px"
-               placeholder="Search email / name / username" aria-label="Search users" />
+               placeholder="@Loc.Get("admin.users.search")" aria-label="@Loc.Get("admin.users.search")" />
         <button id="btnUsrRefresh" class="btn btn-sm btn-outline-secondary"
-                aria-label="Refresh user list">
-            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh
+                aria-label="@Loc.Get("btn.refresh")">
+            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i> @Loc.Get("btn.refresh")
         </button>
     </div>
 </div>
 
 <!-- Bulk action bar — appears when at least one row is checked. -->
 <div id="usrBulkBar" class="alert alert-light border d-none d-flex justify-content-between align-items-center py-2">
-    <span><span id="usrBulkCount">0</span> selected</span>
+    <span><span id="usrBulkCount">0</span> @Loc.Get("admin.users.selected")</span>
     <div class="btn-group btn-group-sm">
-        <button id="btnUsrBulkEnable"  class="btn btn-outline-success">Enable</button>
-        <button id="btnUsrBulkDisable" class="btn btn-outline-danger">Disable</button>
-        <button id="btnUsrBulkUnlock"  class="btn btn-outline-warning">Unlock</button>
+        <button id="btnUsrBulkEnable"  class="btn btn-outline-success">@Loc.Get("admin.users.bulk.enable")</button>
+        <button id="btnUsrBulkDisable" class="btn btn-outline-danger">@Loc.Get("admin.users.bulk.disable")</button>
+        <button id="btnUsrBulkUnlock"  class="btn btn-outline-warning">@Loc.Get("admin.users.bulk.unlock")</button>
     </div>
 </div>
 
@@ -32,11 +33,11 @@
                     <th style="width:32px"><input type="checkbox" id="usrSelectAll"
                            aria-label="Select all visible users" /></th>
                     <th>Email / Username</th>
-                    <th>Display</th>
-                    <th>Status</th>
-                    <th>Cache</th>
-                    <th>Last login</th>
-                    <th class="text-end">Actions</th>
+                    <th>@Loc.Get("admin.users.display")</th>
+                    <th>@Loc.Get("admin.users.status")</th>
+                    <th>@Loc.Get("admin.users.cache")</th>
+                    <th>@Loc.Get("admin.users.lastlogin")</th>
+                    <th class="text-end">@Loc.Get("admin.users.actions")</th>
                 </tr>
             </thead>
             <tbody id="usrBody"><tr><td colspan="7" class="text-muted">Loading…</td></tr></tbody>

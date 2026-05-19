@@ -1,6 +1,7 @@
 @page "/admin/blocked-ips"
 @model SMSManagement.Pages.Admin.BlockedIpsModel
-@{ ViewData["Title"] = "Blocked IPs"; }
+@inject SMSManagement.Modules.Core.Localization.Localizer Loc
+@{ ViewData["Title"] = Loc.Get("admin.blockedips.title"); }
 <style>
     body { font-family: system-ui, sans-serif; margin: 24px; }
     table { border-collapse: collapse; width: 100%; }

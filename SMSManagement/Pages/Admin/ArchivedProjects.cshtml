@@ -1,8 +1,9 @@
 @page
 @model SMSManagement.Pages.Admin.ArchivedProjectsModel
-@{ ViewData["Title"] = "Archived Projects"; }
+@inject SMSManagement.Modules.Core.Localization.Localizer Loc
+@{ ViewData["Title"] = Loc.Get("admin.archived.title"); }
 
-<h1 class="h3 mb-3">Archived projects</h1>
+<h1 class="h3 mb-3">@Loc.Get("admin.archived.title")</h1>
 <p class="text-muted small">
     Projects that have been archived (soft-deleted). Their data + audit history
     is preserved for compliance retention; restoring re-enables the project

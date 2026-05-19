@@ -1,12 +1,13 @@
 @page
 @model SMSManagement.Pages.Admin.SettingsModel
-@{ ViewData["Title"] = "System settings"; }
+@inject SMSManagement.Modules.Core.Localization.Localizer Loc
+@{ ViewData["Title"] = Loc.Get("admin.settings.title"); }
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0">System settings</h1>
+    <h1 class="h3 mb-0">@Loc.Get("admin.settings.title")</h1>
     <span class="small text-muted">
         <i class="bi bi-info-circle"></i>
-        Changes persist to the database but require an app restart to take effect.
+        @Loc.Get("admin.settings.restart_required")
     </span>
 </div>
 

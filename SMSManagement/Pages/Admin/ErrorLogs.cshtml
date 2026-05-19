@@ -1,8 +1,9 @@
 @page
 @model SMSManagement.Pages.Admin.ErrorLogsModel
-@{ ViewData["Title"] = "Error Logs"; }
+@inject SMSManagement.Modules.Core.Localization.Localizer Loc
+@{ ViewData["Title"] = Loc.Get("admin.errorlogs.title"); }
 
-<h1 class="h3 mb-3">Error logs</h1>
+<h1 class="h3 mb-3">@Loc.Get("admin.errorlogs.title")</h1>
 <p class="text-muted small">
     Persistent record of every <code>Error</code> / <code>Fatal</code> Serilog
     event. Useful for triaging without scraping the JSON log files. Requires

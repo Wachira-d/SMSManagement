@@ -90,7 +90,7 @@ window.confirmAction = function (opts) {
               <div class="modal-dialog">
                 <div class="modal-content border-danger">
                   <div class="modal-header bg-danger text-white">
-                    <h5 class="modal-title" id="gcmTitle">Confirm</h5>
+                    <h5 class="modal-title" id="gcmTitle">${t('confirm.title')}</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                   </div>
                   <div class="modal-body">
@@ -98,8 +98,8 @@ window.confirmAction = function (opts) {
                     <div id="gcmExtra" class="mt-3"></div>
                   </div>
                   <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-danger" id="gcmOk">OK</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">${t('confirm.cancel')}</button>
+                    <button type="button" class="btn btn-danger" id="gcmOk">${t('confirm.ok')}</button>
                   </div>
                 </div>
               </div>
@@ -113,9 +113,9 @@ window.confirmAction = function (opts) {
         const extra   = document.getElementById('gcmExtra');
         const ok      = document.getElementById('gcmOk');
 
-        titleEl.textContent = opts.title || 'Confirm';
+        titleEl.textContent = opts.title || t('confirm.title');
         bodyEl.innerHTML    = opts.message || 'Are you sure?';
-        ok.textContent      = opts.okLabel || 'Confirm';
+        ok.textContent      = opts.okLabel || t('confirm.ok');
         ok.className        = 'btn ' + (opts.okClass || 'btn-danger');
         extra.innerHTML     = '';
 
@@ -127,7 +127,7 @@ window.confirmAction = function (opts) {
             const a = 5 + Math.floor(Math.random() * 15);
             const b = 1 + Math.floor(Math.random() * 9);
             extra.innerHTML = `
-                <p class="mb-2"><strong>To confirm, solve:</strong></p>
+                <p class="mb-2"><strong>${t('confirm.solve')}</strong></p>
                 <div class="d-flex align-items-center gap-2">
                     <span class="fw-bold font-monospace fs-5">${a} + ${b}</span>
                     <span>=</span>
