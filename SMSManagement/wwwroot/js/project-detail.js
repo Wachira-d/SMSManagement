@@ -316,20 +316,46 @@ async function loadMappings() {
         const rows = await api.get(`${api_proj}/column-mappings`);
         const body = document.getElementById('mapBody');
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="5" class="text-muted">No mappings yet.</td></tr>';
+            body.innerHTML = '<tr><td colspan="4" class="text-muted">No mappings yet.</td></tr>';
             return;
         }
-        body.innerHTML = rows.map(m => `
-            <tr>
-                <td><code>${esc(m.sourceColumn)}</code></td>
-                <td>→</td>
-                <td><span class="badge bg-info">${esc(m.canonicalField)}</span></td>
-                <td><code class="small">${esc((m.transformChain||[]).join(','))}</code></td>
-                <td>
-                    <button class="btn btn-link btn-sm text-danger p-0"
-                            onclick="deleteMap('${esc(m.id)}')">Delete</button>
-                </td>
-            </tr>`).join('');
+        // Group by canonical so the operator sees "first_name + last_name → name"
+        // rather than two unrelated rows. Within each canonical we sort by joinOrder.
+        const groups = {};
+        for (const m of rows) (groups[m.canonicalField] ||= []).push(m);
+
+        body.innerHTML = Object.entries(groups).map(([canon, entries]) => {
+            entries.sort((a, b) => (a.joinOrder ?? 0) - (b.joinOrder ?? 0)
+                                || a.sourceColumn.localeCompare(b.sourceColumn));
+            // Render each source-column as a chip with its join-separator hint.
+            // The chip itself is clickable → loads the row into the edit form.
+            const sourcePart = entries.map((m, i) => {
+                const sep = i === 0
+                    ? ''
+                    : `<small class="text-muted ms-1">+ "${esc(m.joinSeparator ?? ' ')}" +</small> `;
+                const transforms = (m.transformChain || []).join(', ');
+                return `${sep}<a href="#" class="text-decoration-none"
+                          onclick="editMap(${esc(JSON.stringify(m))});return false"
+                          title="Edit · join order ${m.joinOrder ?? 0}${transforms ? ' · ' + transforms : ''}">
+                          <code class="badge bg-light text-dark border">${esc(m.sourceColumn)}</code>
+                        </a>`;
+            }).join(' ');
+
+            const transformsCombined = [...new Set(entries.flatMap(m => m.transformChain || []))].join(', ');
+            const deleteBtns = entries.map(m =>
+                `<button class="btn btn-link btn-sm text-danger p-0 me-1"
+                         onclick="deleteMap('${esc(m.id)}')"
+                         title="Delete ${esc(m.sourceColumn)}">✕ ${esc(m.sourceColumn)}</button>`
+            ).join('');
+
+            return `<tr>
+                <td><span class="badge bg-info">${esc(canon)}</span>
+                    <code class="small text-muted ms-1">{{${esc(canon)}}}</code></td>
+                <td>${sourcePart}</td>
+                <td><code class="small">${esc(transformsCombined)}</code></td>
+                <td class="small">${deleteBtns}</td>
+            </tr>`;
+        }).join('');
     } catch (e) { toast(e.message, 'danger'); }
 }
 window.deleteMap = async function (id) {
@@ -340,15 +366,30 @@ window.deleteMap = async function (id) {
         loadMappings();
     } catch (e) { toast(e.message, 'danger'); }
 };
+window.editMap = function (m) {
+    // Pre-fill the form so the operator can tweak transforms or join settings.
+    document.getElementById('mapSource').value    = m.sourceColumn;
+    document.getElementById('mapField').value     = m.canonicalField;
+    document.getElementById('mapChain').value     = (m.transformChain || []).join(', ');
+    document.getElementById('mapJoinOrder').value = m.joinOrder ?? 0;
+    document.getElementById('mapJoinSep').value   = m.joinSeparator ?? '';
+    document.getElementById('mapSource').focus();
+};
 document.getElementById('formMap').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     try {
         const chain = document.getElementById('mapChain').value
             .split(',').map(s => s.trim()).filter(Boolean);
+        const sepRaw = document.getElementById('mapJoinSep').value;
         await api.post(`${api_proj}/column-mappings`, {
             sourceColumn:   document.getElementById('mapSource').value.trim(),
             canonicalField: document.getElementById('mapField').value,
-            transformChain: chain
+            transformChain: chain,
+            joinOrder:      parseInt(document.getElementById('mapJoinOrder').value, 10) || 0,
+            // Empty input → null → defaults to " " server-side. Operators can
+            // still set an explicit empty separator by typing a single space then deleting it
+            // and re-saving — but the common case is "I forgot to fill it in".
+            joinSeparator:  sepRaw.length > 0 ? sepRaw : null
         });
         toast('Saved.');
         loadMappings();

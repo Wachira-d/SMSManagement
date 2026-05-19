@@ -25,16 +25,38 @@ public sealed partial class ColumnMapper
         var output = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var errors = new List<string>();
 
-        foreach (var mapping in _mappings)
+        // Group by canonical field so multiple source columns can compose one
+        // field (e.g. first_name + last_name → name). Within a group we sort
+        // by JoinOrder ascending; the first entry's JoinSeparator is ignored.
+        var groups = _mappings
+            .GroupBy(m => m.CanonicalField, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new
+            {
+                Canonical = g.Key,
+                Entries = g.OrderBy(m => m.JoinOrder).ThenBy(m => m.SourceColumn).ToList()
+            });
+
+        foreach (var grp in groups)
         {
-            if (!rawRow.TryGetValue(mapping.SourceColumn, out var value)) continue;
+            var sb = new System.Text.StringBuilder();
+            var emittedAny = false;
 
-            var chain = JsonSerializer.Deserialize<string[]>(mapping.TransformChainJson)
-                        ?? Array.Empty<string>();
-            foreach (var transform in chain)
-                value = ApplyTransform(transform, value);
+            foreach (var mapping in grp.Entries)
+            {
+                if (!rawRow.TryGetValue(mapping.SourceColumn, out var value)) continue;
 
-            output[mapping.CanonicalField] = value;
+                var chain = JsonSerializer.Deserialize<string[]>(mapping.TransformChainJson)
+                            ?? Array.Empty<string>();
+                foreach (var transform in chain)
+                    value = ApplyTransform(transform, value);
+
+                if (emittedAny)
+                    sb.Append(mapping.JoinSeparator ?? " ");
+                sb.Append(value);
+                emittedAny = true;
+            }
+
+            if (emittedAny) output[grp.Canonical] = sb.ToString();
         }
 
         // Validation

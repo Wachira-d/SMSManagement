@@ -44,7 +44,9 @@ public sealed class ColumnMappingsController : ControllerBase
     public sealed record UpsertRequest(
         string SourceColumn,
         string CanonicalField,
-        string[]? TransformChain);
+        string[]? TransformChain,
+        int? JoinOrder = null,
+        string? JoinSeparator = null);
 
     [HttpGet]
     public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
@@ -52,10 +54,10 @@ public sealed class ColumnMappingsController : ControllerBase
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
         var rows = await _db.ColumnMappings
             .Where(m => m.ProjectId == projectId)
-            .OrderBy(m => m.SourceColumn)
+            .OrderBy(m => m.CanonicalField).ThenBy(m => m.JoinOrder).ThenBy(m => m.SourceColumn)
             .Select(m => new
             {
-                m.Id, m.SourceColumn, m.CanonicalField,
+                m.Id, m.SourceColumn, m.CanonicalField, m.JoinOrder, m.JoinSeparator,
                 TransformChain = JsonSerializer.Deserialize<string[]>(m.TransformChainJson, (JsonSerializerOptions?)null)
             })
             .ToListAsync(ct);
@@ -92,9 +94,14 @@ public sealed class ColumnMappingsController : ControllerBase
         }
         existing.CanonicalField = req.CanonicalField.ToLowerInvariant();
         existing.TransformChainJson = JsonSerializer.Serialize(chain);
+        existing.JoinOrder = req.JoinOrder ?? 0;
+        // Empty string is a legitimate "no separator" (e.g. concatenate area+number);
+        // null means "use the default single space".
+        existing.JoinSeparator = req.JoinSeparator;
 
         await _db.SaveChangesAsync(ct);
-        return Ok(new { existing.Id, existing.SourceColumn, existing.CanonicalField });
+        return Ok(new { existing.Id, existing.SourceColumn, existing.CanonicalField,
+                        existing.JoinOrder, existing.JoinSeparator });
     }
 
     /// <summary>

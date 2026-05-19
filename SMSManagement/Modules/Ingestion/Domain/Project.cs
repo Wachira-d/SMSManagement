@@ -79,10 +79,24 @@ public sealed class ColumnMapping
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ProjectId { get; set; }
     public string SourceColumn { get; set; } = string.Empty;
-    /// <summary>phone | message | url | name | custom</summary>
+    /// <summary>phone | message | url | name | email | custom</summary>
     public string CanonicalField { get; set; } = string.Empty;
     /// <summary>JSON array of transforms: e.g. ["trim","upper","prefix_66"].</summary>
     public string TransformChainJson { get; set; } = "[]";
+
+    /// <summary>
+    /// Combine N source columns into one canonical field.
+    /// When more than one mapping targets the same CanonicalField for a
+    /// project, the mapper sorts by JoinOrder ascending and concatenates
+    /// the (transformed) values, placing <see cref="JoinSeparator"/>
+    /// between adjacent entries. The first entry's separator is ignored.
+    /// Example: first_name + last_name → "name" with separator " ".
+    /// </summary>
+    public int JoinOrder { get; set; }
+
+    /// <summary>Separator inserted BEFORE this value when joining
+    /// (ignored on the first entry). Defaults to a single space when null.</summary>
+    public string? JoinSeparator { get; set; }
 }
 
 public sealed class IngestionBatch

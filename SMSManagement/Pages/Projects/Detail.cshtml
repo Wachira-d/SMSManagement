@@ -280,14 +280,71 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
             </div>
         </div>
 
+        <!-- Cheat-sheet for canonical fields. Operators hit this once and remember it;
+             the labels in the dropdown match the {{placeholders}} they'd use in SMS bodies. -->
+        <div class="card mb-3">
+            <div class="card-header">
+                <i class="bi bi-key"></i> Canonical fields cheat-sheet
+            </div>
+            <div class="card-body p-2">
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0 align-middle">
+                        <thead class="table-light"><tr>
+                            <th>Field</th><th>Placeholder</th><th>Used by</th><th>Notes</th>
+                        </tr></thead>
+                        <tbody>
+                            <tr>
+                                <td><code>phone</code> <span class="badge bg-danger">required</span></td>
+                                <td><code>{{phone}}</code></td>
+                                <td>SMS dispatcher (recipient)</td>
+                                <td>8–15 digits. Combine country-code + number with <em>Join order</em> or use the <code>prefix_66</code> transform.</td>
+                            </tr>
+                            <tr>
+                                <td><code>name</code></td>
+                                <td><code>{{name}}</code></td>
+                                <td>SMS template body, greeting</td>
+                                <td>Combine <code>first_name</code> + <code>last_name</code> by mapping both to <code>name</code> with different Join orders.</td>
+                            </tr>
+                            <tr>
+                                <td><code>url</code></td>
+                                <td><code>{{url}}</code></td>
+                                <td>Shortlink module (auto-shortens)</td>
+                                <td>Replaced with <code>https://&lt;your-host&gt;/&lt;slug&gt;</code> at send time. Click events fire <code>shortlink.clicked</code> back to the workflow.</td>
+                            </tr>
+                            <tr>
+                                <td><code>message</code></td>
+                                <td><code>{{message}}</code></td>
+                                <td>SMS body when a per-row override is needed</td>
+                                <td>Lets a CSV column carry the full body instead of using the workflow template. Optional.</td>
+                            </tr>
+                            <tr>
+                                <td><code>email</code></td>
+                                <td><code>{{email}}</code></td>
+                                <td>Email notifications (success / failure)</td>
+                                <td>Used by the per-project notification recipients list, not the SMS dispatcher.</td>
+                            </tr>
+                            <tr>
+                                <td><code>custom</code></td>
+                                <td><code>{{custom}}</code></td>
+                                <td>Anywhere a free-form column is needed</td>
+                                <td>Catch-all for one extra field. For multiple extras, request the canonical list be expanded.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
         <div class="row g-3">
             <div class="col-md-7">
                 <div class="card">
-                    <div class="card-header">Column mappings</div>
+                    <div class="card-header">Column mappings (grouped by canonical)</div>
                     <div class="table-responsive">
-                        <table class="table table-sm mb-0">
-                            <thead><tr><th>Source column</th><th>→</th><th>Canonical</th><th>Transforms</th><th></th></tr></thead>
-                            <tbody id="mapBody"><tr><td colspan="5" class="text-muted">Loading…</td></tr></tbody>
+                        <table class="table table-sm mb-0 align-middle">
+                            <thead><tr>
+                                <th>Canonical</th><th>Source columns (in join order)</th><th>Transforms</th><th></th>
+                            </tr></thead>
+                            <tbody id="mapBody"><tr><td colspan="4" class="text-muted">Loading…</td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -299,14 +356,64 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
                         <form id="formMap">
                             <div class="mb-2"><label class="form-label small">Source column header</label>
                                 <input id="mapSource" class="form-control" required /></div>
-                            <div class="mb-2"><label class="form-label small">Canonical field</label>
+                            <div class="mb-2">
+                                <label class="form-label small">
+                                    Canonical field
+                                    <i class="bi bi-info-circle text-muted" tabindex="0"
+                                       data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                       data-bs-placement="right" data-bs-html="true"
+                                       title="Canonical fields"
+                                       data-bs-content="<code>phone</code> — SMS recipient (required, 8-15 digits)<br>
+<code>name</code> — greeting placeholder <code>{{name}}</code><br>
+<code>url</code> — auto-shortened, click triggers <code>shortlink.clicked</code><br>
+<code>message</code> — full-body override per row<br>
+<code>email</code> — used by notification emails<br>
+<code>custom</code> — single free-form field">
+                                    </i>
+                                </label>
                                 <select id="mapField" class="form-select">
-                                    <option>phone</option><option>message</option><option>url</option>
-                                    <option>name</option><option>email</option><option>custom</option>
-                                </select></div>
-                            <div class="mb-2"><label class="form-label small">Transforms (in order)</label>
+                                    <option value="phone">phone (recipient, required)</option>
+                                    <option value="name">name (greeting)</option>
+                                    <option value="url">url (auto-shortened)</option>
+                                    <option value="message">message (body override)</option>
+                                    <option value="email">email (notifications)</option>
+                                    <option value="custom">custom (extra column)</option>
+                                </select>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label small">
+                                    Transforms (in order)
+                                    <i class="bi bi-info-circle text-muted" tabindex="0"
+                                       data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                       data-bs-placement="right" data-bs-html="true"
+                                       title="Available transforms"
+                                       data-bs-content="<code>trim</code> · <code>upper</code> · <code>lower</code> · <code>digits</code> (strip non-digits) · <code>prefix_66</code> (leading 0 → 66) · <code>hex</code>. Comma-separated, applied left-to-right.">
+                                    </i>
+                                </label>
                                 <input id="mapChain" class="form-control"
-                                       placeholder="trim, digits, prefix_66" /></div>
+                                       placeholder="trim, digits, prefix_66" />
+                            </div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-5">
+                                    <label class="form-label small">
+                                        Join order
+                                        <i class="bi bi-info-circle text-muted" tabindex="0"
+                                           data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                           data-bs-placement="top" data-bs-html="true"
+                                           title="Combining columns"
+                                           data-bs-content="Map several source columns to the SAME canonical field with different join orders to concatenate them.<br><br>
+<strong>Example:</strong> first_name (order 0) + last_name (order 1, separator <code>&quot; &quot;</code>) → <code>{{name}}</code> = &quot;John Doe&quot;.">
+                                        </i>
+                                    </label>
+                                    <input id="mapJoinOrder" type="number" min="0" max="20" value="0"
+                                           class="form-control" />
+                                </div>
+                                <div class="col-7">
+                                    <label class="form-label small">Join separator</label>
+                                    <input id="mapJoinSep" class="form-control"
+                                           placeholder="(default: space)" maxlength="16" />
+                                </div>
+                            </div>
                             <button type="submit" class="btn btn-primary btn-sm">Upsert</button>
                         </form>
                     </div>
