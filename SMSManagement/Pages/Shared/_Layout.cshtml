@@ -55,6 +55,8 @@
 </head>
 <body>
     @{ var isAuth = User?.Identity?.IsAuthenticated ?? false; }
+    <a class="visually-hidden-focusable position-absolute top-0 start-0 m-2 p-2 bg-light"
+       href="#mainContent">Skip to main content</a>
     <header>
         <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
             <div class="container">
@@ -151,9 +153,9 @@
         </nav>
     </header>
 
-    <div class="toast-container"></div>
+    <div class="toast-container" role="status" aria-live="polite" aria-atomic="true"></div>
 
-    <main class="container py-4">
+    <main id="mainContent" class="container py-4" tabindex="-1">
         @RenderBody()
     </main>
 

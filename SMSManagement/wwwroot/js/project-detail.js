@@ -1794,7 +1794,7 @@ async function loadSmsList() {
         const rows = await api.get(`${api_proj}/sms${qs}`);
         const body = document.getElementById('smsListBody');
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="5" class="text-muted">No SMS sent yet.</td></tr>';
+            body.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-4"><i class="bi bi-send fs-3 d-block"></i>No SMS sent yet. Workflow dispatches go here, plus manual sends from the form on the left.</td></tr>';
             return;
         }
         body.innerHTML = rows.map(s => {
@@ -1804,11 +1804,17 @@ async function loadSmsList() {
             const retryable = ['Failed','Rejected','Expired'].includes(s.status);
             const retryBtn = retryable
                 ? `<button class="btn btn-sm btn-link p-0 text-warning"
-                       title="Retry this message"
+                       title="Retry this message" aria-label="Retry message"
                        onclick="event.stopPropagation(); retrySms('${esc(s.id)}')">
-                       <i class="bi bi-arrow-clockwise"></i></button>`
+                       <i class="bi bi-arrow-clockwise" aria-hidden="true"></i></button>`
+                : '';
+            const cb = retryable
+                ? `<input type="checkbox" class="sms-row-check" value="${esc(s.id)}"
+                          onclick="event.stopPropagation()"
+                          aria-label="Select message for bulk action" />`
                 : '';
             return `<tr style="cursor:pointer" onclick="showSmsDetail('${esc(s.id)}')">
+                <td>${cb}</td>
                 <td class="small">${fmtDate(s.createdAt)}</td>
                 <td><code class="small">${esc(s.maskedTo)}</code></td>
                 <td class="small">${esc(s.provider)}</td>
@@ -1818,6 +1824,7 @@ async function loadSmsList() {
                 <td>${s.attempts} ${retryBtn}</td>
             </tr>`;
         }).join('');
+        updateSmsBulkBar();
     } catch (e) { toast(e.message, 'danger'); }
 }
 
@@ -1830,6 +1837,40 @@ window.retrySms = async function (id) {
         loadSmsList();
     } catch (e) { toast(e.message, 'danger'); }
 };
+
+// ============ SMS BULK ACTIONS ============
+function updateSmsBulkBar() {
+    const checks = document.querySelectorAll('.sms-row-check:checked');
+    const bar = document.getElementById('smsBulkBar');
+    document.getElementById('smsBulkCount').textContent = `${checks.length} selected`;
+    bar.classList.toggle('d-none', checks.length === 0);
+}
+
+document.addEventListener('change', (ev) => {
+    if (ev.target.classList?.contains('sms-row-check')) updateSmsBulkBar();
+    if (ev.target.id === 'smsSelectAll') {
+        document.querySelectorAll('.sms-row-check').forEach(cb => cb.checked = ev.target.checked);
+        updateSmsBulkBar();
+    }
+});
+
+document.getElementById('btnSmsBulkRetry')?.addEventListener('click', async () => {
+    const ids = Array.from(document.querySelectorAll('.sms-row-check:checked')).map(cb => cb.value);
+    if (!ids.length) return;
+    const ok = await window.confirmAction({
+        title: 'Retry selected', mode: 'math',
+        message: `Re-send <strong>${ids.length}</strong> message${ids.length === 1 ? '' : 's'}? Each attempt counter resets to zero.`,
+        okLabel: 'Retry all'
+    });
+    if (!ok) return;
+    let success = 0, fail = 0;
+    for (const id of ids) {
+        try { await api.post(`${api_proj}/sms/${id}/retry`, {}); success++; }
+        catch { fail++; }
+    }
+    toast(`Bulk retry: ${success} ok${fail ? `, ${fail} failed` : ''}.`, fail ? 'warning' : 'success');
+    loadSmsList();
+});
 
 window.showSmsDetail = async function (id) {
     const body = document.getElementById('smsDetailBody');

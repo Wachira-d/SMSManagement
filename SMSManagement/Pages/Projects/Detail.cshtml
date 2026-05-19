@@ -1014,21 +1014,35 @@ Other SFTP keys: <code>host, port, username, privateKeyPem, remoteDirectory</cod
             </div>
             <div class="col-md-7">
                 <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                         <span>Recent SMS <span class="refresh-dot" title="Auto-refreshes every 10s"></span></span>
                         <div class="d-flex gap-2 align-items-center">
-                            <select id="smsFilter" class="form-select form-select-sm" style="width:auto">
+                            <!-- Bulk action bar — hidden until at least one row is ticked. -->
+                            <span id="smsBulkBar" class="d-none small">
+                                <span id="smsBulkCount" class="text-muted">0 selected</span>
+                                <button id="btnSmsBulkRetry" class="btn btn-warning btn-sm ms-1"
+                                        aria-label="Retry selected messages">
+                                    <i class="bi bi-arrow-clockwise"></i> Retry selected
+                                </button>
+                            </span>
+                            <select id="smsFilter" class="form-select form-select-sm" style="width:auto"
+                                    aria-label="Filter SMS by status">
                                 <option value="">All statuses</option>
                                 <option>Queued</option><option>Sending</option><option>Sent</option>
                                 <option>Delivered</option><option>Failed</option><option>Rejected</option>
                             </select>
-                            <button id="btnSmsRefresh" class="btn btn-sm btn-link p-0">Refresh now</button>
+                            <button id="btnSmsRefresh" class="btn btn-sm btn-link p-0"
+                                    aria-label="Refresh SMS list">Refresh now</button>
                         </div>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-sm mb-0">
-                            <thead><tr><th>Created</th><th>To</th><th>Provider</th><th>Status</th><th>Attempts</th></tr></thead>
-                            <tbody id="smsListBody"><tr><td colspan="5" class="text-muted">Loading…</td></tr></tbody>
+                            <thead><tr>
+                                <th style="width:32px"><input type="checkbox" id="smsSelectAll"
+                                       aria-label="Select all SMS rows" /></th>
+                                <th>Created</th><th>To</th><th>Provider</th><th>Status</th><th>Attempts</th>
+                            </tr></thead>
+                            <tbody id="smsListBody"><tr><td colspan="6" class="text-muted">Loading…</td></tr></tbody>
                         </table>
                     </div>
                 </div>
