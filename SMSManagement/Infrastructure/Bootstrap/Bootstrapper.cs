@@ -100,7 +100,32 @@ public static class Bootstrapper
         var existing = await db.UserCaches.FirstOrDefaultAsync(u => u.Username == username, ct);
         if (existing is not null)
         {
-            log.LogInformation("Bootstrap: admin '{Username}' already exists — no changes.", username);
+            // Generated dev first-run path: never overwrite an existing row —
+            // the password was already shown once and the operator may have it.
+            if (generated)
+            {
+                log.LogInformation(
+                    "Bootstrap: admin '{Username}' already exists — no changes. " +
+                    "Set Bootstrap:AdminUsername + AdminPassword to rotate the password.",
+                    username);
+                return;
+            }
+
+            // Explicit config path: the operator deliberately supplied a password,
+            // so honour it — rotate the hash + salt + unlock the account. This is
+            // the "I locked myself out" recovery path.
+            var newSalt = hasher.NewSalt();
+            existing.Salt = newSalt;
+            existing.PasswordHash = hasher.Hash(password, newSalt);
+            existing.IsEnabled = true;
+            existing.IsLocked = false;
+            existing.FailedAttempts = 0;
+            existing.UpdatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct);
+
+            log.LogWarning(
+                "Bootstrap: ROTATED password for existing admin '{Username}'. " +
+                "Account unlocked, failed-attempts cleared.", username);
             return;
         }
 
