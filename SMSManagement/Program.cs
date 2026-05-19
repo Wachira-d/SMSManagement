@@ -144,6 +144,11 @@ builder.Services.AddAuthorization(o =>
     o.AddPolicy("workflow.author",  p => p.RequireClaim("perm", "workflow.author"));
     o.AddPolicy("ingestion.upload", p => p.RequireClaim("perm", "ingestion.upload"));
     o.AddPolicy("audit.read",       p => p.RequireClaim("perm", "audit.read"));
+    // System administration. The role claim is stamped by JwtTokenIssuer when
+    // the user is in the configured AD group OR has IsSystemAdmin=true on
+    // their local Users row. Gates the /Admin/* surface that mutates global
+    // state — user enable/disable, password reset, system settings.
+    o.AddPolicy("system_admin",     p => p.RequireClaim("role", "system_admin"));
 });
 
 // ---------- CORS (off by default; opt-in via Cors:AllowedOrigins) ----------

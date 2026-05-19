@@ -22,6 +22,7 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
 {
     private readonly LocalJwtOptions _opts;
     private readonly UserCacheAuthOptions _sessionOpts;
+    private readonly AdminOptions _adminOpts;
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
     private SigningCredentials? _signing;
@@ -29,11 +30,13 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
     public JwtTokenIssuer(
         IOptions<LocalJwtOptions> opts,
         IOptions<UserCacheAuthOptions> sessionOpts,
+        IOptions<AdminOptions> adminOpts,
         AppDbContext db,
         TimeProvider clock)
     {
         _opts = opts.Value;
         _sessionOpts = sessionOpts.Value;
+        _adminOpts = adminOpts.Value;
         _db = db;
         _clock = clock;
     }
@@ -78,6 +81,13 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
         // here we ship a sensible default so the JWT is immediately usable.
         foreach (var perm in MapGroupsToPermissions(groups))
             claims.Add(new Claim("perm", perm));
+
+        // System admin: ORed across AD-group membership and the per-user DB flag.
+        // Either path produces the same role=system_admin claim downstream.
+        var inAdminGroup = !string.IsNullOrWhiteSpace(_adminOpts.SystemAdminGroup)
+            && groups.Any(g => string.Equals(g, _adminOpts.SystemAdminGroup, StringComparison.OrdinalIgnoreCase));
+        if (inAdminGroup || appUser.IsSystemAdmin)
+            claims.Add(new Claim("role", "system_admin"));
 
         var now = _clock.GetUtcNow();
         var exp = now.AddHours(_sessionOpts.SessionTimeoutHours);

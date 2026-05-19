@@ -17,6 +17,11 @@ public sealed class User
     public string Status { get; set; } = "Active";     // Active | Suspended | Deleted
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastLoginAt { get; set; }
+
+    /// <summary>DB-side break-glass for system administration. ORed with the
+    /// configured AD group (Admin:SystemAdminGroup) when deciding whether to
+    /// stamp role=system_admin on the JWT. Toggled from /Admin/Users.</summary>
+    public bool IsSystemAdmin { get; set; }
 }
 
 public enum ProjectAccessLevel

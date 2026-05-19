@@ -55,6 +55,7 @@ public static class ModuleRegistration
         services.Configure<UserCacheAuthOptions>(cfg.GetSection("UserCacheAuth"));
         services.Configure<AuthenApiOptions>(cfg.GetSection("AuthenApi"));
         services.Configure<LocalJwtOptions>(cfg.GetSection("Auth:LocalJwt"));
+        services.Configure<AdminOptions>(cfg.GetSection("Admin"));
         services.AddSingleton<IPasswordHasher, Sha256PasswordHasher>();
         // AuthenAPI uses its own resilience config — auth is sensitive, so we
         // don't pipe it through the default ConfigureResilience (which retries

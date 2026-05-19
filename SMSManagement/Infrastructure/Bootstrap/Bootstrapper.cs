@@ -121,11 +121,29 @@ public static class Bootstrapper
             existing.IsLocked = false;
             existing.FailedAttempts = 0;
             existing.UpdatedAt = DateTimeOffset.UtcNow;
+
+            // Also ensure the FK Users row exists and is flagged IsSystemAdmin
+            // so the rotated admin gets role=system_admin on next login.
+            var appUser = await db.Users.FirstOrDefaultAsync(u => u.ExternalSubject == username, ct);
+            if (appUser is null)
+            {
+                db.Users.Add(new User
+                {
+                    ExternalSubject = username,
+                    Email = email ?? string.Empty,
+                    DisplayName = "System Administrator",
+                    IsSystemAdmin = true
+                });
+            }
+            else if (!appUser.IsSystemAdmin)
+            {
+                appUser.IsSystemAdmin = true;
+            }
             await db.SaveChangesAsync(ct);
 
             log.LogWarning(
                 "Bootstrap: ROTATED password for existing admin '{Username}'. " +
-                "Account unlocked, failed-attempts cleared.", username);
+                "Account unlocked, failed-attempts cleared, IsSystemAdmin ensured.", username);
             return;
         }
 
@@ -148,7 +166,8 @@ public static class Bootstrapper
         {
             ExternalSubject = username,
             Email = email ?? string.Empty,
-            DisplayName = "System Administrator"
+            DisplayName = "System Administrator",
+            IsSystemAdmin = true
         });
 
         await db.SaveChangesAsync(ct);

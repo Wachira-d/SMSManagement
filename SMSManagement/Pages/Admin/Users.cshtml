@@ -1,0 +1,294 @@
+@page
+@model SMSManagement.Pages.Admin.UsersModel
+@{ ViewData["Title"] = "User management"; }
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">User management</h1>
+    <div class="d-flex gap-2">
+        <input id="usrSearch" class="form-control form-control-sm" style="width:240px"
+               placeholder="Search email / name / username" />
+        <button id="btnUsrRefresh" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+    </div>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-sm mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Email / Username</th>
+                    <th>Display</th>
+                    <th>Status</th>
+                    <th>Cache</th>
+                    <th>Last login</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="usrBody"><tr><td colspan="6" class="text-muted">Loading…</td></tr></tbody>
+        </table>
+    </div>
+    <div class="card-footer d-flex justify-content-between align-items-center small text-muted">
+        <span id="usrCount"></span>
+        <div>
+            <button id="btnUsrPrev" class="btn btn-sm btn-outline-secondary" disabled>Prev</button>
+            <button id="btnUsrNext" class="btn btn-sm btn-outline-secondary" disabled>Next</button>
+        </div>
+    </div>
+</div>
+
+<!-- ============ USER DETAIL MODAL ============ -->
+<div class="modal fade" id="usrDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="usrDetailTitle">User</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="usrDetailBody">Loading…</div>
+        </div>
+    </div>
+</div>
+
+<!-- ============ ROTATE PASSWORD RESULT MODAL ============ -->
+<!-- Shows the freshly generated password ONCE; copy or it's gone. -->
+<div class="modal fade" id="pwdModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">New password</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-warning small">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    This is the only time the password will be shown. Copy it now.
+                </p>
+                <div class="input-group">
+                    <input id="pwdValue" class="form-control font-monospace" readonly />
+                    <button id="pwdCopy" class="btn btn-outline-primary">Copy</button>
+                </div>
+                <p class="small text-muted mt-2 mb-0">User: <code id="pwdUser"></code></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+(function () {
+    const PAGE = 50;
+    let skip = 0, total = 0, q = '';
+
+    async function load() {
+        const url = `/api/admin/users?skip=${skip}&take=${PAGE}` +
+                    (q ? `&q=${encodeURIComponent(q)}` : '');
+        try {
+            const data = await api.get(url);
+            total = data.total;
+            const body = document.getElementById('usrBody');
+            if (!data.items.length) {
+                body.innerHTML = '<tr><td colspan="6" class="text-muted">No matches.</td></tr>';
+            } else {
+                body.innerHTML = data.items.map(u => row(u)).join('');
+            }
+            document.getElementById('usrCount').textContent =
+                `${skip + 1}–${Math.min(skip + data.items.length, total)} of ${total}`;
+            document.getElementById('btnUsrPrev').disabled = skip === 0;
+            document.getElementById('btnUsrNext').disabled = skip + PAGE >= total;
+        } catch (e) { toast(e.message, 'danger'); }
+    }
+
+    function row(u) {
+        const statusBadge =
+            u.isLocked ? '<span class="badge bg-danger">Locked</span>' :
+            !u.isEnabled ? '<span class="badge bg-secondary">Disabled</span>' :
+            u.status !== 'Active' ? `<span class="badge bg-warning text-dark">${esc(u.status)}</span>` :
+            '<span class="badge bg-success">Active</span>';
+        const sa = u.isSystemAdmin
+            ? '<span class="badge bg-dark"><i class="bi bi-shield-lock"></i> Admin</span>'
+            : '';
+        return `<tr>
+            <td>
+                <a href="#" onclick="showUser('${esc(u.id)}');return false">
+                    <strong>${esc(u.email || u.username)}</strong>
+                </a><br>
+                <code class="small text-muted">${esc(u.username)}</code>
+            </td>
+            <td>${esc(u.displayName || '')} ${sa}</td>
+            <td>${statusBadge}</td>
+            <td class="small">${u.failedAttempts ? `${u.failedAttempts} failed` : 'OK'}</td>
+            <td class="small">${u.lastLogin ? fmtDate(u.lastLogin) : '<span class="text-muted">never</span>'}</td>
+            <td class="text-end">
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-secondary" onclick="showUser('${esc(u.id)}')"
+                            title="Details"><i class="bi bi-info-circle"></i></button>
+                    ${u.isLocked
+                        ? `<button class="btn btn-outline-warning" onclick="unlockUser('${esc(u.id)}')"
+                                   title="Unlock"><i class="bi bi-unlock"></i></button>`
+                        : ''}
+                    ${u.isEnabled
+                        ? `<button class="btn btn-outline-danger" onclick="toggleUser('${esc(u.id)}', false)"
+                                   title="Disable"><i class="bi bi-person-x"></i></button>`
+                        : `<button class="btn btn-outline-success" onclick="toggleUser('${esc(u.id)}', true)"
+                                   title="Enable"><i class="bi bi-person-check"></i></button>`}
+                </div>
+            </td>
+        </tr>`;
+    }
+
+    window.showUser = async function (id) {
+        const modalEl = document.getElementById('usrDetailModal');
+        const body = document.getElementById('usrDetailBody');
+        document.getElementById('usrDetailTitle').textContent = 'User';
+        body.innerHTML = 'Loading…';
+        new bootstrap.Modal(modalEl).show();
+        try {
+            const d = await api.get(`/api/admin/users/${id}`);
+            document.getElementById('usrDetailTitle').textContent =
+                d.displayName || d.email || d.externalSubject;
+
+            const groups = d.cache?.groups
+                ? (() => { try { return JSON.parse(d.cache.groups); } catch { return []; } })()
+                : [];
+
+            body.innerHTML = `
+              <dl class="row small mb-3">
+                <dt class="col-sm-3">Email</dt><dd class="col-sm-9">${esc(d.email || '')}</dd>
+                <dt class="col-sm-3">Username</dt><dd class="col-sm-9"><code>${esc(d.externalSubject)}</code></dd>
+                <dt class="col-sm-3">Status</dt><dd class="col-sm-9">${esc(d.status)}</dd>
+                <dt class="col-sm-3">System admin</dt>
+                <dd class="col-sm-9">
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="chkSysAdmin"
+                           ${d.isSystemAdmin ? 'checked' : ''}
+                           onchange="setSysAdmin('${esc(d.id)}', this.checked)" />
+                    <label class="form-check-label small text-muted" for="chkSysAdmin">
+                      Grants role=system_admin on next token issue.
+                    </label>
+                  </div>
+                </dd>
+                <dt class="col-sm-3">Created</dt><dd class="col-sm-9">${fmtDate(d.createdAt)}</dd>
+                <dt class="col-sm-3">Last login</dt>
+                <dd class="col-sm-9">${d.lastLoginAt ? fmtDate(d.lastLoginAt) : '<em>never</em>'}</dd>
+                ${d.cache ? `
+                <dt class="col-sm-3">Department</dt><dd class="col-sm-9">${esc(d.cache.department || '')}</dd>
+                <dt class="col-sm-3">Title</dt><dd class="col-sm-9">${esc(d.cache.title || '')}</dd>
+                <dt class="col-sm-3">AD groups</dt>
+                <dd class="col-sm-9">${groups.map(g => `<span class="badge bg-light text-dark me-1">${esc(g)}</span>`).join('') || '<em>none</em>'}</dd>
+                <dt class="col-sm-3">Cache expires</dt><dd class="col-sm-9">${fmtDate(d.cache.cacheExpires)}</dd>
+                ` : '<dt class="col-sm-3">Cache</dt><dd class="col-sm-9"><em class="text-muted">No local cache yet (never logged in)</em></dd>'}
+              </dl>
+
+              <div class="d-flex gap-2 mb-3 flex-wrap">
+                <button class="btn btn-sm btn-outline-warning" onclick="forceResync('${esc(d.id)}')">
+                  <i class="bi bi-arrow-repeat"></i> Force re-auth (expire cache)
+                </button>
+                <button class="btn btn-sm btn-outline-danger" onclick="rotatePwd('${esc(d.id)}')">
+                  <i class="bi bi-key"></i> Reset local password
+                </button>
+              </div>
+
+              <h6 class="mt-3">Project memberships</h6>
+              ${d.memberships.length === 0
+                ? '<p class="text-muted small">No memberships.</p>'
+                : `<table class="table table-sm">
+                    <thead><tr><th>Project</th><th>Level</th><th>Granted</th></tr></thead>
+                    <tbody>${d.memberships.map(m => `<tr>
+                      <td><code class="small">${esc(m.code)}</code> ${esc(m.name)}
+                          ${m.archivedAt ? '<span class="badge bg-secondary">archived</span>' : ''}</td>
+                      <td>${levelName(m.accessLevel)}</td>
+                      <td class="small">${fmtDate(m.grantedAt)}</td>
+                    </tr>`).join('')}</tbody>
+                   </table>`}
+
+              <h6 class="mt-3">Recent login attempts</h6>
+              ${d.recentLogins.length === 0
+                ? '<p class="text-muted small">No login history.</p>'
+                : `<table class="table table-sm">
+                    <thead><tr><th>When</th><th>Result</th><th>Source</th><th>IP</th></tr></thead>
+                    <tbody>${d.recentLogins.map(l => `<tr>
+                      <td class="small">${fmtDate(l.createdAt)}</td>
+                      <td>${l.success ? '<span class="badge bg-success">OK</span>'
+                                       : `<span class="badge bg-danger">${esc(l.failureReason || 'failed')}</span>`}</td>
+                      <td class="small">${esc(l.authSource || '')}</td>
+                      <td class="small text-muted">${esc(l.ipAddress || '')}</td>
+                    </tr>`).join('')}</tbody>
+                   </table>`}`;
+        } catch (e) {
+            body.innerHTML = `<div class="text-danger">${esc(e.message)}</div>`;
+        }
+    };
+
+    function levelName(n) {
+        return ['Viewer','Member','Admin','Owner'][n] || `Level ${n}`;
+    }
+
+    window.toggleUser = async function (id, enable) {
+        if (!confirm(enable ? 'Enable this user?' : 'Disable this user? They will not be able to log in.'))
+            return;
+        try {
+            await api.post(`/api/admin/users/${id}/${enable ? 'enable' : 'disable'}`);
+            toast(enable ? 'User enabled.' : 'User disabled.');
+            load();
+        } catch (e) { toast(e.message, 'danger'); }
+    };
+
+    window.unlockUser = async function (id) {
+        try {
+            await api.post(`/api/admin/users/${id}/unlock`);
+            toast('User unlocked.');
+            load();
+        } catch (e) { toast(e.message, 'danger'); }
+    };
+
+    window.forceResync = async function (id) {
+        if (!confirm('Expire AD cache? The user will be forced to re-auth via the upstream IdP on next login.'))
+            return;
+        try {
+            await api.post(`/api/admin/users/${id}/force-resync`);
+            toast('Cache expired — next login will hit upstream.');
+        } catch (e) { toast(e.message, 'danger'); }
+    };
+
+    window.setSysAdmin = async function (id, isAdmin) {
+        try {
+            await api.post(`/api/admin/users/${id}/system-admin`, { isSystemAdmin: isAdmin });
+            toast(isAdmin ? 'Granted system_admin.' : 'Revoked system_admin.');
+        } catch (e) {
+            toast(e.message, 'danger');
+            document.getElementById('chkSysAdmin').checked = !isAdmin;
+        }
+    };
+
+    window.rotatePwd = async function (id) {
+        if (!confirm('Generate a new local password? This invalidates the user\'s current password immediately.'))
+            return;
+        try {
+            const r = await api.post(`/api/admin/users/${id}/rotate-password`, {});
+            document.getElementById('pwdValue').value = r.newPassword;
+            document.getElementById('pwdUser').textContent = r.username;
+            new bootstrap.Modal(document.getElementById('pwdModal')).show();
+        } catch (e) { toast(e.message, 'danger'); }
+    };
+
+    document.getElementById('pwdCopy').addEventListener('click', async () => {
+        const v = document.getElementById('pwdValue').value;
+        try { await navigator.clipboard.writeText(v); toast('Copied.'); }
+        catch { toast('Copy failed — select and copy manually.', 'warning'); }
+    });
+
+    // Search with debounce.
+    let t = 0;
+    document.getElementById('usrSearch').addEventListener('input', (ev) => {
+        clearTimeout(t);
+        t = setTimeout(() => { q = ev.target.value.trim(); skip = 0; load(); }, 300);
+    });
+    document.getElementById('btnUsrRefresh').addEventListener('click', load);
+    document.getElementById('btnUsrPrev').addEventListener('click', () => { skip = Math.max(0, skip - PAGE); load(); });
+    document.getElementById('btnUsrNext').addEventListener('click', () => { skip += PAGE; load(); });
+    load();
+})();
+</script>
+}
