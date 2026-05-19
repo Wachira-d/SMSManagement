@@ -167,7 +167,12 @@ public sealed class AuthController : ControllerBase
             groups = user.FindAll("group").Select(c => c.Value).ToArray(),
             permissions = user.FindAll("perm").Select(c => c.Value).ToArray(),
             roles = user.FindAll("role").Select(c => c.Value).ToArray(),
-            isSystemAdmin = user.HasClaim("role", "system_admin")
+            isSystemAdmin = user.HasClaim("role", "system_admin"),
+            // Diagnostic: every claim type+value the middleware exposes.
+            // Used to debug claim-type mapping issues ("why doesn't role
+            // show up under that name?"). Safe to keep — JWT claims are
+            // not secret per se; the SIGNATURE is.
+            allClaims = user.Claims.Select(c => new { c.Type, c.Value }).ToArray()
         });
     }
 
