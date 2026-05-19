@@ -73,6 +73,65 @@ public sealed class ProjectsController : ControllerBase
         return Ok(rows);
     }
 
+    /// <summary>
+    /// Lightweight per-project stats for the dashboard card grid.
+    /// Three aggregate queries (SMS last 24h, active workflow instances,
+    /// failed batches last 7d) joined client-side rather than 3*N round-trips.
+    /// </summary>
+    [HttpGet("dashboard-stats")]
+    public async Task<IActionResult> DashboardStats(CancellationToken ct)
+    {
+        var visible = await _me.AccessibleProjectIdsAsync(ct);
+        if (visible.Count == 0) return Ok(Array.Empty<object>());
+
+        var since24h = DateTimeOffset.UtcNow.AddDays(-1);
+        var since7d  = DateTimeOffset.UtcNow.AddDays(-7);
+
+        var smsCounts = await _db.Set<SMSManagement.Modules.Sms.Domain.SmsMessage>()
+            .Where(s => visible.Contains(s.ProjectId) && s.CreatedAt >= since24h)
+            .GroupBy(s => s.ProjectId)
+            .Select(g => new { ProjectId = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+
+        var activeStates = new[]
+        {
+            SMSManagement.Modules.Workflow.Domain.WorkflowState.AwaitingAction,
+            SMSManagement.Modules.Workflow.Domain.WorkflowState.ReminderDue,
+            SMSManagement.Modules.Workflow.Domain.WorkflowState.Dispatching,
+            SMSManagement.Modules.Workflow.Domain.WorkflowState.Scheduled,
+            SMSManagement.Modules.Workflow.Domain.WorkflowState.Pending
+        };
+        var activeInstances = await _db.Set<SMSManagement.Modules.Workflow.Domain.WorkflowInstance>()
+            .Where(i => activeStates.Contains(i.State))
+            .Join(_db.Set<SMSManagement.Modules.Workflow.Domain.WorkflowDefinition>(),
+                  i => i.DefinitionId, d => d.Id, (i, d) => new { i, d.ProjectId })
+            .Where(x => visible.Contains(x.ProjectId))
+            .GroupBy(x => x.ProjectId)
+            .Select(g => new { ProjectId = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+
+        var failedBatches = await _db.Set<IngestionBatch>()
+            .Where(b => visible.Contains(b.ProjectId)
+                     && b.IngestedAt >= since7d
+                     && b.RejectedRows > 0)
+            .GroupBy(b => b.ProjectId)
+            .Select(g => new { ProjectId = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+
+        var smsMap   = smsCounts.ToDictionary(x => x.ProjectId, x => x.Count);
+        var instMap  = activeInstances.ToDictionary(x => x.ProjectId, x => x.Count);
+        var batchMap = failedBatches.ToDictionary(x => x.ProjectId, x => x.Count);
+
+        var result = visible.Select(id => new
+        {
+            ProjectId         = id,
+            SmsLast24h        = smsMap.GetValueOrDefault(id, 0),
+            ActiveInstances   = instMap.GetValueOrDefault(id, 0),
+            FailedBatchesWeek = batchMap.GetValueOrDefault(id, 0)
+        });
+        return Ok(result);
+    }
+
     [HttpGet("{projectId:guid}")]
     public async Task<IActionResult> Get(Guid projectId, CancellationToken ct)
     {
