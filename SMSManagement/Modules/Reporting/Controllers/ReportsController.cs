@@ -40,8 +40,11 @@ public sealed class ReportsController : ControllerBase
         [FromQuery] DateTimeOffset from, [FromQuery] DateTimeOffset to, CancellationToken ct)
         => Ok(await _svc.IngestionQualityAsync(projectId, new DateRange(from, to), ct));
 
+    // Per-project audit. Gated by ReportingService.AuditTrailAsync which calls
+    // EnsureProjectVisibleAsync — Admin/Owner on this project can see their
+    // own project's audit trail. The cross-project audit endpoint
+    // (api/admin/...) is what still requires the global "audit.read" perm.
     [HttpGet("audit-trail")]
-    [Authorize(Policy = "audit.read")]
     public async Task<IActionResult> Audit(Guid projectId,
         [FromQuery] DateTimeOffset from, [FromQuery] DateTimeOffset to,
         [FromQuery] int take = 500, CancellationToken ct = default)

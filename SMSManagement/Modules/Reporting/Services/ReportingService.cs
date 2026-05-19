@@ -2,6 +2,7 @@ using System.Globalization;
 using CsvHelper;
 using Microsoft.EntityFrameworkCore;
 using SMSManagement.Infrastructure.Persistence;
+using SMSManagement.Modules.Identity.Domain;
 using SMSManagement.Modules.Identity.Services;
 using SMSManagement.Modules.Reporting.Domain;
 using SMSManagement.Modules.Shortlink.Domain;
@@ -21,11 +22,13 @@ public sealed class ReportingService : IReportingService
 {
     private readonly AppDbContext _db;
     private readonly ICurrentUser _me;
+    private readonly IProjectAccessService _access;
 
-    public ReportingService(AppDbContext db, ICurrentUser me)
+    public ReportingService(AppDbContext db, ICurrentUser me, IProjectAccessService access)
     {
         _db = db;
         _me = me;
+        _access = access;
     }
 
     public async Task<IReadOnlyList<SmsCampaignRow>> SmsCampaignAsync(
@@ -33,14 +36,19 @@ public sealed class ReportingService : IReportingService
     {
         await EnsureProjectVisibleAsync(projectId, ct);
 
-        // Group by date + provider; compute terminal-state aggregates. No raw PII selected.
+        // Group by year/month/day components — EF translates Year/Month/Day on
+        // DateTimeOffset to DATEPART on SQL Server. The previous version
+        // grouped by m.CreatedAt.UtcDateTime.Date which the SQL Server
+        // provider can't translate (Date getter on DateTime, not the column).
         var raw = await _db.SmsMessages
             .Where(m => m.ProjectId == projectId
                      && m.CreatedAt >= range.From
                      && m.CreatedAt < range.To)
-            .GroupBy(m => new { Day = m.CreatedAt.UtcDateTime.Date, m.Provider })
+            .GroupBy(m => new { m.CreatedAt.Year, m.CreatedAt.Month, m.CreatedAt.Day, m.Provider })
             .Select(g => new
             {
+                g.Key.Year,
+                g.Key.Month,
                 g.Key.Day,
                 g.Key.Provider,
                 Queued    = g.Count(x => x.Status == SmsStatus.Queued),
@@ -53,7 +61,7 @@ public sealed class ReportingService : IReportingService
             .ToListAsync(ct);
 
         return raw.Select(r => new SmsCampaignRow(
-            projectId, r.Provider, DateOnly.FromDateTime(r.Day),
+            projectId, r.Provider, new DateOnly(r.Year, r.Month, r.Day),
             r.Queued, r.Sent, r.Delivered, r.Failed, r.Rejected,
             DeliveryRate: r.Total == 0 ? 0 : (double)r.Delivered / r.Total,
             FailureRate:  r.Total == 0 ? 0 : (double)(r.Failed + r.Rejected) / r.Total))
@@ -238,7 +246,10 @@ public sealed class ReportingService : IReportingService
     public async Task<IReadOnlyList<AuditRow>> AuditTrailAsync(
         Guid projectId, DateRange range, int take, CancellationToken ct = default)
     {
-        await EnsureProjectVisibleAsync(projectId, ct);
+        // Audit on this project: Admin or higher. Owner is included (Owner=3).
+        // Viewers/Members can see their *own* SMS / shortlink stats but not the
+        // who-did-what trail; that contains IPs and action history.
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Admin, ct);
         var cap = Math.Clamp(take, 1, 5000);
 
         // PRODUCTION (SQL Server): single indexed query — uses the
