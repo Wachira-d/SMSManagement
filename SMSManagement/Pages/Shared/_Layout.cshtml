@@ -19,7 +19,39 @@
         pre { background: #f8f9fa; padding: 10px; border-radius: 4px; font-size: 12px; }
         .table-sm td, .table-sm th { padding: 0.4rem; font-size: 0.875rem; }
         .toast-container { position: fixed; top: 20px; right: 20px; z-index: 1080; }
+
+        /* ---- Mobile-friendly tweaks ---- */
+        @@media (max-width: 768px) {
+            /* Project Detail has 9 tabs — wrap them in a horizontal scroller
+               instead of letting the page overflow. */
+            .nav-tabs { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; }
+            .nav-tabs .nav-link { white-space: nowrap; }
+            /* Cards stack on mobile (handled by Bootstrap col grid) but the
+               settings grid was a 2-col layout that overflowed on narrow
+               phones — kill the side-by-side. */
+            .row.g-3 > [class^="col-"] { margin-bottom: 0.5rem; }
+            /* Tighten form controls inside cards. */
+            .card-body .form-control,
+            .card-body .form-select { font-size: 0.9rem; }
+            /* Breadcrumb wraps when project names are long. */
+            .breadcrumb { font-size: 0.875rem; }
+        }
+        /* Help long table content scroll horizontally without breaking layout
+           (covers desktops with narrow window panes too). */
+        .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+        /* Auto-refresh indicator — small dot pulsing next to "Recent" titles. */
+        .refresh-dot {
+            display: inline-block; width: 8px; height: 8px;
+            border-radius: 50%; background: #28a745; margin-left: 6px;
+            opacity: 0.6; animation: pulse 2s ease-in-out infinite;
+        }
+        @@keyframes pulse {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50%      { opacity: 1;   transform: scale(1.2); }
+        }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
     @{ var isAuth = User?.Identity?.IsAuthenticated ?? false; }
@@ -50,6 +82,7 @@
                                     <ul class="dropdown-menu">
                                         <li><a class="dropdown-item" asp-page="/Admin/Reports">Global reports</a></li>
                                         <li><a class="dropdown-item" asp-page="/Admin/BlockedIps">Blocked IPs</a></li>
+                                        <li><a class="dropdown-item" asp-page="/Admin/ArchivedProjects">Archived projects</a></li>
                                         <li><hr class="dropdown-divider"></li>
                                         <li><a class="dropdown-item" href="/jobs" target="_blank">Hangfire dashboard</a></li>
                                         <li><a class="dropdown-item" href="/metrics" target="_blank">Metrics (/metrics)</a></li>

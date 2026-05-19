@@ -1,0 +1,60 @@
+@page
+@model SMSManagement.Pages.Admin.ArchivedProjectsModel
+@{ ViewData["Title"] = "Archived Projects"; }
+
+<h1 class="h3 mb-3">Archived projects</h1>
+<p class="text-muted small">
+    Projects that have been archived (soft-deleted). Their data + audit history
+    is preserved for compliance retention; restoring re-enables the project
+    for its members. Requires <code>audit.read</code> permission.
+</p>
+
+<div class="table-responsive">
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th>Code</th><th>Name</th><th>Provider</th>
+                <th>Created</th><th>Archived</th><th></th>
+            </tr>
+        </thead>
+        <tbody id="arBody"><tr><td colspan="6" class="text-muted">Loading…</td></tr></tbody>
+    </table>
+</div>
+
+@section Scripts {
+<script>
+async function loadArchived() {
+    try {
+        const rows = await api.get('/api/admin/archived-projects');
+        const body = document.getElementById('arBody');
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="6" class="text-muted">No archived projects.</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(p => `
+            <tr>
+                <td><code>${esc(p.code)}</code></td>
+                <td>${esc(p.name)}</td>
+                <td>${esc(p.defaultProvider)}</td>
+                <td class="small">${fmtDate(p.createdAt)}</td>
+                <td class="small">${fmtDate(p.archivedAt)}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-success"
+                            onclick="restoreProject('${esc(p.id)}','${esc(p.name)}')">
+                        <i class="bi bi-arrow-counterclockwise"></i> Restore
+                    </button>
+                </td>
+            </tr>`).join('');
+    } catch (e) { toast(e.message, 'danger'); }
+}
+window.restoreProject = async function (id, name) {
+    if (!confirm(`Restore project "${name}"? It will be visible to its members again.`)) return;
+    try {
+        await api.post('/api/projects/' + id + '/restore');
+        toast('Restored.');
+        loadArchived();
+    } catch (e) { toast(e.message, 'danger'); }
+};
+loadArchived();
+</script>
+}

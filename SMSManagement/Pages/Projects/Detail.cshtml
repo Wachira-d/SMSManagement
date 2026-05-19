@@ -317,8 +317,8 @@
             <div class="col-12">
                 <div class="card">
                     <div class="card-header d-flex justify-content-between">
-                        <span>Recent ingestion batches</span>
-                        <button id="btnBatchRefresh" class="btn btn-sm btn-link p-0">Refresh</button>
+                        <span>Recent ingestion batches <span class="refresh-dot" title="Auto-refreshes every 10s"></span></span>
+                        <button id="btnBatchRefresh" class="btn btn-sm btn-link p-0">Refresh now</button>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-sm mb-0">
@@ -334,11 +334,11 @@
     <!-- ============ WORKFLOWS ============ -->
     <div class="tab-pane fade" id="tab-workflows">
         <div class="row g-3">
-            <div class="col-md-5">
+            <div class="col-md-4">
                 <div class="card">
                     <div class="card-header d-flex justify-content-between">
                         <span>Definitions</span>
-                        <button class="btn btn-sm btn-link p-0" id="btnWfNew">New</button>
+                        <button class="btn btn-sm btn-link p-0" id="btnWfNew">+ New</button>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-sm mb-0">
@@ -348,18 +348,67 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-7">
+            <div class="col-md-8">
                 <div class="card">
-                    <div class="card-header" id="wfEditTitle">Editor</div>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span id="wfEditTitle">Editor</span>
+                        <div class="btn-group btn-group-sm" role="group" id="wfViewSwitch">
+                            <button type="button" class="btn btn-outline-secondary active" data-view="form">Form</button>
+                            <button type="button" class="btn btn-outline-secondary" data-view="json">JSON</button>
+                            <button type="button" class="btn btn-outline-secondary" data-view="diagram">Diagram</button>
+                        </div>
+                    </div>
                     <div class="card-body">
-                        <div class="mb-2"><label class="form-label small">Workflow name</label>
-                            <input id="wfName" class="form-control" placeholder="reminder-flow" /></div>
-                        <div class="mb-2"><label class="form-label small">Spec (JSON)</label>
-                            <textarea id="wfSpec" class="form-control font-monospace" rows="14"
-                                      spellcheck="false"></textarea></div>
-                        <button id="btnWfSave" class="btn btn-primary btn-sm">Save as new version</button>
+                        <div class="row g-2 mb-3">
+                            <div class="col-md-7">
+                                <label class="form-label small">Workflow name</label>
+                                <input id="wfName" class="form-control form-control-sm" placeholder="reminder-flow" />
+                            </div>
+                            <div class="col-md-5">
+                                <label class="form-label small">Expiration (d.HH:MM:SS)</label>
+                                <input id="wfExp" class="form-control form-control-sm" value="60.00:00:00" />
+                            </div>
+                        </div>
+
+                        <!-- FORM VIEW -->
+                        <div id="wfFormView">
+                            <div class="mb-2">
+                                <label class="form-label small">Initial step</label>
+                                <select id="wfInitial" class="form-select form-select-sm"></select>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <small class="text-muted">Steps</small>
+                                <button id="btnWfAddStep" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-plus-lg"></i> Add step
+                                </button>
+                            </div>
+                            <div id="wfStepsList"></div>
+                        </div>
+
+                        <!-- JSON VIEW -->
+                        <div id="wfJsonView" style="display:none">
+                            <textarea id="wfSpec" class="form-control font-monospace" rows="18"
+                                      spellcheck="false"></textarea>
+                            <div class="form-text">
+                                Form view round-trips through this JSON. Edits here are kept when you switch back.
+                            </div>
+                        </div>
+
+                        <!-- DIAGRAM VIEW -->
+                        <div id="wfDiagramView" style="display:none">
+                            <div id="wfDiagram" class="text-center border rounded p-3 bg-light"
+                                 style="min-height:200px"></div>
+                            <div class="form-text">
+                                Rendered from the current spec. Edit in Form or JSON view.
+                            </div>
+                        </div>
+
+                        <hr/>
+                        <button id="btnWfSave" class="btn btn-primary btn-sm">
+                            <i class="bi bi-check2"></i> Save as new version
+                        </button>
                         <span class="text-muted small ms-2">
-                            Server validates the DAG before insert.
+                            Server validates the DAG; activate from the list to make it live.
                         </span>
                     </div>
                 </div>
@@ -394,14 +443,14 @@
             <div class="col-md-7">
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <span>Recent SMS</span>
+                        <span>Recent SMS <span class="refresh-dot" title="Auto-refreshes every 10s"></span></span>
                         <div class="d-flex gap-2 align-items-center">
                             <select id="smsFilter" class="form-select form-select-sm" style="width:auto">
                                 <option value="">All statuses</option>
                                 <option>Queued</option><option>Sending</option><option>Sent</option>
                                 <option>Delivered</option><option>Failed</option><option>Rejected</option>
                             </select>
-                            <button id="btnSmsRefresh" class="btn btn-sm btn-link p-0">Refresh</button>
+                            <button id="btnSmsRefresh" class="btn btn-sm btn-link p-0">Refresh now</button>
                         </div>
                     </div>
                     <div class="table-responsive">
@@ -494,6 +543,32 @@
 </div>
 
 <input type="hidden" id="projectId" value="@Model.ProjectId" />
+
+<!-- ============ DRILL-DOWN MODALS ============ -->
+<div class="modal fade" id="smsDetailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">SMS detail</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body"><pre id="smsDetailBody" class="small">Loading…</pre></div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="slClicksModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">Click history</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <table class="table table-sm">
+                    <thead><tr><th>When</th><th>Device</th><th>Country</th><th>User-Agent</th></tr></thead>
+                    <tbody id="slClicksBody"><tr><td colspan="4" class="text-muted">Loading…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
 
 @section Scripts {
 <script src="~/js/project-detail.js" asp-append-version="true"></script>

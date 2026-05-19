@@ -461,45 +461,18 @@ async function loadBatches() {
 document.getElementById('btnBatchRefresh').addEventListener('click', loadBatches);
 
 // ==================== WORKFLOWS ====================
-async function loadWorkflows() {
-    try {
-        const rows = await api.get(`${api_proj}/workflows`);
-        const body = document.getElementById('wfBody');
-        if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="4" class="text-muted">No workflows yet.</td></tr>';
-        } else {
-            body.innerHTML = rows.map(w => `
-                <tr>
-                    <td><a href="#" onclick="loadWfDef('${esc(w.id)}','${esc(w.name)}');return false">${esc(w.name)}</a></td>
-                    <td>${w.version}</td>
-                    <td>${w.active ? '<i class="bi bi-check-circle-fill text-success"></i>' : ''}</td>
-                    <td>${w.active
-                        ? `<button class="btn btn-link btn-sm p-0" onclick="toggleWf('${esc(w.id)}',false)">Deactivate</button>`
-                        : `<button class="btn btn-link btn-sm p-0" onclick="toggleWf('${esc(w.id)}',true)">Activate</button>`}</td>
-                </tr>`).join('');
-        }
-    } catch (e) { toast(e.message, 'danger'); }
-}
-window.loadWfDef = async function (id, name) {
-    try {
-        const d = await api.get(`${api_proj}/workflows/${id}`);
-        document.getElementById('wfName').value = d.name;
-        document.getElementById('wfSpec').value = JSON.stringify(d.spec, null, 2);
-        document.getElementById('wfEditTitle').textContent = `Editor — ${d.name} v${d.version}`;
-    } catch (e) { toast(e.message, 'danger'); }
-};
-window.toggleWf = async function (id, activate) {
-    try {
-        await api.post(`${api_proj}/workflows/${id}/${activate ? 'activate' : 'deactivate'}`);
-        toast(activate ? 'Activated.' : 'Deactivated.');
-        loadWorkflows();
-    } catch (e) { toast(e.message, 'danger'); }
-};
-document.getElementById('btnWfNew').addEventListener('click', () => {
-    document.getElementById('wfName').value = '';
-    document.getElementById('wfSpec').value = JSON.stringify({
-        initialStep: 'send',
+// Internal model: an object {name, expiration, initialStep, steps: {…}}
+// Form view edits the model directly; JSON view serialises it; Diagram view
+// renders it via Mermaid. Source of truth = the model object; views sync
+// to/from it.
+let wfModel = newWorkflowModel();
+let wfActiveView = 'form';
+
+function newWorkflowModel() {
+    return {
+        name: '',
         expiration: '60.00:00:00',
+        initialStep: 'send',
         steps: {
             send: {
                 type: 'send_sms',
@@ -511,19 +484,338 @@ document.getElementById('btnWfNew').addEventListener('click', () => {
             },
             complete: { type: 'complete' }
         }
-    }, null, 2);
+    };
+}
+
+async function loadWorkflows() {
+    try {
+        const rows = await api.get(`${api_proj}/workflows`);
+        const body = document.getElementById('wfBody');
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="4" class="text-muted">No workflows yet.</td></tr>';
+        } else {
+            body.innerHTML = rows.map(w => `
+                <tr>
+                    <td><a href="#" onclick="loadWfDef('${esc(w.id)}');return false">${esc(w.name)}</a></td>
+                    <td>${w.version}</td>
+                    <td>${w.active ? '<i class="bi bi-check-circle-fill text-success"></i>' : ''}</td>
+                    <td>${w.active
+                        ? `<button class="btn btn-link btn-sm p-0" onclick="toggleWf('${esc(w.id)}',false)">Deactivate</button>`
+                        : `<button class="btn btn-link btn-sm p-0" onclick="toggleWf('${esc(w.id)}',true)">Activate</button>`}</td>
+                </tr>`).join('');
+        }
+    } catch (e) { toast(e.message, 'danger'); }
+}
+
+window.loadWfDef = async function (id) {
+    try {
+        const d = await api.get(`${api_proj}/workflows/${id}`);
+        wfModel = {
+            name: d.name,
+            expiration: d.spec.expiration ?? '60.00:00:00',
+            initialStep: d.spec.initialStep,
+            steps: d.spec.steps || {}
+        };
+        document.getElementById('wfEditTitle').textContent = `Editor — ${d.name} v${d.version}`;
+        renderWf();
+    } catch (e) { toast(e.message, 'danger'); }
+};
+
+window.toggleWf = async function (id, activate) {
+    try {
+        await api.post(`${api_proj}/workflows/${id}/${activate ? 'activate' : 'deactivate'}`);
+        toast(activate ? 'Activated.' : 'Deactivated.');
+        loadWorkflows();
+    } catch (e) { toast(e.message, 'danger'); }
+};
+
+document.getElementById('btnWfNew').addEventListener('click', () => {
+    wfModel = newWorkflowModel();
     document.getElementById('wfEditTitle').textContent = 'Editor — new';
+    renderWf();
 });
+
+// --- View switcher ---
+document.querySelectorAll('#wfViewSwitch button').forEach(btn => {
+    btn.addEventListener('click', () => {
+        // Sync the current view's edits back to the model before switching.
+        if (wfActiveView === 'form') captureFormToModel();
+        else if (wfActiveView === 'json') {
+            try { captureJsonToModel(); }
+            catch (e) { toast('JSON invalid: ' + e.message, 'danger'); return; }
+        }
+        wfActiveView = btn.dataset.view;
+        document.querySelectorAll('#wfViewSwitch button').forEach(b =>
+            b.classList.toggle('active', b === btn));
+        renderWf();
+    });
+});
+
+function renderWf() {
+    document.getElementById('wfName').value = wfModel.name;
+    document.getElementById('wfExp').value  = wfModel.expiration;
+
+    document.getElementById('wfFormView').style.display    = wfActiveView === 'form'    ? '' : 'none';
+    document.getElementById('wfJsonView').style.display    = wfActiveView === 'json'    ? '' : 'none';
+    document.getElementById('wfDiagramView').style.display = wfActiveView === 'diagram' ? '' : 'none';
+
+    if (wfActiveView === 'form')    renderFormView();
+    if (wfActiveView === 'json')    renderJsonView();
+    if (wfActiveView === 'diagram') renderDiagramView();
+}
+
+// --- FORM VIEW ---
+function renderFormView() {
+    const stepNames = Object.keys(wfModel.steps);
+
+    // Initial step dropdown
+    const init = document.getElementById('wfInitial');
+    init.innerHTML = stepNames.map(n =>
+        `<option value="${esc(n)}" ${n === wfModel.initialStep ? 'selected' : ''}>${esc(n)}</option>`).join('');
+    init.onchange = () => { wfModel.initialStep = init.value; };
+
+    // Step cards
+    const list = document.getElementById('wfStepsList');
+    list.innerHTML = stepNames.map(name => stepCardHtml(name, wfModel.steps[name], stepNames)).join('') || '';
+
+    // Bind events on each card
+    list.querySelectorAll('[data-step]').forEach(card => bindStepCard(card));
+}
+
+function stepCardHtml(name, step, allSteps) {
+    const otherSteps = allSteps.filter(s => s !== name);
+    const signalRows = Object.entries(step.onSignal || {}).map(([sig, tgt]) => `
+        <tr data-sig="${esc(sig)}">
+            <td><input class="form-control form-control-sm sig-name" value="${esc(sig)}" /></td>
+            <td>→ <select class="form-select form-select-sm sig-target">
+                ${allSteps.map(s => `<option value="${esc(s)}" ${s===tgt?'selected':''}>${esc(s)}</option>`).join('')}
+            </select></td>
+            <td><button type="button" class="btn btn-link btn-sm text-danger p-0 sig-del">✕</button></td>
+        </tr>`).join('');
+
+    return `
+    <div class="card mb-2" data-step="${esc(name)}">
+      <div class="card-body p-2">
+        <div class="row g-2">
+          <div class="col-md-4">
+            <label class="form-label small">Step name</label>
+            <input class="form-control form-control-sm step-name" value="${esc(name)}" />
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">Type</label>
+            <select class="form-select form-select-sm step-type">
+              <option value="send_sms" ${step.type==='send_sms'?'selected':''}>send_sms</option>
+              <option value="wait"     ${step.type==='wait'    ?'selected':''}>wait</option>
+              <option value="complete" ${step.type==='complete'?'selected':''}>complete</option>
+            </select>
+          </div>
+          <div class="col-md-3 step-wait-col" style="${step.type==='complete'?'display:none':''}">
+            <label class="form-label small">Wait (d.HH:MM:SS)</label>
+            <input class="form-control form-control-sm step-wait" value="${esc(step.wait||'')}" placeholder="2.00:00:00" />
+          </div>
+          <div class="col-md-2 step-maxrep-col" style="${step.type==='complete'?'display:none':''}">
+            <label class="form-label small">Max repeats</label>
+            <input type="number" min="1" max="20" class="form-control form-control-sm step-maxrep"
+                   value="${step.maxRepeats||1}" />
+          </div>
+          <div class="col-12 step-template-col" style="${step.type==='send_sms'?'':'display:none'}">
+            <label class="form-label small">SMS body template (use {{column}} placeholders)</label>
+            <textarea class="form-control form-control-sm step-template" rows="2">${esc(step.template||'')}</textarea>
+          </div>
+          <div class="col-12 step-transitions-col" style="${step.type==='complete'?'display:none':''}">
+            <label class="form-label small">Transitions</label>
+            <table class="table table-sm mb-1">
+              <thead><tr><th>On signal</th><th>Target</th><th></th></tr></thead>
+              <tbody class="sig-body">${signalRows}</tbody>
+            </table>
+            <button type="button" class="btn btn-link btn-sm p-0 add-sig">+ Add signal</button>
+            <span class="ms-3 small">On timeout →
+              <select class="form-select form-select-sm d-inline-block w-auto step-ontimeout">
+                <option value="">(none)</option>
+                ${allSteps.map(s => `<option value="${esc(s)}" ${s===step.onTimeout?'selected':''}>${esc(s)}</option>`).join('')}
+              </select>
+            </span>
+          </div>
+          <div class="col-12 text-end">
+            <button type="button" class="btn btn-link btn-sm text-danger p-0 step-del">
+              <i class="bi bi-trash"></i> Delete step
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function bindStepCard(card) {
+    // Type change toggles which fields show
+    const typeEl = card.querySelector('.step-type');
+    typeEl.addEventListener('change', () => {
+        const isComplete = typeEl.value === 'complete';
+        const isSms      = typeEl.value === 'send_sms';
+        card.querySelector('.step-wait-col').style.display        = isComplete ? 'none' : '';
+        card.querySelector('.step-maxrep-col').style.display      = isComplete ? 'none' : '';
+        card.querySelector('.step-template-col').style.display    = isSms ? '' : 'none';
+        card.querySelector('.step-transitions-col').style.display = isComplete ? 'none' : '';
+    });
+
+    card.querySelector('.add-sig').addEventListener('click', () => {
+        const tbody = card.querySelector('.sig-body');
+        const others = Object.keys(wfModel.steps);
+        tbody.insertAdjacentHTML('beforeend', `
+            <tr data-sig="">
+                <td><input class="form-control form-control-sm sig-name" value="" /></td>
+                <td>→ <select class="form-select form-select-sm sig-target">
+                    ${others.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('')}
+                </select></td>
+                <td><button type="button" class="btn btn-link btn-sm text-danger p-0 sig-del">✕</button></td>
+            </tr>`);
+        // Bind the new delete
+        const newRow = tbody.lastElementChild;
+        newRow.querySelector('.sig-del').addEventListener('click', () => newRow.remove());
+    });
+    card.querySelectorAll('.sig-del').forEach(b => b.addEventListener('click', (ev) =>
+        ev.target.closest('tr').remove()));
+    card.querySelector('.step-del').addEventListener('click', () => {
+        if (!confirm('Delete this step?')) return;
+        // Capture current state first so other unsaved edits aren't lost.
+        captureFormToModel();
+        const stepName = card.dataset.step;
+        delete wfModel.steps[stepName];
+        if (wfModel.initialStep === stepName) {
+            wfModel.initialStep = Object.keys(wfModel.steps)[0] || '';
+        }
+        renderFormView();
+    });
+}
+
+document.getElementById('btnWfAddStep').addEventListener('click', () => {
+    captureFormToModel();
+    let name = 'step', i = 1;
+    while (wfModel.steps[name]) name = 'step' + (++i);
+    wfModel.steps[name] = { type: 'wait', wait: '1.00:00:00', maxRepeats: 1, onSignal: {} };
+    renderFormView();
+});
+
+function captureFormToModel() {
+    const list = document.getElementById('wfStepsList');
+    if (!list || !list.children.length) return;
+    const newSteps = {};
+    let firstName = null;
+    list.querySelectorAll('[data-step]').forEach(card => {
+        const oldName = card.dataset.step;
+        const newName = card.querySelector('.step-name').value.trim() || oldName;
+        if (!firstName) firstName = newName;
+        const type = card.querySelector('.step-type').value;
+        const step = { type };
+        if (type !== 'complete') {
+            step.wait = card.querySelector('.step-wait').value.trim() || undefined;
+            const mx = parseInt(card.querySelector('.step-maxrep').value, 10);
+            if (mx > 0) step.maxRepeats = mx;
+            step.onSignal = {};
+            card.querySelectorAll('.sig-body tr').forEach(tr => {
+                const sig = tr.querySelector('.sig-name').value.trim();
+                const tgt = tr.querySelector('.sig-target').value;
+                if (sig && tgt) step.onSignal[sig] = tgt;
+            });
+            const tmo = card.querySelector('.step-ontimeout').value;
+            if (tmo) step.onTimeout = tmo;
+        }
+        if (type === 'send_sms') {
+            step.template = card.querySelector('.step-template').value;
+        }
+        newSteps[newName] = step;
+    });
+    wfModel.steps = newSteps;
+    wfModel.name = document.getElementById('wfName').value.trim();
+    wfModel.expiration = document.getElementById('wfExp').value.trim() || '60.00:00:00';
+    if (!(wfModel.initialStep in newSteps)) wfModel.initialStep = firstName;
+}
+
+// --- JSON VIEW ---
+function renderJsonView() {
+    const spec = {
+        initialStep: wfModel.initialStep,
+        expiration:  wfModel.expiration,
+        steps:       wfModel.steps
+    };
+    document.getElementById('wfSpec').value = JSON.stringify(spec, null, 2);
+}
+function captureJsonToModel() {
+    const spec = JSON.parse(document.getElementById('wfSpec').value);
+    if (!spec || typeof spec !== 'object') throw new Error('Spec must be an object.');
+    if (!spec.steps || typeof spec.steps !== 'object') throw new Error('Spec.steps required.');
+    wfModel.name        = document.getElementById('wfName').value.trim();
+    wfModel.expiration  = spec.expiration ?? '60.00:00:00';
+    wfModel.initialStep = spec.initialStep;
+    wfModel.steps       = spec.steps;
+}
+
+// --- DIAGRAM VIEW (Mermaid) ---
+let mermaidCounter = 0;
+async function renderDiagramView() {
+    const out = document.getElementById('wfDiagram');
+    if (!Object.keys(wfModel.steps).length) {
+        out.innerHTML = '<p class="text-muted small">No steps to render.</p>';
+        return;
+    }
+    const mermaid = window.mermaid;
+    if (!mermaid) { out.textContent = 'Mermaid library not loaded.'; return; }
+    mermaid.initialize({ startOnLoad: false, theme: 'default' });
+
+    // Build a state diagram from the model.
+    const lines = ['stateDiagram-v2'];
+    if (wfModel.initialStep) lines.push(`    [*] --> ${safeId(wfModel.initialStep)}`);
+    for (const [name, s] of Object.entries(wfModel.steps)) {
+        const id = safeId(name);
+        if (s.type === 'complete') {
+            lines.push(`    ${id} --> [*]`);
+            continue;
+        }
+        for (const [sig, tgt] of Object.entries(s.onSignal || {})) {
+            lines.push(`    ${id} --> ${safeId(tgt)} : ${sig}`);
+        }
+        if (s.onTimeout) {
+            lines.push(`    ${id} --> ${safeId(s.onTimeout)} : timeout`);
+        }
+    }
+    const src = lines.join('\n');
+    try {
+        const { svg } = await mermaid.render('wf-d-' + (++mermaidCounter), src);
+        out.innerHTML = svg;
+    } catch (e) {
+        out.innerHTML =
+            `<div class="text-danger small">Diagram error: ${esc(e.message)}</div>` +
+            `<pre class="small">${esc(src)}</pre>`;
+    }
+}
+function safeId(name) {
+    // Mermaid state names: alphanumeric + underscore. Replace anything else.
+    return (name || 'unnamed').replace(/[^A-Za-z0-9_]/g, '_');
+}
+
+// --- Save handler ---
 document.getElementById('btnWfSave').addEventListener('click', async () => {
     try {
-        const spec = JSON.parse(document.getElementById('wfSpec').value);
-        const r = await api.post(`${api_proj}/workflows`, {
-            name: document.getElementById('wfName').value.trim(),
-            spec
-        });
+        if (wfActiveView === 'form') captureFormToModel();
+        else if (wfActiveView === 'json') captureJsonToModel();
+        const spec = {
+            initialStep: wfModel.initialStep,
+            expiration:  wfModel.expiration,
+            steps:       wfModel.steps
+        };
+        if (!wfModel.name) { toast('Workflow name is required.', 'warning'); return; }
+        if (!spec.initialStep || !(spec.initialStep in spec.steps)) {
+            toast('Initial step must reference an existing step.', 'warning'); return;
+        }
+        const r = await api.post(`${api_proj}/workflows`, { name: wfModel.name, spec });
         toast(`Saved v${r.version}. Activate it from the list.`);
         loadWorkflows();
     } catch (e) { toast('Save failed: ' + e.message, 'danger'); }
+});
+
+// Render an empty model on first paint of the workflows tab
+document.querySelector('a[href="#tab-workflows"]').addEventListener('shown.bs.tab', () => {
+    if (!loaded.wfRendered) { loaded.wfRendered = true; renderWf(); }
 });
 
 // ==================== SMS ====================
@@ -558,7 +850,7 @@ async function loadSmsList() {
         }
         body.innerHTML = rows.map(s => {
             const c = SMS_STATUS_COLOR[s.status] || 'secondary';
-            return `<tr>
+            return `<tr style="cursor:pointer" onclick="showSmsDetail('${esc(s.id)}')">
                 <td class="small">${fmtDate(s.createdAt)}</td>
                 <td><code class="small">${esc(s.maskedTo)}</code></td>
                 <td class="small">${esc(s.provider)}</td>
@@ -570,8 +862,50 @@ async function loadSmsList() {
         }).join('');
     } catch (e) { toast(e.message, 'danger'); }
 }
+
+window.showSmsDetail = async function (id) {
+    const body = document.getElementById('smsDetailBody');
+    body.textContent = 'Loading…';
+    new bootstrap.Modal(document.getElementById('smsDetailModal')).show();
+    try {
+        const d = await api.get(`${api_proj}/sms/${id}`);
+        body.textContent = JSON.stringify(d, null, 2);
+    } catch (e) { body.textContent = 'Error: ' + e.message; }
+};
 document.getElementById('btnSmsRefresh').addEventListener('click', loadSmsList);
 document.getElementById('smsFilter').addEventListener('change', loadSmsList);
+
+// ==================== AUTO-POLLING ====================
+// Light-touch real-time: poll the active list every 10s while:
+//   (a) the relevant tab is shown, AND
+//   (b) the browser tab itself is visible (no work if user switched away)
+// Mirrors the cheapest possible SignalR-equivalent without WebSocket overhead.
+const POLL_MS = 10_000;
+const pollers = {};
+
+function startPoll(name, fn) {
+    if (pollers[name]) return;
+    pollers[name] = setInterval(() => {
+        if (document.visibilityState === 'visible') fn();
+    }, POLL_MS);
+}
+function stopPoll(name) {
+    if (pollers[name]) { clearInterval(pollers[name]); pollers[name] = null; }
+}
+
+document.querySelectorAll('[data-bs-toggle="tab"]').forEach(el => {
+    el.addEventListener('shown.bs.tab', (ev) => {
+        // Stop every poller, then start the one(s) for the visible tab.
+        Object.keys(pollers).forEach(stopPoll);
+        const target = ev.target.getAttribute('href');
+        if (target === '#tab-sms')     startPoll('sms',     loadSmsList);
+        if (target === '#tab-sources') startPoll('batches', loadBatches);
+    });
+});
+// Stop polling when user backgrounds the tab (saves bandwidth + DB hits).
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') Object.keys(pollers).forEach(stopPoll);
+});
 
 // ==================== SHORTLINKS ====================
 async function loadShortlinks() {
@@ -585,7 +919,13 @@ async function loadShortlinks() {
         body.innerHTML = rows.map(s => `
             <tr>
                 <td><code>${esc(s.slug)}</code></td>
-                <td>${s.clickCount}${s.maxClicks ? ' / ' + s.maxClicks : ''}</td>
+                <td>
+                    ${s.clickCount}${s.maxClicks ? ' / ' + s.maxClicks : ''}
+                    ${s.clickCount > 0
+                        ? `<button class="btn btn-link btn-sm p-0 ms-1"
+                                   onclick="showSlClicks('${esc(s.id)}')">history</button>`
+                        : ''}
+                </td>
                 <td>${s.expiresAt ? fmtDate(s.expiresAt) : '—'}</td>
                 <td>${s.disabled ? '<span class="text-danger">yes</span>' : ''}</td>
                 <td>${s.disabled ? '' :
@@ -601,6 +941,28 @@ window.disableSl = async function (id) {
         toast('Disabled.');
         loadShortlinks();
     } catch (e) { toast(e.message, 'danger'); }
+};
+
+window.showSlClicks = async function (id) {
+    const body = document.getElementById('slClicksBody');
+    body.innerHTML = '<tr><td colspan="4" class="text-muted">Loading…</td></tr>';
+    new bootstrap.Modal(document.getElementById('slClicksModal')).show();
+    try {
+        const rows = await api.get(`${api_proj}/shortlinks/${id}/clicks?take=200`);
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="4" class="text-muted">No clicks yet.</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(c => `
+            <tr>
+                <td class="small">${fmtDate(c.clickedAt)}</td>
+                <td class="small">${esc(c.deviceClass||'unknown')}</td>
+                <td class="small">${esc(c.country||'')}</td>
+                <td class="small text-muted text-truncate" style="max-width:380px">${esc(c.userAgent||'')}</td>
+            </tr>`).join('');
+    } catch (e) {
+        body.innerHTML = `<tr><td colspan="4" class="text-danger">${esc(e.message)}</td></tr>`;
+    }
 };
 document.getElementById('formSlCreate').addEventListener('submit', async (ev) => {
     ev.preventDefault();
