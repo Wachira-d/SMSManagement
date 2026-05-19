@@ -6,10 +6,21 @@
     <h1 class="h3 mb-0">User management</h1>
     <div class="d-flex gap-2">
         <input id="usrSearch" class="form-control form-control-sm" style="width:240px"
-               placeholder="Search email / name / username" />
-        <button id="btnUsrRefresh" class="btn btn-sm btn-outline-secondary">
-            <i class="bi bi-arrow-clockwise"></i> Refresh
+               placeholder="Search email / name / username" aria-label="Search users" />
+        <button id="btnUsrRefresh" class="btn btn-sm btn-outline-secondary"
+                aria-label="Refresh user list">
+            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh
         </button>
+    </div>
+</div>
+
+<!-- Bulk action bar — appears when at least one row is checked. -->
+<div id="usrBulkBar" class="alert alert-light border d-none d-flex justify-content-between align-items-center py-2">
+    <span><span id="usrBulkCount">0</span> selected</span>
+    <div class="btn-group btn-group-sm">
+        <button id="btnUsrBulkEnable"  class="btn btn-outline-success">Enable</button>
+        <button id="btnUsrBulkDisable" class="btn btn-outline-danger">Disable</button>
+        <button id="btnUsrBulkUnlock"  class="btn btn-outline-warning">Unlock</button>
     </div>
 </div>
 
@@ -18,6 +29,8 @@
         <table class="table table-sm mb-0 align-middle">
             <thead class="table-light">
                 <tr>
+                    <th style="width:32px"><input type="checkbox" id="usrSelectAll"
+                           aria-label="Select all visible users" /></th>
                     <th>Email / Username</th>
                     <th>Display</th>
                     <th>Status</th>
@@ -26,7 +39,7 @@
                     <th class="text-end">Actions</th>
                 </tr>
             </thead>
-            <tbody id="usrBody"><tr><td colspan="6" class="text-muted">Loading…</td></tr></tbody>
+            <tbody id="usrBody"><tr><td colspan="7" class="text-muted">Loading…</td></tr></tbody>
         </table>
     </div>
     <div class="card-footer d-flex justify-content-between align-items-center small text-muted">
@@ -89,7 +102,7 @@
             total = data.total;
             const body = document.getElementById('usrBody');
             if (!data.items.length) {
-                body.innerHTML = '<tr><td colspan="6" class="text-muted">No matches.</td></tr>';
+                body.innerHTML = '<tr><td colspan="7" class="text-muted">No matches.</td></tr>';
             } else {
                 body.innerHTML = data.items.map(u => row(u)).join('');
             }
@@ -110,6 +123,8 @@
             ? '<span class="badge bg-dark"><i class="bi bi-shield-lock"></i> Admin</span>'
             : '';
         return `<tr>
+            <td><input type="checkbox" class="usr-row-check" value="${esc(u.id)}"
+                       aria-label="Select user for bulk action" /></td>
             <td>
                 <a href="#" onclick="showUser('${esc(u.id)}');return false">
                     <strong>${esc(u.email || u.username)}</strong>
@@ -288,6 +303,45 @@
     document.getElementById('btnUsrRefresh').addEventListener('click', load);
     document.getElementById('btnUsrPrev').addEventListener('click', () => { skip = Math.max(0, skip - PAGE); load(); });
     document.getElementById('btnUsrNext').addEventListener('click', () => { skip += PAGE; load(); });
+
+    // ============ BULK ACTIONS ============
+    function refreshBulk() {
+        const checks = document.querySelectorAll('.usr-row-check:checked');
+        const bar = document.getElementById('usrBulkBar');
+        document.getElementById('usrBulkCount').textContent = checks.length;
+        bar.classList.toggle('d-none', checks.length === 0);
+    }
+    document.addEventListener('change', (ev) => {
+        if (ev.target.classList?.contains('usr-row-check')) refreshBulk();
+        if (ev.target.id === 'usrSelectAll') {
+            document.querySelectorAll('.usr-row-check').forEach(cb => cb.checked = ev.target.checked);
+            refreshBulk();
+        }
+    });
+    async function bulk(action, label, danger) {
+        const ids = Array.from(document.querySelectorAll('.usr-row-check:checked')).map(cb => cb.value);
+        if (!ids.length) return;
+        const ok = await window.confirmAction({
+            title: `Bulk ${label}`,
+            mode: danger ? 'math' : 'simple',
+            message: `${label} <strong>${ids.length}</strong> user${ids.length === 1 ? '' : 's'}?`,
+            okLabel: label,
+            okClass: danger ? 'btn-danger' : 'btn-primary'
+        });
+        if (!ok) return;
+        try {
+            const r = await api.post(`/api/admin/users/bulk/${action}`, { userIds: ids });
+            const okCount = r.results.filter(x => x.ok).length;
+            const failCount = r.results.length - okCount;
+            toast(`${label}: ${okCount} ok${failCount ? `, ${failCount} skipped` : ''}.`,
+                  failCount ? 'warning' : 'success');
+            load();
+        } catch (e) { toast(e.message, 'danger'); }
+    }
+    document.getElementById('btnUsrBulkEnable') .addEventListener('click', () => bulk('enable',  'Enable',  false));
+    document.getElementById('btnUsrBulkDisable').addEventListener('click', () => bulk('disable', 'Disable', true));
+    document.getElementById('btnUsrBulkUnlock') .addEventListener('click', () => bulk('unlock',  'Unlock',  false));
+
     load();
 })();
 </script>

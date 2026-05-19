@@ -295,6 +295,87 @@ public sealed class AdminUsersController : ControllerBase
         return Ok(new RotatePasswordResult(u.ExternalSubject, newPwd));
     }
 
+    public sealed record BulkRequest(Guid[] UserIds);
+
+    /// <summary>
+    /// Bulk enable / disable / unlock — accepts up to 200 ids at once.
+    /// Each row processed independently so a single bad id doesn't poison
+    /// the batch; result reports per-id success or skip reason.
+    /// </summary>
+    [HttpPost("bulk/{action}")]
+    public async Task<IActionResult> Bulk(string action, [FromBody] BulkRequest req, CancellationToken ct)
+    {
+        if (req.UserIds is null || req.UserIds.Length == 0)
+            return BadRequest(new { Message = "No userIds." });
+        if (req.UserIds.Length > 200)
+            return BadRequest(new { Message = "Cap is 200 per request." });
+
+        var act = action?.ToLowerInvariant();
+        if (act is not ("enable" or "disable" or "unlock"))
+            return BadRequest(new { Message = "Action must be enable / disable / unlock." });
+
+        // Self-disable / self-unlock distinction: disabling yourself is a
+        // foot-gun (lock-out); enable/unlock for self is harmless.
+        if (act == "disable" && req.UserIds.Contains(_me.UserId))
+            return BadRequest(new { Message = "Cannot disable your own account in a bulk op." });
+
+        var ids = req.UserIds.Distinct().ToArray();
+        var users = await _db.Users.Where(u => ids.Contains(u.Id)).ToListAsync(ct);
+        var byExternal = users.ToDictionary(u => u.ExternalSubject, u => u, StringComparer.OrdinalIgnoreCase);
+        var caches = await _db.UserCaches
+            .Where(c => byExternal.Keys.Contains(c.Username))
+            .ToListAsync(ct);
+        var cacheByName = caches.ToDictionary(c => c.Username, c => c, StringComparer.OrdinalIgnoreCase);
+
+        var results = new List<object>(users.Count);
+        foreach (var u in users)
+        {
+            cacheByName.TryGetValue(u.ExternalSubject, out var cache);
+            switch (act)
+            {
+                case "enable":
+                    u.Status = "Active";
+                    if (cache is not null) cache.IsEnabled = true;
+                    results.Add(new { id = u.Id, ok = true, action = act });
+                    break;
+                case "disable":
+                    u.Status = "Suspended";
+                    if (cache is not null) cache.IsEnabled = false;
+                    results.Add(new { id = u.Id, ok = true, action = act });
+                    break;
+                case "unlock":
+                    if (cache is null)
+                    {
+                        results.Add(new { id = u.Id, ok = false, action = act, reason = "no_cache" });
+                    }
+                    else
+                    {
+                        cache.IsLocked = false;
+                        cache.FailedAttempts = 0;
+                        cache.UpdatedAt = DateTimeOffset.UtcNow;
+                        results.Add(new { id = u.Id, ok = true, action = act });
+                    }
+                    break;
+            }
+        }
+        // Skipped ids (no Users row) — surface so the caller knows nothing happened to them.
+        var foundIds = users.Select(u => u.Id).ToHashSet();
+        foreach (var missing in ids.Where(i => !foundIds.Contains(i)))
+            results.Add(new { id = missing, ok = false, action = act, reason = "not_found" });
+
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.WriteAsync(new AuditEntry(
+            _me.UserId, $"admin.user.bulk_{act}", "User",
+            string.Join(",", users.Select(u => u.Id)),
+            HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            Request.Headers.UserAgent.ToString(),
+            HttpContext.TraceIdentifier,
+            After: new { count = users.Count }), ct);
+
+        return Ok(new { results });
+    }
+
     private static string GeneratePassword()
     {
         const string alpha = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";

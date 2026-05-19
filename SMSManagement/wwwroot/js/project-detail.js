@@ -1168,7 +1168,10 @@ async function loadWfInstances() {
                 const label = typeof r.state === 'number' ? WF_STATE_LABEL[r.state] : r.state;
                 const idx   = typeof r.state === 'number' ? r.state : WF_STATE_LABEL.indexOf(label);
                 const bg    = WF_STATE_BG[idx] || 'secondary';
-                return `<span class="badge bg-${bg} me-1" title="${esc(label)}">${esc(label)}: ${r.count}</span>`;
+                // Click → drill-down modal listing instances + abort buttons.
+                return `<a href="#" class="badge bg-${bg} me-1 text-decoration-none text-white"
+                          onclick="showWfInstances('${esc(d.id)}','${esc(d.name)}',${idx});return false"
+                          title="Show ${esc(label)} instances">${esc(label)}: ${r.count}</a>`;
             }).join('');
             return `<div class="py-2 border-bottom">
                 <div><strong>${esc(d.name)}</strong> v${d.version}
@@ -1180,6 +1183,80 @@ async function loadWfInstances() {
     } catch (e) { toast(e.message, 'danger'); }
 }
 document.getElementById('btnWfInstRefresh')?.addEventListener('click', loadWfInstances);
+
+// Drill-down — opens a modal listing instances in the chosen state, with
+// abort buttons for non-terminal states. Reuses the same backend list
+// endpoint as the API, filtered by (definitionId, state).
+window.showWfInstances = async function (definitionId, definitionName, stateIdx) {
+    const modalEl = document.getElementById('wfInstModal') || buildWfInstModal();
+    document.getElementById('wfInstTitle').textContent =
+        `${definitionName} — ${WF_STATE_LABEL[stateIdx]} instances`;
+    const body = document.getElementById('wfInstBody');
+    body.innerHTML = '<div class="text-muted small">Loading…</div>';
+    new bootstrap.Modal(modalEl).show();
+    try {
+        const rows = await api.get(
+            `${api_proj}/workflow-instances?definitionId=${encodeURIComponent(definitionId)}&state=${stateIdx}&take=100`);
+        const isTerminal = stateIdx === 5 || stateIdx === 6 || stateIdx === 7;
+        if (!rows.length) {
+            body.innerHTML = '<div class="text-muted small">No instances in this state.</div>';
+            return;
+        }
+        body.innerHTML = `<table class="table table-sm align-middle">
+            <thead><tr>
+                <th>Created</th><th>Recipient</th><th>Current step</th>
+                <th>Repeats</th><th>Expires</th><th></th>
+            </tr></thead>
+            <tbody>${rows.map(i => `<tr>
+                <td class="small">${fmtDate(i.createdAt)}</td>
+                <td><code class="small">${esc(i.maskedPhone || '')}</code></td>
+                <td class="small">${esc(i.currentStep)}</td>
+                <td>${i.stepRepeatCount}</td>
+                <td class="small">${fmtDate(i.expiresAt)}</td>
+                <td>${isTerminal ? '' :
+                    `<button class="btn btn-link btn-sm p-0 text-danger"
+                       onclick="abortWfInstance('${esc(i.id)}', '${esc(definitionId)}', ${stateIdx}, '${esc(definitionName)}')"
+                       title="Force this instance to Expired">Abort</button>`}</td>
+            </tr>`).join('')}</tbody></table>`;
+    } catch (e) {
+        body.innerHTML = `<div class="text-danger">${esc(e.message)}</div>`;
+    }
+};
+
+function buildWfInstModal() {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `
+    <div class="modal fade" id="wfInstModal" tabindex="-1">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="wfInstTitle">Instances</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body" id="wfInstBody"></div>
+        </div>
+      </div>
+    </div>`;
+    document.body.appendChild(wrap.firstElementChild);
+    return document.getElementById('wfInstModal');
+}
+
+window.abortWfInstance = async function (instanceId, definitionId, stateIdx, definitionName) {
+    const ok = await window.confirmAction({
+        title: 'Abort instance', mode: 'simple',
+        message: 'Force this workflow instance to <strong>Expired</strong>? It will stop sending immediately and cannot be resumed.',
+        okLabel: 'Abort'
+    });
+    if (!ok) return;
+    try {
+        await api.post(`${api_proj}/workflow-instances/${instanceId}/abort`, {});
+        toast('Instance aborted.');
+        // Re-open the drill-down to show the updated state, plus refresh the
+        // summary so the badge counts update.
+        showWfInstances(definitionId, definitionName, stateIdx);
+        loadWfInstances();
+    } catch (e) { toast(e.message, 'danger'); }
+};
 
 async function loadWorkflows() {
     try {
@@ -2052,31 +2129,54 @@ document.getElementById('audFrom').addEventListener('rangechange', () => {
     }
 });
 
+// Cached audit rows so the dropdowns can filter without a re-fetch.
+let _auditRows = [];
+function renderAudit() {
+    const userFilter   = document.getElementById('audUserPick').value;
+    const actionFilter = document.getElementById('audActionPick').value;
+    const body         = document.getElementById('audBody');
+    const filtered = _auditRows.filter(r =>
+        (!userFilter   || (r.userEmail || r.userId) === userFilter) &&
+        (!actionFilter || r.action === actionFilter));
+    if (!filtered.length) {
+        body.innerHTML = '<tr><td colspan="5" class="text-muted">No audit entries match filters.</td></tr>';
+        return;
+    }
+    body.innerHTML = filtered.map(r => `
+        <tr>
+            <td class="small">${fmtDate(r.at)}</td>
+            <td><span class="small">${esc(r.userEmail || (r.userId||'').slice(0,8))}</span></td>
+            <td><code class="small">${esc(r.action)}</code></td>
+            <td class="small">${esc(r.entityType)}#${esc((r.entityId||'').slice(0,8))}</td>
+            <td class="small text-muted">${esc(r.ipAddress||'')}</td>
+        </tr>`).join('');
+    window.initTable(document.getElementById('tab-audit'));
+}
+
 document.getElementById('btnAud').addEventListener('click', async () => {
     const from = document.getElementById('audFrom').value;
     const to   = document.getElementById('audTo').value;
     try {
-        const rows = await api.get(`${api_proj}/reports/audit-trail` +
+        _auditRows = await api.get(`${api_proj}/reports/audit-trail` +
             `?from=${from}T00:00:00Z&to=${to}T23:59:59Z&take=500`);
-        const body = document.getElementById('audBody');
-        body.dataset.loaded = '1';
-        if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="5" class="text-muted">No audit entries in range.</td></tr>';
-            return;
-        }
-        body.innerHTML = rows.map(r => `
-            <tr>
-                <td class="small">${fmtDate(r.at)}</td>
-                <td><span class="small">${esc(r.userEmail || (r.userId||'').slice(0,8))}</span></td>
-                <td><code class="small">${esc(r.action)}</code></td>
-                <td class="small">${esc(r.entityType)}#${esc((r.entityId||'').slice(0,8))}</td>
-                <td class="small text-muted">${esc(r.ipAddress||'')}</td>
-            </tr>`).join('');
-        // Re-attach sort handlers in case this is the first time the table
-        // got real rows (initTable runs at DOMContentLoaded; idempotent).
-        window.initTable(document.getElementById('tab-audit'));
+        document.getElementById('audBody').dataset.loaded = '1';
+
+        // Populate filter dropdowns from the loaded set — no extra endpoint
+        // needed. Dedup + sort alphabetically; preserves any current selection.
+        const userSel   = document.getElementById('audUserPick');
+        const actionSel = document.getElementById('audActionPick');
+        const prevUser   = userSel.value;
+        const prevAction = actionSel.value;
+        const users   = [...new Set(_auditRows.map(r => r.userEmail || r.userId).filter(Boolean))].sort();
+        const actions = [...new Set(_auditRows.map(r => r.action).filter(Boolean))].sort();
+        userSel.innerHTML   = '<option value="">All users</option>'   + users.map(u   => `<option ${u===prevUser?'selected':''}>${esc(u)}</option>`).join('');
+        actionSel.innerHTML = '<option value="">All actions</option>' + actions.map(a => `<option ${a===prevAction?'selected':''}>${esc(a)}</option>`).join('');
+
+        renderAudit();
     } catch (e) { toast(e.message, 'danger'); }
 });
+document.getElementById('audUserPick').addEventListener('change', renderAudit);
+document.getElementById('audActionPick').addEventListener('change', renderAudit);
 
 // ==================== PROVIDER CREDENTIALS ====================
 // Loaded the first time the SMS tab is shown (alongside loadSmsList). The GET

@@ -1177,9 +1177,21 @@ Other SFTP keys: <code>host, port, username, privateKeyPem, remoteDirectory</cod
             <div class="col-auto"><input type="date" id="audFrom" class="form-control form-control-sm" /></div>
             <div class="col-auto"><input type="date" id="audTo" class="form-control form-control-sm" /></div>
             <div class="col-auto">
+                <select id="audUserPick" class="form-select form-select-sm"
+                        aria-label="Filter by user">
+                    <option value="">All users</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <select id="audActionPick" class="form-select form-select-sm"
+                        aria-label="Filter by action">
+                    <option value="">All actions</option>
+                </select>
+            </div>
+            <div class="col-auto">
                 <input id="audFilter" type="search" class="form-control form-control-sm"
-                       placeholder="Filter rows (action, user, IP…)"
-                       data-filter-target="#audBody" style="width:240px" />
+                       placeholder="Search text…" aria-label="Filter rows by free text"
+                       data-filter-target="#audBody" style="width:200px" />
             </div>
             <div class="col-auto">
                 <button id="btnAud" class="btn btn-primary btn-sm">Load</button>
