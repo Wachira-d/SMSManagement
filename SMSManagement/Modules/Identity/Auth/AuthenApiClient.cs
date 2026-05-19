@@ -50,10 +50,20 @@ public sealed class AuthenApiClient : IAuthenApiClient
         {
             resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            _log.LogWarning(ex, "AuthenAPI transport failure calling {Url}.", url);
-            throw new AuthenApiException($"AuthenAPI unreachable ({url}).", ex);
+            // Genuine user-initiated cancellation — let it propagate.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Includes Polly TimeoutRejectedException and the OperationCanceledException
+            // Polly raises internally when an attempt times out. Logged at Error so the
+            // ErrorLogs admin viewer captures the URL alongside the Polly OnTimeout
+            // event — without the URL the operator can't tell whether it's a misconfig
+            // or a real outage.
+            _log.LogError(ex, "AuthenAPI transport failure calling {Url}.", url);
+            throw new AuthenApiException($"AuthenAPI unreachable ({url}): {ex.Message}", ex);
         }
 
         using (resp)

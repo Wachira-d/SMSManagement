@@ -46,6 +46,15 @@ public sealed class AuthenApiOptions
     public string ApiKey { get; init; } = string.Empty;
 
     public int TimeoutSeconds { get; init; } = 30;
+
+    /// <summary>Polly retry attempts for transient upstream failures.
+    /// Default 1: auth is sensitive — don't burn the timeout budget retrying
+    /// a slow IdP. Set to 0 to disable retries entirely.</summary>
+    public int RetryAttempts { get; init; } = 1;
+
+    /// <summary>Maximum time per attempt before Polly cancels and (optionally)
+    /// retries. Defaults to <see cref="TimeoutSeconds"/> when unset.</summary>
+    public int AttemptTimeoutSeconds { get; init; } = 0;
 }
 
 /// <summary>Signing config for locally-issued JWTs (post-cache-login bearer tokens).

@@ -56,12 +56,33 @@ public static class ModuleRegistration
         services.Configure<AuthenApiOptions>(cfg.GetSection("AuthenApi"));
         services.Configure<LocalJwtOptions>(cfg.GetSection("Auth:LocalJwt"));
         services.AddSingleton<IPasswordHasher, Sha256PasswordHasher>();
+        // AuthenAPI uses its own resilience config — auth is sensitive, so we
+        // don't pipe it through the default ConfigureResilience (which retries
+        // 3× with 10s attempts and burns the budget on a slow IdP). Timeouts
+        // come from AuthenApiOptions so operators can tune per environment.
         services.AddHttpClient<IAuthenApiClient, AuthenApiClient>((sp, http) =>
         {
             var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AuthenApiOptions>>().Value;
             if (opts.TimeoutSeconds > 0)
                 http.Timeout = TimeSpan.FromSeconds(opts.TimeoutSeconds);
-        }).AddStandardResilienceHandler(ConfigureResilience);
+        }).AddStandardResilienceHandler().Configure((o, sp) =>
+        {
+            var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AuthenApiOptions>>().Value;
+            var total   = Math.Max(1, opts.TimeoutSeconds);
+            var attempt = opts.AttemptTimeoutSeconds > 0 ? opts.AttemptTimeoutSeconds : total;
+            // Polly requires AttemptTimeout ≤ TotalRequestTimeout/2 when retries
+            // are configured, otherwise it throws on pipeline build. Cap it.
+            if (opts.RetryAttempts > 0 && attempt > total / 2)
+                attempt = Math.Max(1, total / 2);
+
+            o.AttemptTimeout.Timeout       = TimeSpan.FromSeconds(attempt);
+            o.TotalRequestTimeout.Timeout  = TimeSpan.FromSeconds(total);
+            o.Retry.MaxRetryAttempts       = opts.RetryAttempts;
+            o.Retry.BackoffType            = DelayBackoffType.Exponential;
+            o.Retry.UseJitter              = true;
+            o.CircuitBreaker.FailureRatio  = 0.5;
+            o.CircuitBreaker.MinimumThroughput = 10;
+        });
         services.AddScoped<IUserCacheAuthenticator, UserCacheAuthenticator>();
         services.AddScoped<IJwtTokenIssuer, JwtTokenIssuer>();
         services.AddScoped<IRefreshTokenStore, RefreshTokenStore>();
