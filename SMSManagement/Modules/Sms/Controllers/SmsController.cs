@@ -70,6 +70,43 @@ public sealed class SmsController : ControllerBase
         return Ok(msg);
     }
 
+    /// <summary>
+    /// Re-dispatch a previously failed / rejected SMS. Resets attempt counter
+    /// and ErrorCode, flips status back to Queued, then drives the dispatcher
+    /// synchronously so the operator sees the new outcome inline.
+    /// Only Failed / Rejected / Expired messages are eligible — Sent /
+    /// Delivered messages would be a duplicate send.
+    /// </summary>
+    [HttpPost("{messageId:guid}/retry")]
+    public async Task<IActionResult> Retry(Guid projectId, Guid messageId, CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Member, ct);
+        await _features.EnsureAsync(projectId, ProjectFeature.Sms, ct);
+
+        var msg = await _db.SmsMessages
+            .FirstOrDefaultAsync(m => m.Id == messageId && m.ProjectId == projectId, ct);
+        if (msg is null) return NotFound();
+
+        if (msg.Status is SmsStatus.Sent or SmsStatus.Delivered)
+            return Conflict(new { Message = $"Message is {msg.Status}; cannot retry — duplicate send." });
+
+        msg.Status = SmsStatus.Queued;
+        msg.Attempts = 0;
+        msg.ErrorCode = null;
+        msg.SentAt = null;
+        msg.DeliveredAt = null;
+        await _db.SaveChangesAsync(ct);
+
+        await _dispatcher.DispatchAsync(messageId, ct);
+
+        var refreshed = await _db.SmsMessages
+            .AsNoTracking()
+            .Where(m => m.Id == messageId)
+            .Select(m => new { m.Id, m.Status, m.ProviderMessageId, m.ErrorCode, m.Attempts, m.SentAt })
+            .FirstAsync(ct);
+        return Ok(refreshed);
+    }
+
     [HttpGet("{messageId:guid}")]
     public async Task<IActionResult> Get(Guid projectId, Guid messageId, CancellationToken ct)
     {

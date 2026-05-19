@@ -1799,6 +1799,15 @@ async function loadSmsList() {
         }
         body.innerHTML = rows.map(s => {
             const c = SMS_STATUS_COLOR[s.status] || 'secondary';
+            // Only failed-class states are retryable. Sent/Delivered intentionally
+            // can't be retried — that would be a duplicate send.
+            const retryable = ['Failed','Rejected','Expired'].includes(s.status);
+            const retryBtn = retryable
+                ? `<button class="btn btn-sm btn-link p-0 text-warning"
+                       title="Retry this message"
+                       onclick="event.stopPropagation(); retrySms('${esc(s.id)}')">
+                       <i class="bi bi-arrow-clockwise"></i></button>`
+                : '';
             return `<tr style="cursor:pointer" onclick="showSmsDetail('${esc(s.id)}')">
                 <td class="small">${fmtDate(s.createdAt)}</td>
                 <td><code class="small">${esc(s.maskedTo)}</code></td>
@@ -1806,11 +1815,21 @@ async function loadSmsList() {
                 <td><span class="badge bg-${c}">${esc(s.status)}</span>
                     ${s.errorCode ? `<small class="text-danger ms-1">${esc(s.errorCode)}</small>` : ''}
                 </td>
-                <td>${s.attempts}</td>
+                <td>${s.attempts} ${retryBtn}</td>
             </tr>`;
         }).join('');
     } catch (e) { toast(e.message, 'danger'); }
 }
+
+window.retrySms = async function (id) {
+    if (!confirm('Re-send this message? Attempt counter resets to zero.')) return;
+    try {
+        const r = await api.post(`${api_proj}/sms/${id}/retry`, {});
+        toast(`Retry ${r.status === 'Sent' || r.status === 'Delivered' ? 'succeeded' : 'attempted'}: ${r.status}`,
+              r.status === 'Failed' || r.status === 'Rejected' ? 'warning' : 'success');
+        loadSmsList();
+    } catch (e) { toast(e.message, 'danger'); }
+};
 
 window.showSmsDetail = async function (id) {
     const body = document.getElementById('smsDetailBody');
