@@ -28,6 +28,8 @@ public sealed class WorkflowEngine : IWorkflowEngine
 
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
+    private readonly Modules.Core.Notifications.IUserNotifier _notify;
+
     public WorkflowEngine(
         AppDbContext db,
         FieldEncryptor crypto,
@@ -36,7 +38,8 @@ public sealed class WorkflowEngine : IWorkflowEngine
         IOptions<ShortlinkOptions> shortlinkOpts,
         CampaignMetrics metrics,
         TimeProvider clock,
-        ILogger<WorkflowEngine> log)
+        ILogger<WorkflowEngine> log,
+        Modules.Core.Notifications.IUserNotifier notify)
     {
         _db = db;
         _crypto = crypto;
@@ -46,6 +49,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
         _metrics = metrics;
         _clock = clock;
         _log = log;
+        _notify = notify;
     }
 
     public async Task<Guid> StartAsync(
@@ -113,6 +117,29 @@ public sealed class WorkflowEngine : IWorkflowEngine
             .ToListAsync(ct);
         foreach (var inst in expired)
             await TransitionAsync(inst, "__expired__", "expiration", ct, WorkflowState.Expired);
+
+        // Notify project members in bulk so the Workflows tab badge update
+        // shows up live. One toast per project (not per instance) so a tick
+        // that expires 1000 rows doesn't fire 1000 toasts.
+        if (expired.Count > 0)
+        {
+            var byProject = await _db.WorkflowDefinitions
+                .Where(d => expired.Select(e => e.DefinitionId).Contains(d.Id))
+                .Select(d => new { d.Id, d.ProjectId })
+                .ToListAsync(ct);
+            var projMap = byProject.ToDictionary(x => x.Id, x => x.ProjectId);
+            var perProject = expired
+                .GroupBy(e => projMap.GetValueOrDefault(e.DefinitionId))
+                .Where(g => g.Key != Guid.Empty);
+            foreach (var g in perProject)
+            {
+                await _notify.ToProjectAsync(g.Key, new Modules.Core.Notifications.NotificationPayload(
+                    Kind: "workflow.instances.expired",
+                    Title: "Workflow expired",
+                    Body: $"{g.Count()} instance(s) hit their expiration and stopped sending.",
+                    Variant: "warning"), ct);
+            }
+        }
 
         // 2. Fire timeouts for AwaitingAction / ReminderDue instances whose wait elapsed.
         var due = await _db.WorkflowInstances
