@@ -139,14 +139,17 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
     ///
     /// Reference matrix:
     ///
-    ///   AD Group           Perms granted
+    ///   AD Group           Perms granted (in addition to the baseline)
     ///   ─────────────────────────────────────────────────────────────────────
-    ///   CampaignAdmin      project.create, sms.dispatch, workflow.author,
-    ///                      ingestion.upload, audit.read
-    ///   CampaignOperator   sms.dispatch, ingestion.upload          (no create)
-    ///   CampaignAuditor    audit.read                              (read-only)
-    ///   (no group)         (none — can only see projects shared to them as a
-    ///                       Viewer/Member; "data puller" persona)
+    ///   CampaignAdmin      sms.dispatch, workflow.author, ingestion.upload,
+    ///                      audit.read
+    ///   CampaignOperator   sms.dispatch, ingestion.upload
+    ///   CampaignAuditor    audit.read
+    ///
+    /// Baseline (every authenticated user, regardless of AD group):
+    ///   project.create — anyone who can log in can start their own project
+    ///                    and becomes its Owner. Sensitive perms (sms.dispatch,
+    ///                    audit.read, etc.) still require the AD group.
     ///
     /// Replace this hard-coded switch with a DB-driven mapping in production
     /// (PermissionMapping table + admin UI). Kept inline here so the token
@@ -154,12 +157,14 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
     /// </summary>
     private static IEnumerable<string> MapGroupsToPermissions(IReadOnlyList<string> groups)
     {
+        // Baseline for every signed-in user.
+        yield return "project.create";
+
         foreach (var g in groups)
         {
             switch (g)
             {
                 case "CampaignAdmin":
-                    yield return "project.create";
                     yield return "sms.dispatch";
                     yield return "workflow.author";
                     yield return "ingestion.upload";
