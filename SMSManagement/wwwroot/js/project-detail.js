@@ -1901,6 +1901,17 @@ function renderReport(kind, data) {
 }
 
 // ==================== AUDIT ====================
+// Wire presets once on first DOM ready — the buttons drive audFrom/audTo and
+// fire 'rangechange' which we hook below to auto-reload.
+window.initDateRangePresets('#audRangeGroup', '#audFrom', '#audTo');
+document.getElementById('audFrom').addEventListener('rangechange', () => {
+    // Only auto-reload if we've already loaded once (i.e. user has clicked
+    // Load at least once). Otherwise wait for the button click.
+    if (document.getElementById('audBody').dataset.loaded === '1') {
+        document.getElementById('btnAud').click();
+    }
+});
+
 document.getElementById('btnAud').addEventListener('click', async () => {
     const from = document.getElementById('audFrom').value;
     const to   = document.getElementById('audTo').value;
@@ -1908,6 +1919,7 @@ document.getElementById('btnAud').addEventListener('click', async () => {
         const rows = await api.get(`${api_proj}/reports/audit-trail` +
             `?from=${from}T00:00:00Z&to=${to}T23:59:59Z&take=500`);
         const body = document.getElementById('audBody');
+        body.dataset.loaded = '1';
         if (!rows.length) {
             body.innerHTML = '<tr><td colspan="5" class="text-muted">No audit entries in range.</td></tr>';
             return;
@@ -1920,6 +1932,9 @@ document.getElementById('btnAud').addEventListener('click', async () => {
                 <td class="small">${esc(r.entityType)}#${esc((r.entityId||'').slice(0,8))}</td>
                 <td class="small text-muted">${esc(r.ipAddress||'')}</td>
             </tr>`).join('');
+        // Re-attach sort handlers in case this is the first time the table
+        // got real rows (initTable runs at DOMContentLoaded; idempotent).
+        window.initTable(document.getElementById('tab-audit'));
     } catch (e) { toast(e.message, 'danger'); }
 });
 

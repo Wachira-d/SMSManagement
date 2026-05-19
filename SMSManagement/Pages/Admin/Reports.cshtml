@@ -9,7 +9,21 @@
     spot anomalous user activity.
 </p>
 
-<div class="row g-2 mb-3">
+<div class="row g-2 mb-2">
+    <div class="col-12">
+        <!-- Date-range presets backed by site.js helper. The two date inputs
+             below are still the source of truth; the buttons just set them. -->
+        <div class="btn-group btn-group-sm" id="rptRangeGroup" role="group" aria-label="Date range preset">
+            <button type="button" class="btn btn-outline-secondary" data-range="today">Today</button>
+            <button type="button" class="btn btn-outline-secondary" data-range="yesterday">Yesterday</button>
+            <button type="button" class="btn btn-outline-secondary active" data-range="last7">Last 7 days</button>
+            <button type="button" class="btn btn-outline-secondary" data-range="last30">Last 30 days</button>
+            <button type="button" class="btn btn-outline-secondary" data-range="mtd">MTD</button>
+            <button type="button" class="btn btn-outline-secondary" data-range="qtd">QTD</button>
+        </div>
+    </div>
+</div>
+<div class="row g-2 mb-3 align-items-center">
     <div class="col-auto"><input type="date" id="rptFrom" class="form-control form-control-sm" /></div>
     <div class="col-auto"><input type="date" id="rptTo" class="form-control form-control-sm" /></div>
     <div class="col-auto">
@@ -22,6 +36,11 @@
     <div class="col-auto"><a id="btnCsv" class="btn btn-outline-secondary btn-sm">CSV</a></div>
 </div>
 
+<div class="card mb-3">
+    <div class="card-body" style="position:relative; height:260px">
+        <canvas id="rptChart"></canvas>
+    </div>
+</div>
 <div id="rptOut" class="card"><div class="card-body text-muted small">
     Pick a date range + report and click Run.
 </div></div>
@@ -29,10 +48,11 @@
 @section Scripts {
 <script>
 (function () {
-    const to = new Date();
-    const from = new Date(); from.setDate(from.getDate() - 30);
-    document.getElementById('rptFrom').value = from.toISOString().slice(0,10);
-    document.getElementById('rptTo').value   = to.toISOString().slice(0,10);
+    // Init via the shared site.js helper. It seeds Last 7d (matches the
+    // active preset above) and fires a 'rangechange' event on subsequent
+    // preset clicks.
+    window.initDateRangePresets('#rptRangeGroup', '#rptFrom', '#rptTo');
+    document.querySelector('#rptRangeGroup [data-range="last7"]').click();
 })();
 
 function qs() {
@@ -41,6 +61,7 @@ function qs() {
     return `?from=${from}T00:00:00Z&to=${to}T23:59:59Z`;
 }
 
+let chartInstance = null;
 document.getElementById('btnRpt').addEventListener('click', async () => {
     const kind = document.getElementById('rptKind').value;
     try {
@@ -48,6 +69,7 @@ document.getElementById('btnRpt').addEventListener('click', async () => {
         const out = document.getElementById('rptOut');
         if (!Array.isArray(data) || !data.length) {
             out.innerHTML = '<div class="card-body text-muted small">No data in this range.</div>';
+            if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
             return;
         }
         const cols = Object.keys(data[0]);
@@ -62,8 +84,55 @@ document.getElementById('btnRpt').addEventListener('click', async () => {
               </tbody>
             </table>
           </div>`;
+        renderChart(kind, data);
     } catch (e) { toast(e.message, 'danger'); }
 });
+
+// Bar chart per report kind — provider perf shows volume + delivery rate;
+// user activity shows top users by total actions. Chart.js handles legend
+// + tooltips by default, so we only feed it labels + datasets.
+function renderChart(kind, data) {
+    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+    const ctx = document.getElementById('rptChart');
+    if (!ctx) return;
+
+    let cfg;
+    if (kind === 'provider-performance') {
+        cfg = {
+            type: 'bar',
+            data: {
+                labels: data.map(r => r.provider),
+                datasets: [
+                    { label: 'Volume',         data: data.map(r => r.volume), yAxisID: 'y' },
+                    { label: 'Delivery rate %', data: data.map(r => (r.deliveryRate * 100).toFixed(1)),
+                      yAxisID: 'y1', type: 'line', tension: 0.3 }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                    y:  { beginAtZero: true, title: { display: true, text: 'Volume' } },
+                    y1: { beginAtZero: true, max: 100, position: 'right', grid: { drawOnChartArea: false },
+                          title: { display: true, text: 'Delivery %' } }
+                }
+            }
+        };
+    } else {
+        const top = data.slice(0, 10);
+        cfg = {
+            type: 'bar',
+            data: {
+                labels: top.map(r => r.email || r.displayName || (r.userId || '').slice(0, 8)),
+                datasets: [{ label: 'Total actions', data: top.map(r => r.totalActions) }]
+            },
+            options: {
+                indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                scales: { x: { beginAtZero: true } }
+            }
+        };
+    }
+    chartInstance = new Chart(ctx, cfg);
+}
 
 document.getElementById('btnCsv').addEventListener('click', () => {
     document.getElementById('btnCsv').href =
