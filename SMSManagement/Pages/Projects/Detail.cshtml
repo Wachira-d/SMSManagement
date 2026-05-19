@@ -282,6 +282,13 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
 
         <!-- Cheat-sheet for canonical fields. Operators hit this once and remember it;
              the labels in the dropdown match the {{placeholders}} they'd use in SMS bodies. -->
+        <div class="alert alert-info small mb-3">
+            <i class="bi bi-info-circle"></i>
+            <strong>Failure semantics:</strong> when ingestion runs, each row is mapped + validated independently.
+            Rows that fail go to the rejected folder; the rest of the file still completes.
+            Click a batch in the <a href="#tab-sources" data-bs-toggle="tab">Sources</a> tab to see rejection details.
+        </div>
+
         <div class="card mb-3">
             <div class="card-header">
                 <i class="bi bi-key"></i> Canonical fields cheat-sheet
@@ -308,8 +315,13 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
                             <tr>
                                 <td><code>url</code></td>
                                 <td><code>{{url}}</code></td>
-                                <td>Shortlink module (auto-shortens)</td>
-                                <td>Replaced with <code>https://&lt;your-host&gt;/&lt;slug&gt;</code> at send time. Click events fire <code>shortlink.clicked</code> back to the workflow.</td>
+                                <td>Shortlink module (when enabled)</td>
+                                <td>
+                                    Replaced with <code>https://&lt;your-host&gt;/&lt;slug&gt;</code> at send time
+                                    only when <strong>Shortlink</strong> feature is ON in
+                                    <a href="#tab-settings" data-bs-toggle="tab">Settings</a>.
+                                    When off, the original URL is sent as-is. Click events fire <code>shortlink.clicked</code> back to the workflow.
+                                </td>
                             </tr>
                             <tr>
                                 <td><code>message</code></td>
@@ -331,6 +343,109 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
                             </tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Validation rules per canonical. Operator picks the field, ticks the
+             checks they want, saves. A row that violates any rule is rejected;
+             the rest of the file still completes (see banner above). -->
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-check2-square"></i> Validation rules</span>
+                <small class="text-muted">Optional. Built-in phone format check applies until you override it.</small>
+            </div>
+            <div class="card-body">
+                <div class="row g-2">
+                    <div class="col-md-7">
+                        <table class="table table-sm mb-0 align-middle">
+                            <thead class="table-light">
+                                <tr><th>Field</th><th>Required</th><th>Length</th><th>Other</th><th></th></tr>
+                            </thead>
+                            <tbody id="rulesBody"><tr><td colspan="5" class="text-muted">Loading…</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div class="col-md-5">
+                        <form id="formRule" class="row g-2">
+                            <div class="col-12">
+                                <label class="form-label small">Field</label>
+                                <select id="ruleField" class="form-select form-select-sm">
+                                    <option value="phone">phone</option>
+                                    <option value="name">name</option>
+                                    <option value="url">url</option>
+                                    <option value="message">message</option>
+                                    <option value="email">email</option>
+                                    <option value="custom">custom</option>
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <div class="form-check form-switch">
+                                    <input id="ruleRequired" class="form-check-input" type="checkbox" />
+                                    <label class="form-check-label small" for="ruleRequired">Required (non-blank)</label>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Min length</label>
+                                <input id="ruleMinLen" type="number" min="0" max="1000"
+                                       class="form-control form-control-sm" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Max length</label>
+                                <input id="ruleMaxLen" type="number" min="0" max="1000"
+                                       class="form-control form-control-sm" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small">
+                                    Starts with (any)
+                                    <i class="bi bi-info-circle text-muted" tabindex="0"
+                                       data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                       data-bs-placement="left" data-bs-html="true"
+                                       title="Starts-with"
+                                       data-bs-content="Comma-separated list. ANY match passes.<br>
+<strong>Example for Thai mobile (after digits transform):</strong> <code>08,06,09</code>"></i>
+                                </label>
+                                <input id="ruleStarts" class="form-control form-control-sm"
+                                       placeholder="08,06,09" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small">Ends with (any)</label>
+                                <input id="ruleEnds" class="form-control form-control-sm"
+                                       placeholder=".gov.th,.co.th" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small">
+                                    Pattern (regex)
+                                    <i class="bi bi-info-circle text-muted" tabindex="0"
+                                       data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                       data-bs-placement="left" data-bs-html="true"
+                                       title="Regex pattern"
+                                       data-bs-content="Applied to the FINAL value (after transforms + joins). Bad regex is rejected at save.<br>
+<strong>Examples:</strong><br>
+<code>^0[689]\d{8}$</code> &mdash; Thai mobile with leading 0<br>
+<code>^[\w.+-]+@@[\w.-]+\.\w{2,}$</code> &mdash; loose email"></i>
+                                </label>
+                                <input id="rulePattern" class="form-control form-control-sm font-monospace"
+                                       placeholder="^0[689]\d{8}$" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small">Allowed values (any)</label>
+                                <input id="ruleAllowed" class="form-control form-control-sm"
+                                       placeholder="Active,Pending,Closed" />
+                            </div>
+                            <div class="col-12 d-flex gap-2">
+                                <button type="submit" class="btn btn-primary btn-sm">Save rule</button>
+                                <button type="button" id="btnRuleDelete" class="btn btn-outline-danger btn-sm" disabled>Remove rule</button>
+                                <button type="button" id="btnRulePreset" class="btn btn-outline-secondary btn-sm ms-auto"
+                                        data-bs-toggle="dropdown">Presets ▾</button>
+                                <ul class="dropdown-menu">
+                                    <li><button type="button" class="dropdown-item" data-preset="thai-mobile">Thai mobile (10 digits, starts 06/08/09)</button></li>
+                                    <li><button type="button" class="dropdown-item" data-preset="email">Email format</button></li>
+                                    <li><button type="button" class="dropdown-item" data-preset="https-url">URL (https://)</button></li>
+                                    <li><button type="button" class="dropdown-item" data-preset="clear">Clear all</button></li>
+                                </ul>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1019,6 +1134,20 @@ Other SFTP keys: <code>host, port, username, privateKeyPem, remoteDirectory</cod
                     <tbody id="slClicksBody"><tr><td colspan="4" class="text-muted">Loading…</td></tr></tbody>
                 </table>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Per-batch rejection sample. Surfaces the WHY behind the "X rejected" count
+     on the Sources tab batches list without making the operator dig through logs. -->
+<div class="modal fade" id="rejectionsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-x-octagon"></i> Rejected rows</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="rejectionsBody">Loading…</div>
         </div>
     </div>
 </div>

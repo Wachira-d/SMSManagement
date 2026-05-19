@@ -14,10 +14,19 @@ public sealed partial class ColumnMapper
     private static partial Regex PhoneRegex();
 
     private readonly IReadOnlyList<ColumnMapping> _mappings;
+    private readonly IReadOnlyDictionary<string, CanonicalFieldRule> _rules;
 
     public ColumnMapper(IReadOnlyList<ColumnMapping> mappings)
+        : this(mappings, new Dictionary<string, CanonicalFieldRule>(StringComparer.OrdinalIgnoreCase))
+    {
+    }
+
+    public ColumnMapper(
+        IReadOnlyList<ColumnMapping> mappings,
+        IReadOnlyDictionary<string, CanonicalFieldRule> rulesByCanonical)
     {
         _mappings = mappings;
+        _rules = rulesByCanonical;
     }
 
     public MapResult Map(IReadOnlyDictionary<string, string> rawRow)
@@ -59,12 +68,25 @@ public sealed partial class ColumnMapper
             if (emittedAny) output[grp.Canonical] = sb.ToString();
         }
 
-        // Validation
-        if (output.TryGetValue("phone", out var phone) && !PhoneRegex().IsMatch(phone))
-            errors.Add($"invalid_phone:{phone[..Math.Min(3, phone.Length)]}***");
+        // Validation — built-in phone guard runs even when no custom rule exists,
+        // so an unconfigured project never sends to garbage numbers. A custom
+        // rule on "phone" supersedes the built-in checks (operator opted in).
+        if (!_rules.ContainsKey("phone"))
+        {
+            if (!output.ContainsKey("phone"))
+                errors.Add("phone:missing");
+            else if (!PhoneRegex().IsMatch(output["phone"]))
+                errors.Add($"phone:invalid_format");
+        }
 
-        if (!output.ContainsKey("phone"))
-            errors.Add("missing_phone");
+        // Custom rules per canonical. Run for every configured rule, even when
+        // the field is absent — that's how Required is enforced.
+        foreach (var (canonical, rule) in _rules)
+        {
+            output.TryGetValue(canonical, out var v);
+            foreach (var err in CanonicalFieldValidator.Validate(v, rule))
+                errors.Add($"{canonical}:{err}");
+        }
 
         return new MapResult(output, errors);
     }

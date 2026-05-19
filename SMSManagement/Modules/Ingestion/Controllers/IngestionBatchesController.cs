@@ -47,10 +47,28 @@ public sealed class IngestionBatchesController : ControllerBase
                 b.AcceptedRows,
                 b.RejectedRows,
                 b.Status,
-                b.IngestedAt
+                b.IngestedAt,
+                HasRejections = b.RejectionsJson != null
             })
             .ToListAsync(ct);
 
         return Ok(rows);
+    }
+
+    /// <summary>Returns the captured rejection sample (first 50) for one batch.</summary>
+    [HttpGet("{batchId:guid}/rejections")]
+    public async Task<IActionResult> Rejections(
+        Guid projectId, Guid batchId, CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
+        var json = await _db.IngestionBatches
+            .AsNoTracking()
+            .Where(b => b.Id == batchId && b.ProjectId == projectId)
+            .Select(b => b.RejectionsJson)
+            .FirstOrDefaultAsync(ct);
+        if (json is null) return Ok(new { items = Array.Empty<object>(), total = 0 });
+        // Already JSON — bounce it through Content-Type:application/json directly
+        // so we don't deserialize-then-reserialize the bounded sample.
+        return Content(json, "application/json");
     }
 }

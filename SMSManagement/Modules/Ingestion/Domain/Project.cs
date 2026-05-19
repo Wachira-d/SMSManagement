@@ -112,4 +112,12 @@ public sealed class IngestionBatch
     public string Status { get; set; } = "Pending";
     public DateTimeOffset IngestedAt { get; set; } = DateTimeOffset.UtcNow;
     public Guid? IngestedBy { get; set; }
+
+    /// <summary>
+    /// JSON array of up to 50 rejection summaries — <c>{ rowIndex, errors[] }</c>.
+    /// Bounded so a million-row file with a structural error doesn't bloat the
+    /// row. Lets the operator click a batch and see WHY rows failed without
+    /// trawling logs. Null when no rejections (or for legacy batches).
+    /// </summary>
+    public string? RejectionsJson { get; set; }
 }

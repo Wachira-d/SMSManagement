@@ -36,7 +36,7 @@ document.querySelectorAll('[data-bs-toggle="tab"]').forEach(el => {
         const target = ev.target.getAttribute('href');
         switch (target) {
             case '#tab-members':    if (!loaded.members)    { loaded.members    = true; loadMembers();    } break;
-            case '#tab-mappings':   if (!loaded.mappings)   { loaded.mappings   = true; loadMappings();   } break;
+            case '#tab-mappings':   if (!loaded.mappings)   { loaded.mappings   = true; loadMappings(); loadRules(); } break;
             case '#tab-sources':    if (!loaded.sources)    { loaded.sources    = true; loadSources(); loadBatches(); } break;
             case '#tab-workflows':  if (!loaded.workflows)  { loaded.workflows  = true; loadWorkflows();  } break;
             case '#tab-shortlinks': if (!loaded.shortlinks) { loaded.shortlinks = true; loadShortlinks(); } break;
@@ -308,6 +308,118 @@ document.getElementById('formShare').addEventListener('submit', async (ev) => {
         document.getElementById('btnShare').disabled = true;
         loadMembers();
     } catch (e) { toast(e.message, 'danger'); }
+});
+
+// ==================== CANONICAL FIELD RULES ====================
+// Per-project, per-canonical validation. A row that violates any rule is
+// rejected; the rest of the file still completes. The built-in phone
+// format check (8-15 digits) applies only when no custom rule for "phone"
+// exists, so projects that opt in fully take over.
+async function loadRules() {
+    try {
+        const rows = await api.get(`${api_proj}/canonical-rules`);
+        const body = document.getElementById('rulesBody');
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="5" class="text-muted small">No custom rules yet. The built-in phone check still applies.</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(r => {
+            const lengthCell = (r.minLength != null || r.maxLength != null)
+                ? `${r.minLength ?? '0'}–${r.maxLength ?? '∞'}` : '—';
+            const other = [
+                r.startsWithAny    ? `starts: ${esc(r.startsWithAny)}`   : null,
+                r.endsWithAny      ? `ends: ${esc(r.endsWithAny)}`       : null,
+                r.pattern          ? `regex: <code class="small">${esc(r.pattern)}</code>` : null,
+                r.allowedValues    ? `in: ${esc(r.allowedValues)}`       : null
+            ].filter(Boolean).join('<br>');
+            return `<tr>
+                <td><a href="#" onclick="editRule(${esc(JSON.stringify(r))});return false">
+                        <span class="badge bg-info">${esc(r.canonicalField)}</span></a></td>
+                <td>${r.required ? '<i class="bi bi-check-circle-fill text-success"></i>' : ''}</td>
+                <td class="small">${lengthCell}</td>
+                <td class="small">${other || '—'}</td>
+                <td><button class="btn btn-link btn-sm text-danger p-0"
+                       onclick="deleteRule('${esc(r.canonicalField)}')">Delete</button></td>
+            </tr>`;
+        }).join('');
+    } catch (e) { toast(e.message, 'danger'); }
+}
+
+window.editRule = function (r) {
+    document.getElementById('ruleField').value     = r.canonicalField;
+    document.getElementById('ruleRequired').checked = !!r.required;
+    document.getElementById('ruleMinLen').value    = r.minLength  ?? '';
+    document.getElementById('ruleMaxLen').value    = r.maxLength  ?? '';
+    document.getElementById('ruleStarts').value    = r.startsWithAny ?? '';
+    document.getElementById('ruleEnds').value      = r.endsWithAny   ?? '';
+    document.getElementById('rulePattern').value   = r.pattern        ?? '';
+    document.getElementById('ruleAllowed').value   = r.allowedValues  ?? '';
+    document.getElementById('btnRuleDelete').disabled = false;
+};
+
+window.deleteRule = async function (canonical) {
+    if (!confirm(`Delete rule for "${canonical}"?`)) return;
+    try {
+        await api.delete(`${api_proj}/canonical-rules/${encodeURIComponent(canonical)}`);
+        toast('Rule removed.');
+        loadRules();
+    } catch (e) { toast(e.message, 'danger'); }
+};
+
+document.getElementById('formRule').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const numOrNull = (id) => {
+        const v = document.getElementById(id).value;
+        return v === '' ? null : Number(v);
+    };
+    const trimOrNull = (id) => {
+        const v = document.getElementById(id).value.trim();
+        return v ? v : null;
+    };
+    try {
+        await api.put(`${api_proj}/canonical-rules`, {
+            canonicalField: document.getElementById('ruleField').value,
+            required:       document.getElementById('ruleRequired').checked,
+            minLength:      numOrNull('ruleMinLen'),
+            maxLength:      numOrNull('ruleMaxLen'),
+            startsWithAny:  trimOrNull('ruleStarts'),
+            endsWithAny:    trimOrNull('ruleEnds'),
+            pattern:        trimOrNull('rulePattern'),
+            allowedValues:  trimOrNull('ruleAllowed')
+        });
+        toast('Rule saved.');
+        loadRules();
+    } catch (e) { toast(e.message, 'danger'); }
+});
+
+document.getElementById('btnRuleDelete').addEventListener('click', () => {
+    const f = document.getElementById('ruleField').value;
+    if (f) window.deleteRule(f);
+});
+
+// Presets fill the form fields — operator still hits "Save rule" to commit.
+document.querySelectorAll('#formRule [data-preset]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const p = btn.dataset.preset;
+        const set = (id, v) => document.getElementById(id).value = v;
+        set('ruleRequired', false); document.getElementById('ruleRequired').checked = false;
+        ['ruleMinLen','ruleMaxLen','ruleStarts','ruleEnds','rulePattern','ruleAllowed']
+            .forEach(id => set(id, ''));
+        if (p === 'thai-mobile') {
+            set('ruleField', 'phone');
+            document.getElementById('ruleRequired').checked = true;
+            set('ruleMinLen', '10'); set('ruleMaxLen', '10');
+            set('ruleStarts', '08,06,09');
+            set('rulePattern', '^0[689]\\d{8}$');
+        } else if (p === 'email') {
+            set('ruleField', 'email');
+            set('rulePattern', '^[\\w.+-]+@[\\w.-]+\\.\\w{2,}$');
+        } else if (p === 'https-url') {
+            set('ruleField', 'url');
+            set('rulePattern', '^https://.+');
+        }
+        // 'clear' leaves everything blank (set() above already wiped them).
+    });
 });
 
 // ==================== MAPPINGS ====================
@@ -777,19 +889,58 @@ async function loadBatches() {
         body.innerHTML = rows.map(b => {
             const cls = b.status === 'Completed' ? 'success'
                 : (b.status === 'Failed' ? 'danger' : 'warning');
+            const rejectedCell = b.hasRejections
+                ? `<a href="#" onclick="showRejections('${esc(b.id)}');return false"
+                       class="text-danger" title="View rejection sample">
+                       ${b.rejectedRows} <i class="bi bi-search small"></i></a>`
+                : `<span class="text-danger">${b.rejectedRows}</span>`;
             return `<tr>
                 <td class="small">${fmtDate(b.ingestedAt)}</td>
                 <td><code class="small">${esc(b.sourceType)}</code></td>
                 <td class="small">${esc(b.sourceRef)}</td>
                 <td>${b.totalRows}</td>
                 <td class="text-success">${b.acceptedRows}</td>
-                <td class="text-danger">${b.rejectedRows}</td>
+                <td>${rejectedCell}</td>
                 <td><span class="badge bg-${cls}">${esc(b.status)}</span></td>
             </tr>`;
         }).join('');
     } catch (e) { toast(e.message, 'danger'); }
 }
 document.getElementById('btnBatchRefresh').addEventListener('click', loadBatches);
+
+// Per-batch rejection sample — bounded to 50 by the pipeline. Renders the
+// raw error codes so operators can fix the data and re-upload. Same modal
+// element is reused for each batch.
+window.showRejections = async function (batchId) {
+    const modalEl = document.getElementById('rejectionsModal');
+    const body    = document.getElementById('rejectionsBody');
+    body.innerHTML = '<div class="text-muted small">Loading…</div>';
+    new bootstrap.Modal(modalEl).show();
+    try {
+        const d = await api.get(`${api_proj}/ingestion-batches/${batchId}/rejections`);
+        if (!d.items || d.items.length === 0) {
+            body.innerHTML = '<div class="text-muted small">No rejection sample stored for this batch.</div>';
+            return;
+        }
+        const header = d.truncated
+            ? `<div class="alert alert-warning small mb-2">
+                 Showing first ${d.shown} of ${d.total} rejected rows. Re-upload after fixing to retry the rest.
+               </div>`
+            : `<div class="small text-muted mb-2">${d.shown} rejected row(s).</div>`;
+        body.innerHTML = header + `
+            <table class="table table-sm">
+                <thead><tr><th>Row #</th><th>Errors</th></tr></thead>
+                <tbody>${d.items.map(r => `
+                    <tr><td>${r.rowIndex}</td>
+                        <td>${(r.errors || []).map(e =>
+                            `<code class="small me-1">${esc(e)}</code>`).join('')}</td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>`;
+    } catch (e) {
+        body.innerHTML = `<div class="text-danger">${esc(e.message)}</div>`;
+    }
+};
 
 // ==================== WORKFLOWS ====================
 // Internal model: an object {name, expiration, initialStep, steps: {…}}

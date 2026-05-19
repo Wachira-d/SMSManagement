@@ -196,6 +196,17 @@ public sealed class WorkflowEngine : IWorkflowEngine
                 "Shortlink:PublicBaseUrl not configured — leaving URLs as-is.");
             return body;
         }
+
+        // Project-level toggle: when ShortlinkEnabled = false, leave URLs as
+        // their original form (operator opted out — e.g. they're tracking
+        // clicks via a third-party redirector and don't want a double-hop).
+        var projectId = await ProjectIdForAsync(instance.DefinitionId, ct);
+        var shortlinkOn = await _db.Projects
+            .Where(p => p.Id == projectId)
+            .Select(p => p.ShortlinkEnabled)
+            .FirstOrDefaultAsync(ct);
+        if (!shortlinkOn) return body;
+
         var baseUrl = _shortlinkOpts.PublicBaseUrl.TrimEnd('/');
 
         // Cheap URL detection; production should use a vetted Regex with timeout.
@@ -207,8 +218,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
                 && tokens[i].Length > 32)
             {
                 var slug = await _shortlinks.CreateAsync(
-                    await ProjectIdForAsync(instance.DefinitionId, ct),
-                    tokens[i], instance.Id, TimeSpan.FromDays(60), null, ct);
+                    projectId, tokens[i], instance.Id, TimeSpan.FromDays(60), null, ct);
                 tokens[i] = $"{baseUrl}/{slug}";
             }
         }

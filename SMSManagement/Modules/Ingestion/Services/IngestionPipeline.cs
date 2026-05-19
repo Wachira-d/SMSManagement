@@ -95,11 +95,17 @@ public sealed class IngestionPipeline : IIngestionPipeline
         await _db.SaveChangesAsync(ct);
 
         // 3) Read + map + dispatch
-        var (accepted, rejected) = await ProcessRowsAsync(projectId, batch.Id, filePath, ct);
+        var (accepted, rejected, rejectionsJson) = await ProcessRowsAsync(projectId, batch.Id, filePath, ct);
 
         batch.TotalRows = accepted + rejected;
         batch.AcceptedRows = accepted;
         batch.RejectedRows = rejected;
+        batch.RejectionsJson = rejectionsJson;
+        // Row-level semantics: partial files still complete. Status only flips
+        // to "Failed" when NOTHING got through (zero accepted with at least
+        // one rejected). Otherwise the batch is "Completed" — operator sees
+        // the accepted / rejected split in the UI and clicks through to the
+        // rejection sample to fix and re-upload.
         batch.Status = rejected > 0 && accepted == 0 ? "Failed" : "Completed";
         await _db.SaveChangesAsync(ct);
 
@@ -142,13 +148,18 @@ public sealed class IngestionPipeline : IIngestionPipeline
 
     // ---------------- helpers ----------------
 
-    private async Task<(int accepted, int rejected)> ProcessRowsAsync(
+    private async Task<(int accepted, int rejected, string? rejectionsJson)> ProcessRowsAsync(
         Guid projectId, Guid batchId, string filePath, CancellationToken ct)
     {
         var mappings = await _db.ColumnMappings
             .Where(m => m.ProjectId == projectId)
             .ToListAsync(ct);
-        var mapper = new ColumnMapper(mappings);
+        var rules = (await _db.CanonicalFieldRules
+                .Where(r => r.ProjectId == projectId)
+                .ToListAsync(ct))
+            .ToDictionary(r => r.CanonicalField, r => r,
+                StringComparer.OrdinalIgnoreCase);
+        var mapper = new ColumnMapper(mappings, rules);
 
         var defaultDefinition = await _db.WorkflowDefinitions
             .Where(d => d.ProjectId == projectId && d.Active)
@@ -169,22 +180,43 @@ public sealed class IngestionPipeline : IIngestionPipeline
         var context = new IngestionContext(projectId, batchId, filePath,
             new Dictionary<string, string>());
 
-        var accepted = 0; var rejected = 0;
+        const int rejectionSampleCap = 50;
+        var rejectionSamples = new List<object>(rejectionSampleCap);
+        var accepted = 0; var rejected = 0; var rowIndex = 0;
+
         await foreach (var raw in source.ReadAsync(context, ct))
         {
+            rowIndex++;
             var mapped = mapper.Map(raw);
             if (!mapped.IsValid)
             {
                 rejected++;
-                _log.LogWarning("Row rejected batch={BatchId} errors={Errors}",
-                    batchId, string.Join(',', mapped.Errors));
+                _log.LogWarning("Row rejected batch={BatchId} rowIndex={RowIndex} errors={Errors}",
+                    batchId, rowIndex, string.Join(',', mapped.Errors));
+                if (rejectionSamples.Count < rejectionSampleCap)
+                    rejectionSamples.Add(new
+                    {
+                        rowIndex,
+                        errors = mapped.Errors
+                    });
                 continue;
             }
 
             await _workflow.StartAsync(defaultDefinition.Value, mapped.Row, batchId, ct);
             accepted++;
         }
-        return (accepted, rejected);
+
+        var rejectionsJson = rejected == 0
+            ? null
+            : System.Text.Json.JsonSerializer.Serialize(new
+            {
+                truncated = rejected > rejectionSampleCap,
+                shown = rejectionSamples.Count,
+                total = rejected,
+                items = rejectionSamples
+            });
+
+        return (accepted, rejected, rejectionsJson);
     }
 
     private async Task ApplyPostProcessAsync(

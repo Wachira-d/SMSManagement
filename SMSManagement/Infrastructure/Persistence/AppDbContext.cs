@@ -35,6 +35,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<ColumnMapping> ColumnMappings => Set<ColumnMapping>();
     public DbSet<IngestionBatch> IngestionBatches => Set<IngestionBatch>();
     public DbSet<IngestionSourceSettings> IngestionSourceSettings => Set<IngestionSourceSettings>();
+    public DbSet<CanonicalFieldRule> CanonicalFieldRules => Set<CanonicalFieldRule>();
 
     public DbSet<WorkflowDefinition> WorkflowDefinitions => Set<WorkflowDefinition>();
     public DbSet<WorkflowInstance> WorkflowInstances => Set<WorkflowInstance>();
@@ -74,6 +75,18 @@ public sealed class AppDbContext : DbContext
 
         b.Entity<ColumnMapping>(e =>
             e.HasIndex(x => new { x.ProjectId, x.SourceColumn }).IsUnique());
+
+        b.Entity<CanonicalFieldRule>(e =>
+        {
+            // One rule per (project, canonical) — operator can't accidentally
+            // create competing rule sets for the same field.
+            e.HasIndex(x => new { x.ProjectId, x.CanonicalField }).IsUnique();
+            e.Property(x => x.CanonicalField).HasMaxLength(32);
+            e.Property(x => x.StartsWithAny).HasMaxLength(256);
+            e.Property(x => x.EndsWithAny).HasMaxLength(256);
+            e.Property(x => x.Pattern).HasMaxLength(512);
+            e.Property(x => x.AllowedValues).HasMaxLength(1024);
+        });
 
         b.Entity<IngestionBatch>(e =>
         {
