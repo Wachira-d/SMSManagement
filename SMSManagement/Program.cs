@@ -48,7 +48,11 @@ builder.Host.UseSerilog((ctx, services, lc) => lc
     .Enrich.With(new PiiMaskingEnricher())
     .WriteTo.Console(formatter: new Serilog.Formatting.Compact.CompactJsonFormatter()));
 
-// ---------- AuthN: JWT bearer ----------
+// ---------- AuthN: JWT bearer (header OR cookie) ----------
+// Razor Pages use the cookie path (server-rendered, session-style UX).
+// API clients use the Authorization: Bearer header. Same JWT, same
+// validation — the cookie just carries the token for the browser.
+const string AuthCookieName = "auth_token";
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
@@ -76,6 +80,36 @@ builder.Services
             IssuerSigningKey = !string.IsNullOrWhiteSpace(localKey)
                 ? new SymmetricSecurityKey(Convert.FromBase64String(localKey))
                 : null
+        };
+
+        // Cookie bridge + redirect to /Account/Login for unauthenticated
+        // browser hits to Razor Pages (API paths still get 401 JSON).
+        o.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
+        {
+            OnMessageReceived = ctx =>
+            {
+                if (string.IsNullOrEmpty(ctx.Token) &&
+                    ctx.Request.Cookies.TryGetValue(AuthCookieName, out var fromCookie))
+                {
+                    ctx.Token = fromCookie;
+                }
+                return Task.CompletedTask;
+            },
+            OnChallenge = ctx =>
+            {
+                var path = ctx.HttpContext.Request.Path.Value ?? string.Empty;
+                if (!path.StartsWith("/api", StringComparison.OrdinalIgnoreCase)
+                    && !path.StartsWith("/jobs", StringComparison.OrdinalIgnoreCase)
+                    && !path.StartsWith("/metrics", StringComparison.OrdinalIgnoreCase)
+                    && !path.StartsWith("/health", StringComparison.OrdinalIgnoreCase))
+                {
+                    ctx.HandleResponse();
+                    var return_ = Uri.EscapeDataString(
+                        ctx.HttpContext.Request.Path + ctx.HttpContext.Request.QueryString);
+                    ctx.HttpContext.Response.Redirect($"/Account/Login?returnUrl={return_}");
+                }
+                return Task.CompletedTask;
+            }
         };
     });
 
@@ -137,7 +171,17 @@ builder.Services.AddControllers(o =>
     // hand-rolling status-code handling everywhere.
     o.Filters.Add<SMSManagement.Infrastructure.Middleware.FeatureDisabledFilter>();
 });
-builder.Services.AddRazorPages();
+builder.Services.AddRazorPages(o =>
+{
+    // Everything under /Pages requires login by default; opt out per-page
+    // (Login + Blocked must be reachable without auth).
+    o.Conventions.AuthorizeFolder("/");
+    o.Conventions.AllowAnonymousToPage("/Account/Login");
+    o.Conventions.AllowAnonymousToPage("/Account/Logout");
+    o.Conventions.AllowAnonymousToPage("/Blocked");
+    o.Conventions.AllowAnonymousToPage("/Error");
+    o.Conventions.AllowAnonymousToPage("/Index"); // landing — handles its own redirect
+});
 builder.Services.Configure<BootstrapOptions>(builder.Configuration.GetSection("Bootstrap"));
 builder.Services.AddCampaignPlatform(builder.Configuration);
 

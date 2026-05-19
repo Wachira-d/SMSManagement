@@ -1,0 +1,44 @@
+@page
+@model SMSManagement.Pages.Account.LoginModel
+@{ ViewData["Title"] = "Login"; Layout = "_Layout"; }
+<div class="row justify-content-center">
+    <div class="col-md-5">
+        <div class="card shadow-sm mt-5">
+            <div class="card-body p-4">
+                <h2 class="card-title text-center mb-4">
+                    <i class="bi bi-broadcast text-primary"></i>
+                    Campaign Platform
+                </h2>
+                <form method="post">
+                    @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+                    {
+                        <div class="alert alert-danger small">@Model.ErrorMessage</div>
+                    }
+                    <div class="mb-3">
+                        <label class="form-label">Username</label>
+                        <input asp-for="Input.Username" class="form-control"
+                               autocomplete="username" autofocus required />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <input asp-for="Input.Password" type="password" class="form-control"
+                               autocomplete="current-password" required />
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input asp-for="Input.RememberMe" class="form-check-input" />
+                        <label class="form-check-label" asp-for="Input.RememberMe">
+                            Remember me on this device
+                        </label>
+                    </div>
+                    <input asp-for="Input.ReturnUrl" type="hidden" />
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-box-arrow-in-right"></i> Sign in
+                    </button>
+                </form>
+            </div>
+        </div>
+        <p class="text-center text-muted small mt-3">
+            Your IP and device may be logged for security purposes.
+        </p>
+    </div>
+</div>

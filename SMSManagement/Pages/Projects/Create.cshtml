@@ -1,0 +1,71 @@
+@page
+@model SMSManagement.Pages.Projects.CreateModel
+@{ ViewData["Title"] = "New Project"; }
+
+<h1 class="h3 mb-3">New project</h1>
+
+<div class="row">
+    <div class="col-md-7">
+        <div class="card">
+            <div class="card-body">
+                <div id="error" class="alert alert-danger d-none"></div>
+                <form id="form">
+                    <div class="mb-3">
+                        <label class="form-label">Project code <span class="text-danger">*</span></label>
+                        <input id="code" class="form-control" required
+                               pattern="[a-z0-9\-_]+" maxlength="64"
+                               placeholder="e.g. honda-q3-2026" />
+                        <div class="form-text">Lowercase, digits, hyphens, underscores. Unique across the platform.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Name <span class="text-danger">*</span></label>
+                        <input id="name" class="form-control" required maxlength="120" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Default SMS provider</label>
+                        <select id="provider" class="form-select">
+                            <option value="etracker">Etracker</option>
+                            <option value="infobip">Infobip</option>
+                        </select>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-lg"></i> Create project
+                        </button>
+                        <a class="btn btn-outline-secondary" asp-page="/Projects/Index">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-5">
+        <div class="alert alert-light border small">
+            You'll become the project <strong>Owner</strong> automatically. You can
+            then enable features, configure mappings/sources, define workflows,
+            and share with teammates.
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+document.getElementById('form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const err = document.getElementById('error');
+    err.classList.add('d-none');
+    try {
+        const body = {
+            code: document.getElementById('code').value.trim(),
+            name: document.getElementById('name').value.trim(),
+            defaultProvider: document.getElementById('provider').value
+        };
+        const created = await api.post('/api/projects', body);
+        toast('Project created.');
+        window.location = '/Projects/Detail?id=' + encodeURIComponent(created.id);
+    } catch (e) {
+        err.textContent = e.message;
+        err.classList.remove('d-none');
+    }
+});
+</script>
+}
