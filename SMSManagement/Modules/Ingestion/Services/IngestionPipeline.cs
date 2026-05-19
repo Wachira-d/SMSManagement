@@ -27,16 +27,20 @@ public sealed class IngestionPipeline : IIngestionPipeline
     private readonly IAuditLogger _audit;
     private readonly ILogger<IngestionPipeline> _log;
 
+    private readonly Modules.Core.Notifications.IUserNotifier _notify;
+
     public IngestionPipeline(
         AppDbContext db,
         IWorkflowEngine workflow,
         IAuditLogger audit,
-        ILogger<IngestionPipeline> log)
+        ILogger<IngestionPipeline> log,
+        Modules.Core.Notifications.IUserNotifier notify)
     {
         _db = db;
         _workflow = workflow;
         _audit = audit;
         _log = log;
+        _notify = notify;
     }
 
     public async Task<IngestionOutcome> IngestFileAsync(
@@ -126,6 +130,20 @@ public sealed class IngestionPipeline : IIngestionPipeline
                 batch.FileHash, batch.TotalRows, batch.AcceptedRows,
                 batch.RejectedRows, batch.Status, ForceReingest = forceReingest
             }), ct);
+
+        // Live notify project members. variant=danger when status=Failed
+        // (zero rows made it through); warning when some were rejected;
+        // success otherwise. The Sources tab Batches list also updates
+        // on its own polling timer, but the toast brings the operator
+        // attention to it without staring at the tab.
+        var variant = batch.Status == "Failed" ? "danger"
+                    : batch.RejectedRows > 0 ? "warning"
+                    : "success";
+        await _notify.ToProjectAsync(projectId, new Modules.Core.Notifications.NotificationPayload(
+            Kind: "ingestion.batch.complete",
+            Title: $"Batch {batch.Status.ToLowerInvariant()}",
+            Body: $"{batch.AcceptedRows} accepted · {batch.RejectedRows} rejected · {batch.TotalRows} total",
+            Variant: variant), ct);
 
         // Fire-and-forget stakeholder email. Tolerant of missing recipients /
         // SMTP misconfig (see SmtpEmailSender). Enqueued via Hangfire so SMTP

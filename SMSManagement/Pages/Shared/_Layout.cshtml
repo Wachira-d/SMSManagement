@@ -169,7 +169,29 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
             integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>
+    @if (isAuth)
+    {
+        <script>
+            // Open the notifications hub for authenticated sessions. Failure to
+            // connect (e.g. JWT just expired) doesn't break the page — silently
+            // give up and the operator still sees the rest of the UI.
+            (function () {
+                if (!window.signalR) return;
+                const conn = new signalR.HubConnectionBuilder()
+                    .withUrl('/hubs/notifications')
+                    .withAutomaticReconnect()
+                    .build();
+                conn.on('notify', (p) => {
+                    if (window.toast) window.toast(
+                        `<strong>${(p.title||'').replace(/</g,'&lt;')}</strong><br>${(p.body||'').replace(/</g,'&lt;')}`,
+                        p.variant || 'info');
+                });
+                conn.start().catch(() => { /* silent */ });
+            })();
+        </script>
+    }
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

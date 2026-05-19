@@ -124,6 +124,7 @@ builder.Services
             {
                 var path = ctx.HttpContext.Request.Path.Value ?? string.Empty;
                 if (!path.StartsWith("/api", StringComparison.OrdinalIgnoreCase)
+                    && !path.StartsWith("/hubs", StringComparison.OrdinalIgnoreCase)
                     && !path.StartsWith("/jobs", StringComparison.OrdinalIgnoreCase)
                     && !path.StartsWith("/metrics", StringComparison.OrdinalIgnoreCase)
                     && !path.StartsWith("/health", StringComparison.OrdinalIgnoreCase))
@@ -316,6 +317,7 @@ if (!testingEnabled)
 
 app.MapRazorPages();
 app.MapControllers();
+app.MapHub<SMSManagement.Modules.Core.Notifications.NotificationHub>("/hubs/notifications");
 
 if (!testingEnabled)
 {
