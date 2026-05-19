@@ -22,6 +22,9 @@ public sealed class AuthController : ControllerBase
     private readonly ILoginAuditWriter _audit;
     private readonly CampaignMetrics _metrics;
     private readonly AppDbContext _db;
+    private readonly Modules.Identity.Auth.IPasswordHasher _hasher;
+    private readonly Modules.Notifications.IEmailSender _email;
+    private readonly ILogger<AuthController> _log;
 
     public AuthController(
         IUserCacheAuthenticator auth,
@@ -29,7 +32,10 @@ public sealed class AuthController : ControllerBase
         IRefreshTokenStore refreshStore,
         ILoginAuditWriter audit,
         CampaignMetrics metrics,
-        AppDbContext db)
+        AppDbContext db,
+        Modules.Identity.Auth.IPasswordHasher hasher,
+        Modules.Notifications.IEmailSender email,
+        ILogger<AuthController> log)
     {
         _auth = auth;
         _jwt = jwt;
@@ -37,6 +43,9 @@ public sealed class AuthController : ControllerBase
         _audit = audit;
         _metrics = metrics;
         _db = db;
+        _hasher = hasher;
+        _email = email;
+        _log = log;
     }
 
     public sealed record LoginRequest(
@@ -150,6 +159,106 @@ public sealed class AuthController : ControllerBase
         ClearRememberMeCookie();
         return NoContent();
     }
+
+    // ============ FORGOT / RESET PASSWORD (local accounts only) ============
+    // AD-authenticated users reset upstream (their AD account). This pair of
+    // endpoints covers the local break-glass admin path.
+    //
+    // Anti-enumeration: the request endpoint always returns 200 OK regardless
+    // of whether the email matches a row, so an attacker can't probe for
+    // valid emails. The reset endpoint constant-time compares the hashed
+    // raw token, sets UsedAt, and rejects expired / already-used tokens.
+
+    public sealed record ForgotRequest(string Email);
+    public sealed record ResetRequest(string Token, string NewPassword);
+
+    [HttpPost("forgot-password")]
+    [AllowAnonymous]
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> Forgot([FromBody] ForgotRequest req, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(req.Email))
+        {
+            var email = req.Email.Trim();
+            var cache = await _db.UserCaches
+                .FirstOrDefaultAsync(u => u.Email != null
+                    && u.Email.ToLower() == email.ToLower(), ct);
+            if (cache is not null && cache.IsEnabled)
+            {
+                var raw = Convert.ToBase64String(
+                    System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
+                    .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+                var hash = HashToken(raw);
+                _db.PasswordResetTokens.Add(new Domain.PasswordResetToken
+                {
+                    UserCacheId = cache.Id,
+                    TokenHash   = hash,
+                    ExpiresAt   = DateTimeOffset.UtcNow.AddHours(1),
+                    RequestIp   = HttpContext.Connection.RemoteIpAddress?.ToString()
+                });
+                await _db.SaveChangesAsync(ct);
+
+                var resetUrl = $"{Request.Scheme}://{Request.Host}/Account/ResetPassword?token={Uri.EscapeDataString(raw)}";
+                try
+                {
+                    await _email.SendAsync(new Modules.Notifications.EmailMessage(
+                        To: new[] { email },
+                        Subject: "Reset your SMS Management password",
+                        HtmlBody: $"<p>A password reset was requested for this account.</p>" +
+                                  $"<p><a href=\"{resetUrl}\">Set a new password</a> (link expires in 1 hour).</p>" +
+                                  $"<p>If you didn't request this, ignore this email — the account is unchanged.</p>",
+                        PlainTextBody: $"Reset link (expires in 1h): {resetUrl}"), ct);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "Failed to send password reset email to {Email}", email);
+                }
+                _log.LogInformation("Password reset issued for {Email}", email);
+            }
+        }
+
+        // Always 200, always the same message — defeats email enumeration.
+        return Ok(new { Message = "If the email matches a local account, a reset link has been sent." });
+    }
+
+    [HttpPost("reset-password")]
+    [AllowAnonymous]
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> Reset([FromBody] ResetRequest req, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(req.Token) || string.IsNullOrWhiteSpace(req.NewPassword))
+            return BadRequest(new { Message = "Token and new password are required." });
+        if (req.NewPassword.Length < 8)
+            return BadRequest(new { Message = "Password must be at least 8 characters." });
+
+        var hash = HashToken(req.Token);
+        var row = await _db.PasswordResetTokens
+            .FirstOrDefaultAsync(r => r.TokenHash == hash, ct);
+        if (row is null) return BadRequest(new { Message = "Invalid or expired link." });
+        if (row.UsedAt is not null) return BadRequest(new { Message = "This link has already been used." });
+        if (row.ExpiresAt < DateTimeOffset.UtcNow)
+            return BadRequest(new { Message = "Invalid or expired link." });
+
+        var cache = await _db.UserCaches.FirstOrDefaultAsync(u => u.Id == row.UserCacheId, ct);
+        if (cache is null || !cache.IsEnabled)
+            return BadRequest(new { Message = "Invalid or expired link." });
+
+        var newSalt = _hasher.NewSalt();
+        cache.Salt = newSalt;
+        cache.PasswordHash = _hasher.Hash(req.NewPassword, newSalt);
+        cache.IsLocked = false;
+        cache.FailedAttempts = 0;
+        cache.UpdatedAt = DateTimeOffset.UtcNow;
+        row.UsedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        _log.LogWarning("Password reset completed for cache.Username={Username}", cache.Username);
+        return Ok(new { Message = "Password updated. You can log in with your new password." });
+    }
+
+    private static string HashToken(string raw) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(raw)));
 
     /// <summary>Returns the identity associated with the current bearer token.
     /// Useful for the SPA to render the user menu without parsing the JWT.</summary>

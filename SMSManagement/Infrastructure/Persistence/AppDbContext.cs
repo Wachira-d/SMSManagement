@@ -56,6 +56,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<UserCache> UserCaches => Set<UserCache>();
     public DbSet<LoginAudit> LoginAudits => Set<LoginAudit>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<ErrorLog> ErrorLogs => Set<ErrorLog>();
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
 
@@ -242,6 +243,17 @@ public sealed class AppDbContext : DbContext
             e.Property(x => x.TokenHash).HasMaxLength(64);
             e.Property(x => x.RevokedReason).HasMaxLength(64);
             e.Property(x => x.CreatedFromIp).HasMaxLength(64);
+        });
+
+        b.Entity<PasswordResetToken>(e =>
+        {
+            // TokenHash unique so issued tokens can't collide; ExpiresAt
+            // indexed for the purge job.
+            e.HasIndex(x => x.TokenHash).IsUnique();
+            e.HasIndex(x => x.ExpiresAt);
+            e.HasIndex(x => x.UserCacheId);
+            e.Property(x => x.TokenHash).HasMaxLength(64);
+            e.Property(x => x.RequestIp).HasMaxLength(64);
         });
 
         b.Entity<SystemSetting>(e =>
