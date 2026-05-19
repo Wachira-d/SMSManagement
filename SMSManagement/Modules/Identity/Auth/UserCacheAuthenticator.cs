@@ -58,8 +58,10 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrEmpty(password))
             return Reject(AuthOutcome.InvalidCredentials, "Username and password are required.");
 
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         username = username.Trim().ToLowerInvariant();
         var cached = await LoadCacheAsync(username, ct);
+        var cacheLoadMs = sw.ElapsedMilliseconds;
 
         // 1. Lockout (independent of the upstream IdP)
         if (cached is { IsLocked: true } && StillLocked(cached))
@@ -80,15 +82,23 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
             return Reject(AuthOutcome.AccountDisabled, "Account is disabled.");
 
         // 2. Cache hit + fresh + hash matches → skip the API entirely.
-        if (cached is not null
-            && IsFresh(cached)
-            && _hasher.Verify(password, cached.Salt, cached.PasswordHash))
+        var isFresh = cached is not null && IsFresh(cached);
+        var hashMatches = cached is not null && _hasher.Verify(password, cached.Salt, cached.PasswordHash);
+        if (cached is not null && isFresh && hashMatches)
         {
             await MarkSuccessAsync(cached, ct);
             await Audit(username, "auth.cache_hit", cached, ct);
+            _log.LogInformation(
+                "auth: CACHE_HIT user={Username} totalMs={Total} cacheLoadMs={CacheLoad}",
+                username, sw.ElapsedMilliseconds, cacheLoadMs);
             return new AuthResult(true, AuthOutcome.Success,
                 "Authenticated from cache.", cached, AuthSource.Cache);
         }
+
+        // Cache-miss / stale / mismatch diagnostic — explains *why* we fell through.
+        _log.LogInformation(
+            "auth: cache miss for {Username} — cacheExists={Exists} fresh={Fresh} hashMatches={Hash}. Calling upstream.",
+            username, cached is not null, isFresh, hashMatches);
 
         // 3. Cache miss / stale / hash mismatch → call the upstream API.
         AuthenApiResult apiResult;
@@ -98,6 +108,9 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
         }
         catch (AuthenApiException ex)
         {
+            _log.LogInformation(
+                "auth: API_FAILURE user={Username} totalMs={Total} error={Error}",
+                username, sw.ElapsedMilliseconds, ex.Message);
             return await HandleApiFailureAsync(username, password, cached, ex.Message, ct);
         }
 
@@ -120,6 +133,9 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
         // 4. Upstream authenticated — refresh cache.
         var refreshed = await UpsertCacheAsync(apiResult, password, ct);
         await Audit(username, "auth.api_success", refreshed, ct);
+        _log.LogInformation(
+            "auth: API_SUCCESS user={Username} totalMs={Total} cacheLoadMs={CacheLoad}",
+            username, sw.ElapsedMilliseconds, cacheLoadMs);
         return new AuthResult(true, AuthOutcome.Success,
             "Authenticated via upstream and cache refreshed.",
             refreshed, AuthSource.AuthenApi);
