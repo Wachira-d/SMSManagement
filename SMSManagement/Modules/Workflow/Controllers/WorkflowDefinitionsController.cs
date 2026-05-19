@@ -98,6 +98,50 @@ public sealed class WorkflowDefinitionsController : ControllerBase
             new { def.Id, def.Name, def.Version, def.Active });
     }
 
+    public sealed record PreviewRequest(string Template, Dictionary<string, string>? Sample);
+    public sealed record PreviewResponse(string Rendered, int CharCount, int SmsParts, string[] MissingPlaceholders);
+
+    /// <summary>
+    /// Render a workflow SMS template with sample row data so the operator
+    /// can spot placeholder typos / over-long bodies before activating.
+    /// Auditors don't need to see this — every authenticated user with
+    /// Viewer access can preview.
+    /// </summary>
+    [HttpPost("preview")]
+    public async Task<IActionResult> Preview(
+        Guid projectId, [FromBody] PreviewRequest req, CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
+        if (req.Template is null) return BadRequest(new { Message = "Template is required." });
+
+        var sample = req.Sample ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["name"]  = "John Doe",
+            ["phone"] = "66812345678",
+            ["url"]   = "https://example.com/landing-page?ref=campaign",
+            ["email"] = "john@example.com",
+            ["message"] = "(custom message)",
+            ["custom"]  = "(custom)"
+        };
+
+        var rendered = req.Template;
+        foreach (var (k, v) in sample)
+            rendered = rendered.Replace("{{" + k + "}}", v, StringComparison.OrdinalIgnoreCase);
+
+        // Surface placeholders the template still references but the sample
+        // doesn't provide — likely typos.
+        var missing = System.Text.RegularExpressions.Regex.Matches(rendered, @"\{\{\s*([^\}]+?)\s*\}\}")
+            .Select(m => m.Groups[1].Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var len = rendered.Length;
+        // GSM-7 boundaries: 1 part if ≤160; otherwise 153 chars per part.
+        var parts = len <= 160 ? 1 : (int)Math.Ceiling(len / 153.0);
+
+        return Ok(new PreviewResponse(rendered, len, parts, missing));
+    }
+
     /// <summary>Activate a version; the previously active version (if any) becomes inactive.</summary>
     [HttpPost("{definitionId:guid}/activate")]
     public async Task<IActionResult> Activate(

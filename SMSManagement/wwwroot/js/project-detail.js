@@ -100,7 +100,7 @@ document.querySelectorAll('[data-bs-toggle="tab"]').forEach(el => {
             case '#tab-members':    if (!loaded.members)    { loaded.members    = true; loadMembers();    } break;
             case '#tab-mappings':   if (!loaded.mappings)   { loaded.mappings   = true; loadMappings(); loadRules(); } break;
             case '#tab-sources':    if (!loaded.sources)    { loaded.sources    = true; loadSources(); loadBatches(); } break;
-            case '#tab-workflows':  if (!loaded.workflows)  { loaded.workflows  = true; loadWorkflows();  } break;
+            case '#tab-workflows':  if (!loaded.workflows)  { loaded.workflows  = true; loadWorkflows(); loadWfInstances(); } break;
             case '#tab-shortlinks': if (!loaded.shortlinks) { loaded.shortlinks = true; loadShortlinks(); } break;
             case '#tab-sms':        if (!loaded.sms)        { loaded.sms        = true; loadSmsList(); loadProviderConfig('etracker'); loadProviderConfig('infobip'); } break;
         }
@@ -700,12 +700,18 @@ async function loadSources() {
             body.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-4"><i class="bi bi-cloud-download fs-3 d-block"></i>No automatic sources. Click <strong>+ New</strong> to add SFTP / SharePoint / REST, or skip this tab if you only upload manually.</td></tr>';
             return;
         }
-        body.innerHTML = rows.map(s => `
-            <tr>
+        body.innerHTML = rows.map(s => {
+            const cron = s.pollingSchedule || '*/5 * * * *';
+            const human = humanizeCron(cron);
+            const next = s.enabled ? nextCronTime(cron) : null;
+            const nextLabel = !s.enabled ? '<span class="text-muted">paused</span>'
+                : (next ? `<span title="${esc(next.toLocaleString())}">in ${relTime(next)}</span>`
+                       : '<span class="text-muted">—</span>');
+            return `<tr>
                 <td>${esc(s.sourceType)}</td>
-                <td><code class="small">${esc(s.archiveDirectory||'-')}</code></td>
+                <td class="small">${esc(human)}<br><code class="text-muted">${esc(cron)}</code></td>
+                <td class="small">${nextLabel}</td>
                 <td>${ACTION_LABEL[s.action] || s.action}</td>
-                <td>${DUP_LABEL[s.duplicatePolicy] || s.duplicatePolicy}</td>
                 <td>${s.enabled ? '<span class="text-success">●</span>' : '<span class="text-muted">○</span>'}</td>
                 <td>
                     <button class="btn btn-link btn-sm p-0"
@@ -713,7 +719,8 @@ async function loadSources() {
                     <button class="btn btn-link btn-sm p-0 text-danger"
                             onclick="deleteSrc('${esc(s.id)}')">Delete</button>
                 </td>
-            </tr>`).join('');
+            </tr>`;
+        }).join('');
         rows.forEach(s => sel.insertAdjacentHTML('beforeend',
             `<option value="${esc(s.id)}">${esc(s.sourceType)} — ${esc(s.id.slice(0,8))}…</option>`));
     } catch (e) { toast(e.message, 'danger'); }
@@ -1041,6 +1048,76 @@ function friendlyToTs(n, unit) {
     return days > 0 ? `${days}.${hhmmss}` : hhmmss;
 }
 
+// ============ CRON HUMAN-READABLE + NEXT-FIRE ============
+// Recognises the same preset shapes the schedule picker emits. Anything
+// outside those falls back to "(custom cron)" / null — operator sees the
+// raw expression in the cell below.
+function humanizeCron(cron) {
+    const parts = (cron || '').trim().split(/\s+/);
+    if (parts.length !== 5) return '(custom cron)';
+    const [m, h, dom, mon, dow] = parts;
+    let mm;
+    if ((mm = m.match(/^\*\/(\d+)$/)) && h === '*' && dom === '*' && mon === '*' && dow === '*')
+        return `Every ${mm[1]} minute${mm[1] === '1' ? '' : 's'}`;
+    if (m === '0' && h === '*' && dom === '*' && mon === '*' && dow === '*')
+        return 'Every hour';
+    if (m === '0' && (mm = h.match(/^\*\/(\d+)$/)) && dom === '*' && mon === '*' && dow === '*')
+        return `Every ${mm[1]} hours`;
+    if (/^\d+$/.test(m) && /^\d+$/.test(h) && dom === '*' && mon === '*' && dow === '*')
+        return `Daily at ${pad(h)}:${pad(m)}`;
+    if (/^\d+$/.test(m) && /^\d+$/.test(h) && dom === '*' && mon === '*' && /^[0-6]$/.test(dow))
+        return `Weekly ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][Number(dow)]} at ${pad(h)}:${pad(m)}`;
+    return '(custom cron)';
+}
+function nextCronTime(cron, from = new Date()) {
+    const parts = (cron || '').trim().split(/\s+/);
+    if (parts.length !== 5) return null;
+    const [m, h, dom, mon, dow] = parts;
+    const d = new Date(from); d.setSeconds(0, 0);
+    let mm;
+    if ((mm = m.match(/^\*\/(\d+)$/)) && h === '*' && dom === '*' && mon === '*' && dow === '*') {
+        const n = Number(mm[1]);
+        const next = Math.ceil((d.getMinutes() + 1) / n) * n;
+        d.setMinutes(next, 0, 0);
+        return d;
+    }
+    if (m === '0' && h === '*' && dom === '*' && mon === '*' && dow === '*') {
+        d.setHours(d.getHours() + 1, 0, 0, 0); return d;
+    }
+    if (m === '0' && (mm = h.match(/^\*\/(\d+)$/)) && dom === '*' && mon === '*' && dow === '*') {
+        const n = Number(mm[1]);
+        const next = Math.ceil((d.getHours() + 1) / n) * n;
+        if (next >= 24) { d.setDate(d.getDate() + 1); d.setHours(0, 0, 0, 0); }
+        else { d.setHours(next, 0, 0, 0); }
+        return d;
+    }
+    if (/^\d+$/.test(m) && /^\d+$/.test(h) && dom === '*' && mon === '*' && dow === '*') {
+        d.setHours(Number(h), Number(m), 0, 0);
+        if (d <= from) d.setDate(d.getDate() + 1);
+        return d;
+    }
+    if (/^\d+$/.test(m) && /^\d+$/.test(h) && dom === '*' && mon === '*' && /^[0-6]$/.test(dow)) {
+        d.setHours(Number(h), Number(m), 0, 0);
+        const targetDow = Number(dow);
+        while (d <= from || d.getDay() !== targetDow) d.setDate(d.getDate() + 1);
+        return d;
+    }
+    return null;
+}
+function pad(s) { return String(Number(s)).padStart(2, '0'); }
+function relTime(future) {
+    const ms = future - new Date();
+    if (ms <= 0) return 'now';
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ${m % 60}m`;
+    const d = Math.floor(h / 24);
+    return `${d}d ${h % 24}h`;
+}
+
 function newWorkflowModel() {
     return {
         name: '',
@@ -1059,6 +1136,50 @@ function newWorkflowModel() {
         }
     };
 }
+
+// ============ WORKFLOW INSTANCES SUMMARY ============
+// Server returns one row per (definitionId, state, count). We join against
+// the loaded workflow definitions to label the rows; the state palette
+// matches the WorkflowState enum colours used elsewhere.
+const WF_STATE_LABEL = ['Pending','Scheduled','Dispatching','AwaitingAction','ReminderDue','Completed','Failed','Expired'];
+const WF_STATE_BG    = ['secondary','info','primary','warning','warning','success','danger','dark'];
+
+async function loadWfInstances() {
+    try {
+        const [defs, summary] = await Promise.all([
+            api.get(`${api_proj}/workflows`),
+            api.get(`${api_proj}/workflow-instances/summary`)
+        ]);
+        const byDef = new Map();
+        for (const r of summary) {
+            const arr = byDef.get(r.definitionId) || [];
+            arr.push(r);
+            byDef.set(r.definitionId, arr);
+        }
+        const container = document.getElementById('wfInstSummary');
+        if (!defs.length) {
+            container.innerHTML = '<span class="text-muted">No definitions yet.</span>';
+            return;
+        }
+        container.innerHTML = defs.map(d => {
+            const rows = byDef.get(d.id) || [];
+            const total = rows.reduce((a, r) => a + r.count, 0);
+            const badges = rows.map(r => {
+                const label = typeof r.state === 'number' ? WF_STATE_LABEL[r.state] : r.state;
+                const idx   = typeof r.state === 'number' ? r.state : WF_STATE_LABEL.indexOf(label);
+                const bg    = WF_STATE_BG[idx] || 'secondary';
+                return `<span class="badge bg-${bg} me-1" title="${esc(label)}">${esc(label)}: ${r.count}</span>`;
+            }).join('');
+            return `<div class="py-2 border-bottom">
+                <div><strong>${esc(d.name)}</strong> v${d.version}
+                    ${d.active ? '<span class="badge bg-success ms-1">active</span>' : ''}
+                    <span class="text-muted small ms-1">${total} total</span></div>
+                <div class="mt-1">${badges || '<span class="text-muted small">no instances</span>'}</div>
+            </div>`;
+        }).join('');
+    } catch (e) { toast(e.message, 'danger'); }
+}
+document.getElementById('btnWfInstRefresh')?.addEventListener('click', loadWfInstances);
 
 async function loadWorkflows() {
     try {
@@ -1371,6 +1492,24 @@ function captureFormToModel() {
         const n = bodyEl.value.length;
         countEl.textContent = n;
         countEl.className = n > 320 ? 'text-danger' : n > 160 ? 'text-warning' : '';
+    });
+
+    // Preview — server renders with sample values so the operator sees both
+    // the final body and any placeholder typos that didn't resolve.
+    document.getElementById('btnQsPreview').addEventListener('click', async () => {
+        const out = document.getElementById('qsPreviewOut');
+        out.classList.remove('d-none');
+        out.textContent = 'Rendering…';
+        try {
+            const r = await api.post(`${api_proj}/workflows/preview`, {
+                template: bodyEl.value, sample: null
+            });
+            const partsLine = `${r.charCount} chars · ${r.smsParts} SMS part${r.smsParts === 1 ? '' : 's'}`;
+            const missingLine = r.missingPlaceholders.length
+                ? `\n\n⚠ Unresolved placeholders: ${r.missingPlaceholders.join(', ')}`
+                : '';
+            out.textContent = `${partsLine}\n\n${r.rendered}${missingLine}`;
+        } catch (e) { out.textContent = e.message; }
     });
 
     genBtn.addEventListener('click', () => {

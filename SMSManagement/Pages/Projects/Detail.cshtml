@@ -584,7 +584,7 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
                     </div>
                     <div class="table-responsive">
                         <table class="table table-sm mb-0">
-                            <thead><tr><th>Type</th><th>Archive dir</th><th>Action</th><th>Dup</th><th>On</th><th></th></tr></thead>
+                            <thead><tr><th>Type</th><th>Schedule</th><th>Next poll</th><th>Action</th><th>On</th><th></th></tr></thead>
                             <tbody id="srcBody"><tr><td colspan="6" class="text-muted">Loading…</td></tr></tbody>
                         </table>
                     </div>
@@ -769,6 +769,17 @@ Other SFTP keys: <code>host, port, username, privateKeyPem, remoteDirectory</cod
                         </table>
                     </div>
                 </div>
+                <!-- Per-definition instance count summary. State counts come from a
+                     server-side group-by; clicking a state opens the modal below. -->
+                <div class="card mt-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Running instances</span>
+                        <button id="btnWfInstRefresh" class="btn btn-link btn-sm p-0">Refresh</button>
+                    </div>
+                    <div class="card-body p-2">
+                        <div id="wfInstSummary" class="small text-muted">Loading…</div>
+                    </div>
+                </div>
             </div>
             <div class="col-md-8">
                 <div class="card">
@@ -820,10 +831,16 @@ Other SFTP keys: <code>host, port, username, privateKeyPem, remoteDirectory</cod
                                         </label>
                                         <textarea id="qsBody" class="form-control form-control-sm" rows="2"
                                             placeholder="Hi {{name}}, please visit {{url}} — thanks!"></textarea>
-                                        <div class="form-text">
-                                            <span id="qsBodyCount">0</span> chars
-                                            <span class="text-muted">(160 = 1 SMS · 153 / part if longer)</span>
+                                        <div class="form-text d-flex justify-content-between align-items-center">
+                                            <span>
+                                                <span id="qsBodyCount">0</span> chars
+                                                <span class="text-muted">(160 = 1 SMS · 153 / part if longer)</span>
+                                            </span>
+                                            <button type="button" id="btnQsPreview" class="btn btn-outline-secondary btn-sm py-0">
+                                                <i class="bi bi-eye"></i> Preview
+                                            </button>
                                         </div>
+                                        <pre id="qsPreviewOut" class="small mt-2 p-2 bg-light border rounded d-none"></pre>
                                     </div>
                                     <div class="col-12 qs-escalate-only" style="display:none">
                                         <label class="form-label small">Escalation body (sent on retry)</label>
