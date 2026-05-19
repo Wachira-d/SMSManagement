@@ -79,6 +79,7 @@ public static class ModuleRegistration
 
         services.AddScoped<ISmsProvider>(sp => sp.GetRequiredService<EtrackerSmsProvider>());
         services.AddScoped<ISmsProvider>(sp => sp.GetRequiredService<InfobipSmsProvider>());
+        services.AddScoped<IProviderConfigResolver, ProviderConfigResolver>();
         services.AddScoped<IProviderRouter, ProviderRouter>();
         services.AddScoped<ISmsDispatcher, SmsDispatcher>();
         services.AddScoped<IScheduledSmsDispatcher, ScheduledSmsDispatcher>();
@@ -96,6 +97,9 @@ public static class ModuleRegistration
         // ---------- Ingestion ----------
         services.AddScoped<IIngestionPipeline, IngestionPipeline>();
         services.AddScoped<IIngestionPoller, IngestionPoller>();
+
+        // ---------- Error log retention ----------
+        services.AddScoped<IErrorLogPurger, ErrorLogPurger>();
 
         // ---------- Notifications ----------
         services.Configure<SmtpOptions>(cfg.GetSection("Smtp"));

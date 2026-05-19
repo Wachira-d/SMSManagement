@@ -1,0 +1,112 @@
+@page
+@model SMSManagement.Pages.Admin.ErrorLogsModel
+@{ ViewData["Title"] = "Error Logs"; }
+
+<h1 class="h3 mb-3">Error logs</h1>
+<p class="text-muted small">
+    Persistent record of every <code>Error</code> / <code>Fatal</code> Serilog
+    event. Useful for triaging without scraping the JSON log files. Requires
+    <code>audit.read</code> permission. Click a row to see the full stack trace.
+</p>
+
+<div class="row g-2 mb-3 align-items-end">
+    <div class="col-auto">
+        <label class="form-label small">From</label>
+        <input type="date" id="fromDate" class="form-control form-control-sm" />
+    </div>
+    <div class="col-auto">
+        <label class="form-label small">To</label>
+        <input type="date" id="toDate" class="form-control form-control-sm" />
+    </div>
+    <div class="col-auto">
+        <label class="form-label small">Level</label>
+        <select id="levelFilter" class="form-select form-select-sm">
+            <option value="">All (Error+Fatal)</option>
+            <option value="Error">Error only</option>
+            <option value="Fatal">Fatal only</option>
+        </select>
+    </div>
+    <div class="col-auto">
+        <label class="form-label small">Search (message/path/exception)</label>
+        <input type="text" id="search" class="form-control form-control-sm" placeholder="…" />
+    </div>
+    <div class="col-auto">
+        <button id="btnSearch" class="btn btn-primary btn-sm">Search</button>
+    </div>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-sm">
+        <thead><tr>
+            <th>When</th><th>Level</th><th>Source</th><th>Message</th>
+            <th>Path</th><th>User</th><th>Correlation</th>
+        </tr></thead>
+        <tbody id="errBody"><tr><td colspan="7" class="text-muted">Loading…</td></tr></tbody>
+    </table>
+</div>
+
+<div class="modal fade" id="errModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">Error detail</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body"><pre id="errDetail" class="small" style="max-height:70vh;overflow:auto"></pre></div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+(function () {
+    const to = new Date();
+    const from = new Date(); from.setDate(from.getDate() - 7);
+    document.getElementById('fromDate').value = from.toISOString().slice(0,10);
+    document.getElementById('toDate').value   = to.toISOString().slice(0,10);
+})();
+
+async function load() {
+    const from   = document.getElementById('fromDate').value;
+    const to     = document.getElementById('toDate').value;
+    const level  = document.getElementById('levelFilter').value;
+    const search = document.getElementById('search').value;
+    const qs = new URLSearchParams({
+        from: from + 'T00:00:00Z', to: to + 'T23:59:59Z', take: 200
+    });
+    if (level)  qs.set('level', level);
+    if (search) qs.set('search', search);
+
+    try {
+        const rows = await api.get('/api/admin/error-logs?' + qs);
+        const body = document.getElementById('errBody');
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="7" class="text-muted">No errors in this range.</td></tr>';
+            return;
+        }
+        // Cache for detail modal
+        window._errorRows = Object.fromEntries(rows.map(r => [r.id, r]));
+        body.innerHTML = rows.map(r => `
+            <tr style="cursor:pointer" onclick="showErr(${r.id})">
+                <td class="small">${fmtDate(r.createdAt)}</td>
+                <td><span class="badge bg-${r.level==='Fatal' ? 'dark' : 'danger'}">${esc(r.level)}</span></td>
+                <td class="small text-truncate" style="max-width:220px">${esc(r.sourceContext||'')}</td>
+                <td class="small">${esc(r.message||'')}
+                    ${r.exceptionType ? `<br/><code class="text-danger small">${esc(r.exceptionType)}: ${esc(r.exceptionMessage||'')}</code>` : ''}
+                </td>
+                <td class="small"><code>${esc(r.requestMethod||'')} ${esc(r.requestPath||'')}</code></td>
+                <td class="small">${esc((r.userId||'').slice(0,8))}</td>
+                <td class="small text-muted">${esc((r.correlationId||'').slice(0,8))}</td>
+            </tr>`).join('');
+    } catch (e) { toast(e.message, 'danger'); }
+}
+
+window.showErr = function (id) {
+    const r = window._errorRows[id];
+    if (!r) return;
+    document.getElementById('errDetail').textContent = JSON.stringify(r, null, 2);
+    new bootstrap.Modal(document.getElementById('errModal')).show();
+};
+
+document.getElementById('btnSearch').addEventListener('click', load);
+load();
+</script>
+}

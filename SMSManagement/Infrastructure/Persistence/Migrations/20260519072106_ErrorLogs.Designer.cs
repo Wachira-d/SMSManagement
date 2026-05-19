@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SMSManagement.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using SMSManagement.Infrastructure.Persistence;
 namespace SMSManagement.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260519072106_ErrorLogs")]
+    partial class ErrorLogs
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -755,38 +758,6 @@ namespace SMSManagement.Infrastructure.Persistence.Migrations
                     b.HasIndex("ShortlinkId", "ClickedAt");
 
                     b.ToTable("ShortlinkClicks");
-                });
-
-            modelBuilder.Entity("SMSManagement.Modules.Sms.Domain.ProjectSmsProviderConfig", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<byte[]>("EncryptedConfig")
-                        .IsRequired()
-                        .HasColumnType("varbinary(max)");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<Guid?>("UpdatedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "Provider")
-                        .IsUnique();
-
-                    b.ToTable("ProjectSmsProviderConfigs");
                 });
 
             modelBuilder.Entity("SMSManagement.Modules.Sms.Domain.SmsMessage", b =>

@@ -40,7 +40,7 @@ document.querySelectorAll('[data-bs-toggle="tab"]').forEach(el => {
             case '#tab-sources':    if (!loaded.sources)    { loaded.sources    = true; loadSources(); loadBatches(); } break;
             case '#tab-workflows':  if (!loaded.workflows)  { loaded.workflows  = true; loadWorkflows();  } break;
             case '#tab-shortlinks': if (!loaded.shortlinks) { loaded.shortlinks = true; loadShortlinks(); } break;
-            case '#tab-sms':        if (!loaded.sms)        { loaded.sms        = true; loadSmsList();    } break;
+            case '#tab-sms':        if (!loaded.sms)        { loaded.sms        = true; loadSmsList(); loadProviderConfig('etracker'); loadProviderConfig('infobip'); } break;
         }
     });
 });
@@ -1051,5 +1051,82 @@ document.getElementById('btnAud').addEventListener('click', async () => {
                 <td class="small">${esc(r.entityType)}#${esc((r.entityId||'').slice(0,8))}</td>
                 <td class="small text-muted">${esc(r.ipAddress||'')}</td>
             </tr>`).join('');
+    } catch (e) { toast(e.message, 'danger'); }
+});
+
+// ==================== PROVIDER CREDENTIALS ====================
+// Loaded the first time the SMS tab is shown (alongside loadSmsList). The GET
+// returns metadata + masked indicators only — no plaintext secrets — so we
+// surface "stored" badges and a leave-blank-to-keep hint.
+async function loadProviderConfig(provider) {
+    try {
+        const r = await api.get(`${api_proj}/sms-providers/${provider}`);
+        if (provider === 'etracker') {
+            document.getElementById('etBaseUrl').value = r.baseUrl ?? '';
+            document.getElementById('etUser').value    = r.username ?? '';
+            document.getElementById('etSender').value  = r.defaultSenderId ?? '';
+            document.getElementById('etType').value    = r.defaultType ?? '';
+            document.getElementById('etPwdMark').classList.toggle('d-none', !r.passwordSet);
+            document.getElementById('etStatus').textContent = r.hasOverride
+                ? `Override active · updated ${fmtDate(r.updatedAt)}`
+                : 'No override — using global defaults.';
+        } else {
+            document.getElementById('ibBaseUrl').value = r.baseUrl ?? '';
+            document.getElementById('ibSender').value  = r.defaultSenderId ?? '';
+            document.getElementById('ibKeyMark').classList.toggle('d-none', !r.apiKeySet);
+            document.getElementById('ibStatus').textContent = r.hasOverride
+                ? `Override active · updated ${fmtDate(r.updatedAt)}`
+                : 'No override — using global defaults.';
+        }
+    } catch (e) { toast(e.message, 'danger'); }
+}
+
+document.getElementById('formProvEtracker').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const body = {
+        baseUrl:         document.getElementById('etBaseUrl').value || null,
+        username:        document.getElementById('etUser').value    || null,
+        password:        document.getElementById('etPwd').value     || null,
+        defaultSenderId: document.getElementById('etSender').value  || null,
+        defaultType:     document.getElementById('etType').value    || null
+    };
+    try {
+        await api.put(`${api_proj}/sms-providers/etracker`, body);
+        document.getElementById('etPwd').value = '';
+        toast('Etracker credentials saved.');
+        await loadProviderConfig('etracker');
+    } catch (e) { toast(e.message, 'danger'); }
+});
+
+document.getElementById('formProvInfobip').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const body = {
+        baseUrl:         document.getElementById('ibBaseUrl').value || null,
+        apiKey:          document.getElementById('ibKey').value     || null,
+        defaultSenderId: document.getElementById('ibSender').value  || null
+    };
+    try {
+        await api.put(`${api_proj}/sms-providers/infobip`, body);
+        document.getElementById('ibKey').value = '';
+        toast('Infobip credentials saved.');
+        await loadProviderConfig('infobip');
+    } catch (e) { toast(e.message, 'danger'); }
+});
+
+document.getElementById('btnEtClear').addEventListener('click', async () => {
+    if (!confirm('Remove project override and revert to global Etracker defaults?')) return;
+    try {
+        await api.delete(`${api_proj}/sms-providers/etracker`);
+        toast('Override removed.');
+        await loadProviderConfig('etracker');
+    } catch (e) { toast(e.message, 'danger'); }
+});
+
+document.getElementById('btnIbClear').addEventListener('click', async () => {
+    if (!confirm('Remove project override and revert to global Infobip defaults?')) return;
+    try {
+        await api.delete(`${api_proj}/sms-providers/infobip`);
+        toast('Override removed.');
+        await loadProviderConfig('infobip');
     } catch (e) { toast(e.message, 'danger'); }
 });

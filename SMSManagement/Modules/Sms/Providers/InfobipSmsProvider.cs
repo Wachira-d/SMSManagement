@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Microsoft.Extensions.Options;
 using SMSManagement.Modules.Core.Security;
 using SMSManagement.Modules.Sms.Domain;
 
@@ -11,40 +10,42 @@ namespace SMSManagement.Modules.Sms.Providers;
 public sealed class InfobipOptions
 {
     /// <summary>e.g. https://abc123.api.infobip.com (per-account base URL).</summary>
-    public string BaseUrl { get; init; } = string.Empty;
+    public string BaseUrl { get; set; } = string.Empty;
 
-    /// <summary>API key — Infobip's preferred auth. Resolved from KMS at startup.</summary>
-    public string ApiKey { get; init; } = string.Empty;
+    /// <summary>API key — Infobip's preferred auth. Resolved from KMS at startup,
+    /// OR from ProjectSmsProviderConfig (encrypted) per project.</summary>
+    public string ApiKey { get; set; } = string.Empty;
 
     /// <summary>Display sender (alpha or short code).</summary>
-    public string DefaultSenderId { get; init; } = string.Empty;
+    public string DefaultSenderId { get; set; } = string.Empty;
 }
 
 /// <summary>
-/// Infobip SMS provider. Implementing the same <see cref="ISmsProvider"/>
-/// contract as Etracker — no caller of <c>ISmsDispatcher</c> changes when
-/// the active provider is switched.
+/// Infobip SMS provider. Credentials resolved per-request via
+/// <see cref="IProviderConfigResolver"/> so each project can use its own
+/// Infobip account without sharing one global API key.
 /// </summary>
 public sealed class InfobipSmsProvider : ISmsProvider
 {
     public string Name => "infobip";
 
     private readonly HttpClient _http;
-    private readonly InfobipOptions _opts;
+    private readonly IProviderConfigResolver _configResolver;
     private readonly ILogger<InfobipSmsProvider> _log;
 
     public InfobipSmsProvider(
         HttpClient http,
-        IOptions<InfobipOptions> opts,
+        IProviderConfigResolver configResolver,
         ILogger<InfobipSmsProvider> log)
     {
         _http = http;
-        _opts = opts.Value;
+        _configResolver = configResolver;
         _log = log;
     }
 
     public async Task<ProviderDispatchResult> DispatchAsync(SmsRequest request, CancellationToken ct)
     {
+        var opts = await _configResolver.ResolveInfobipAsync(request.ProjectId, ct);
         var to = NormaliseE164(request.Recipient);
 
         // Infobip Send SMS API v2: POST /sms/2/text/advanced
@@ -55,18 +56,18 @@ public sealed class InfobipSmsProvider : ISmsProvider
                 new
                 {
                     destinations = new[] { new { to } },
-                    from = request.SenderId ?? _opts.DefaultSenderId,
+                    from = request.SenderId ?? opts.DefaultSenderId,
                     text = request.Body
                 }
             }
         };
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, $"{_opts.BaseUrl}/sms/2/text/advanced")
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"{opts.BaseUrl}/sms/2/text/advanced")
         {
             Content = JsonContent.Create(payload)
         };
         // Header auth — Infobip's required scheme: "App <apiKey>".
-        req.Headers.Authorization = new AuthenticationHeaderValue("App", _opts.ApiKey);
+        req.Headers.Authorization = new AuthenticationHeaderValue("App", opts.ApiKey);
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
         _log.LogInformation("Dispatching SMS provider=infobip project={ProjectId} to={MaskedTo}",

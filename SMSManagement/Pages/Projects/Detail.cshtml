@@ -461,6 +461,58 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Per-project provider credentials. Admin-only. Secrets never come back over GET. -->
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Provider credentials (per project)</span>
+                        <small class="text-muted">Blank fields fall back to the global default. Secrets are stored encrypted and never returned by the API.</small>
+                    </div>
+                    <div class="card-body">
+                        <ul class="nav nav-pills mb-3" role="tablist">
+                            <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#prov-etracker">Etracker</a></li>
+                            <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#prov-infobip">Infobip</a></li>
+                        </ul>
+                        <div class="tab-content">
+                            <div class="tab-pane fade show active" id="prov-etracker">
+                                <form id="formProvEtracker" class="row g-2">
+                                    <div class="col-md-6"><label class="form-label small">Base URL</label>
+                                        <input id="etBaseUrl" class="form-control form-control-sm" placeholder="https://www.etracker.cc/bulksms/mesapi.aspx" /></div>
+                                    <div class="col-md-6"><label class="form-label small">Username</label>
+                                        <input id="etUser" class="form-control form-control-sm" autocomplete="off" /></div>
+                                    <div class="col-md-6"><label class="form-label small">Password <span id="etPwdMark" class="badge text-bg-secondary d-none">stored</span></label>
+                                        <input id="etPwd" type="password" class="form-control form-control-sm" autocomplete="new-password" placeholder="leave blank to keep current" /></div>
+                                    <div class="col-md-4"><label class="form-label small">Default Sender ID</label>
+                                        <input id="etSender" class="form-control form-control-sm" /></div>
+                                    <div class="col-md-2"><label class="form-label small">Default Type</label>
+                                        <input id="etType" class="form-control form-control-sm" placeholder="0" /></div>
+                                    <div class="col-12 d-flex gap-2">
+                                        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> Save</button>
+                                        <button type="button" id="btnEtClear" class="btn btn-outline-danger btn-sm">Remove override</button>
+                                        <span id="etStatus" class="ms-auto small text-muted"></span>
+                                    </div>
+                                </form>
+                            </div>
+                            <div class="tab-pane fade" id="prov-infobip">
+                                <form id="formProvInfobip" class="row g-2">
+                                    <div class="col-md-6"><label class="form-label small">Base URL</label>
+                                        <input id="ibBaseUrl" class="form-control form-control-sm" placeholder="https://api.infobip.com" /></div>
+                                    <div class="col-md-6"><label class="form-label small">API Key <span id="ibKeyMark" class="badge text-bg-secondary d-none">stored</span></label>
+                                        <input id="ibKey" type="password" class="form-control form-control-sm" autocomplete="new-password" placeholder="leave blank to keep current" /></div>
+                                    <div class="col-md-6"><label class="form-label small">Default Sender ID</label>
+                                        <input id="ibSender" class="form-control form-control-sm" /></div>
+                                    <div class="col-12 d-flex gap-2">
+                                        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> Save</button>
+                                        <button type="button" id="btnIbClear" class="btn btn-outline-danger btn-sm">Remove override</button>
+                                        <span id="ibStatus" class="ms-auto small text-muted"></span>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

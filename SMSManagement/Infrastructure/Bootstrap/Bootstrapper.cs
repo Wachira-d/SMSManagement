@@ -1,4 +1,6 @@
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Identity.Auth;
@@ -17,73 +19,147 @@ public sealed class BootstrapOptions
 
     /// <summary>Required iff AdminUsername is set. Must satisfy local password policy.</summary>
     public string? AdminPassword { get; init; }
+
+    /// <summary>Development-only: if true AND no users exist AND
+    /// Bootstrap:AdminUsername is blank, generate a default "admin" user
+    /// with a random password and log it loudly. Default true in
+    /// appsettings.Development.json so a fresh clone works out of the box.</summary>
+    public bool AutoFirstRunAdminInDev { get; init; } = true;
 }
 
 /// <summary>
 /// Idempotent first-run setup. Runs once at startup, after EF migrations.
-///   - Mirrors a system-admin User row + UserCache so the admin can log in
-///     even when the upstream AuthenAPI is unreachable.
-///   - Does nothing if no admin is configured (most production envs).
+///   1. If Bootstrap:AdminUsername + AdminPassword set:
+///      seed that user (existing behaviour).
+///   2. ELSE, in Development with AutoFirstRunAdminInDev=true and
+///      zero UserCache rows: seed a default "admin" user with a
+///      generated password, log the credentials WARN-level so the
+///      operator can copy them from the console on first boot.
+///      This is the path users hit when they git-clone + dotnet run.
 /// </summary>
 public static class Bootstrapper
 {
+    private const string DefaultUsername = "admin";
+
     public static async Task RunAsync(IServiceProvider services, CancellationToken ct = default)
     {
         await using var scope = services.CreateAsyncScope();
         var sp = scope.ServiceProvider;
         var log = sp.GetRequiredService<ILogger<Program>>();
+        var env = sp.GetRequiredService<IHostEnvironment>();
         var opts = sp.GetRequiredService<IOptions<BootstrapOptions>>().Value;
-
-        if (string.IsNullOrWhiteSpace(opts.AdminUsername))
-        {
-            log.LogInformation("Bootstrap: no AdminUsername configured — skipping admin seed.");
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(opts.AdminPassword))
-        {
-            log.LogWarning("Bootstrap: AdminUsername set but AdminPassword missing — admin NOT seeded.");
-            return;
-        }
-
         var db = sp.GetRequiredService<AppDbContext>();
         var hasher = sp.GetRequiredService<IPasswordHasher>();
-        var username = opts.AdminUsername.Trim().ToLowerInvariant();
 
-        var existingCache = await db.UserCaches
-            .FirstOrDefaultAsync(u => u.Username == username, ct);
-        if (existingCache is not null)
+        // ---- Path 1: explicit Bootstrap config ----
+        if (!string.IsNullOrWhiteSpace(opts.AdminUsername))
+        {
+            if (string.IsNullOrWhiteSpace(opts.AdminPassword))
+            {
+                log.LogWarning(
+                    "Bootstrap: AdminUsername set but AdminPassword missing — admin NOT seeded.");
+                return;
+            }
+            await SeedAsync(db, hasher, log, opts.AdminUsername!, opts.AdminPassword!,
+                opts.AdminEmail, generated: false, ct);
+            return;
+        }
+
+        // ---- Path 2: dev first-run convenience ----
+        if (!env.IsDevelopment() || !opts.AutoFirstRunAdminInDev)
+        {
+            log.LogInformation(
+                "Bootstrap: no AdminUsername configured and dev auto-seed " +
+                "{Status} — skipping admin seed.",
+                env.IsDevelopment() ? "disabled" : "off (env != Development)");
+            return;
+        }
+
+        var anyUserExists = await db.UserCaches.AnyAsync(ct);
+        if (anyUserExists)
+        {
+            log.LogInformation(
+                "Bootstrap: dev first-run skipped — UserCache already has rows. " +
+                "Set Bootstrap:AdminUsername + AdminPassword to provision a specific admin.");
+            return;
+        }
+
+        // Generate a strong random password the operator can copy from the log.
+        var generatedPwd = GenerateReadablePassword();
+        await SeedAsync(db, hasher, log, DefaultUsername, generatedPwd,
+            email: "admin@local.dev", generated: true, ct);
+    }
+
+    private static async Task SeedAsync(
+        AppDbContext db, IPasswordHasher hasher, ILogger log,
+        string usernameRaw, string password, string? email, bool generated,
+        CancellationToken ct)
+    {
+        var username = usernameRaw.Trim().ToLowerInvariant();
+
+        var existing = await db.UserCaches.FirstOrDefaultAsync(u => u.Username == username, ct);
+        if (existing is not null)
         {
             log.LogInformation("Bootstrap: admin '{Username}' already exists — no changes.", username);
             return;
         }
 
         var salt = hasher.NewSalt();
-        var cache = new UserCache
+        db.UserCaches.Add(new UserCache
         {
             Username = username,
             Salt = salt,
-            PasswordHash = hasher.Hash(opts.AdminPassword, salt),
+            PasswordHash = hasher.Hash(password, salt),
             DisplayName = "System Administrator",
-            Email = opts.AdminEmail,
+            Email = email,
             IsEnabled = true,
             IsLocked = false,
             LastAdSync = DateTimeOffset.UtcNow,
             CacheExpires = DateTimeOffset.UtcNow.AddYears(1),
             GroupsJson = "[\"CampaignAdmin\"]"
-        };
-        db.UserCaches.Add(cache);
+        });
 
-        var user = new User
+        db.Users.Add(new User
         {
             ExternalSubject = username,
-            Email = opts.AdminEmail ?? string.Empty,
-            DisplayName = cache.DisplayName
-        };
-        db.Users.Add(user);
+            Email = email ?? string.Empty,
+            DisplayName = "System Administrator"
+        });
 
         await db.SaveChangesAsync(ct);
-        log.LogWarning(
-            "Bootstrap: SEEDED admin user '{Username}'. Rotate this credential immediately.",
-            username);
+
+        if (generated)
+        {
+            // VERY visible log block — operator copies these from the console
+            // on first boot. Subsequent boots see "already exists — no changes".
+            log.LogWarning(
+                "\n" +
+                "============================================================\n" +
+                "  FIRST-RUN DEV ADMIN CREATED\n" +
+                "    Username : {Username}\n" +
+                "    Password : {Password}\n" +
+                "  Save this — it will NOT be shown again. Rotate before any\n" +
+                "  shared / non-Development deployment. Configure Bootstrap:\n" +
+                "  AdminUsername + AdminPassword to provision your own.\n" +
+                "============================================================",
+                username, password);
+        }
+        else
+        {
+            log.LogWarning(
+                "Bootstrap: SEEDED admin user '{Username}'. Rotate this credential immediately.",
+                username);
+        }
+    }
+
+    /// <summary>Strong but copy-pasteable: 16 chars from URL-safe alphabet.</summary>
+    private static string GenerateReadablePassword()
+    {
+        const string alpha = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+        Span<byte> bytes = stackalloc byte[16];
+        RandomNumberGenerator.Fill(bytes);
+        Span<char> chars = stackalloc char[16];
+        for (var i = 0; i < bytes.Length; i++) chars[i] = alpha[bytes[i] % alpha.Length];
+        return new string(chars);
     }
 }

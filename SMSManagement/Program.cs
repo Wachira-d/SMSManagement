@@ -53,13 +53,19 @@ if (!string.IsNullOrWhiteSpace(keyDir))
         .SetApplicationName("CampaignPlatform");
 }
 
-// ---------- Logging: structured + PII-masked ----------
+// ---------- Logging: structured + PII-masked + DB error sink ----------
+// The ErrorLogSink writes Error/Fatal events to the ErrorLogs table; it
+// needs an IServiceScopeFactory to resolve AppDbContext, so we pull that
+// from the host-provided services parameter (available after DI is built).
 builder.Host.UseSerilog((ctx, services, lc) => lc
     .ReadFrom.Configuration(ctx.Configuration)
     .Enrich.FromLogContext()
     .Enrich.WithCorrelationId()
     .Enrich.With(new PiiMaskingEnricher())
-    .WriteTo.Console(formatter: new Serilog.Formatting.Compact.CompactJsonFormatter()));
+    .WriteTo.Console(formatter: new Serilog.Formatting.Compact.CompactJsonFormatter())
+    .WriteTo.Conditional(
+        ev => ev.Level >= Serilog.Events.LogEventLevel.Error,
+        cfg => cfg.Sink(new ErrorLogSink(services.GetRequiredService<IServiceScopeFactory>()))));
 
 // ---------- AuthN: JWT bearer (header OR cookie) ----------
 // Razor Pages use the cookie path (server-rendered, session-style UX).
@@ -326,6 +332,12 @@ if (!testingEnabled)
         "sms-scheduled-dispatch",
         worker => worker.DispatchDueAsync(CancellationToken.None),
         "* * * * *");
+
+    // Daily purge of old ErrorLogs entries (default retention 30 days).
+    RecurringJob.AddOrUpdate<IErrorLogPurger>(
+        "error-log-purge",
+        purger => purger.PurgeAsync(CancellationToken.None),
+        "0 3 * * *");
 }
 
 app.Run();

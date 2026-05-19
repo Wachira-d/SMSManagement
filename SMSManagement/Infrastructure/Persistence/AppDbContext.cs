@@ -40,6 +40,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<WorkflowTransition> WorkflowTransitions => Set<WorkflowTransition>();
 
     public DbSet<SmsMessage> SmsMessages => Set<SmsMessage>();
+    public DbSet<ProjectSmsProviderConfig> ProjectSmsProviderConfigs => Set<ProjectSmsProviderConfig>();
 
     public DbSet<SMSManagement.Modules.Shortlink.Domain.Shortlink> Shortlinks =>
         Set<SMSManagement.Modules.Shortlink.Domain.Shortlink>();
@@ -53,6 +54,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<UserCache> UserCaches => Set<UserCache>();
     public DbSet<LoginAudit> LoginAudits => Set<LoginAudit>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<ErrorLog> ErrorLogs => Set<ErrorLog>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -106,6 +108,14 @@ public sealed class AppDbContext : DbContext
             e.HasIndex(x => x.WorkflowInstanceId);
             e.Property(x => x.Status).HasConversion<int>();
             e.Property(x => x.Priority).HasConversion<int>();
+        });
+
+        b.Entity<ProjectSmsProviderConfig>(e =>
+        {
+            // One row per (project, provider). Provider stored canonical lower-case
+            // to match ISmsProvider.Name.
+            e.HasIndex(x => new { x.ProjectId, x.Provider }).IsUnique();
+            e.Property(x => x.Provider).HasMaxLength(32);
         });
 
         // ---------- Shortlink ----------
@@ -217,6 +227,23 @@ public sealed class AppDbContext : DbContext
             e.Property(x => x.TokenHash).HasMaxLength(64);
             e.Property(x => x.RevokedReason).HasMaxLength(64);
             e.Property(x => x.CreatedFromIp).HasMaxLength(64);
+        });
+
+        b.Entity<ErrorLog>(e =>
+        {
+            e.HasIndex(x => x.CreatedAt);
+            e.HasIndex(x => new { x.Level, x.CreatedAt });
+            e.HasIndex(x => x.CorrelationId);
+            e.HasIndex(x => x.UserId);
+            e.Property(x => x.Level).HasMaxLength(16);
+            e.Property(x => x.SourceContext).HasMaxLength(256);
+            e.Property(x => x.Message).HasMaxLength(2100);
+            e.Property(x => x.ExceptionType).HasMaxLength(256);
+            e.Property(x => x.ExceptionMessage).HasMaxLength(2100);
+            e.Property(x => x.RequestPath).HasMaxLength(500);
+            e.Property(x => x.RequestMethod).HasMaxLength(16);
+            e.Property(x => x.CorrelationId).HasMaxLength(100);
+            e.Property(x => x.IpAddress).HasMaxLength(64);
         });
     }
 }

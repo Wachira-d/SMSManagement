@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Headers;
-using Microsoft.Extensions.Options;
 using SMSManagement.Modules.Core.Security;
 using SMSManagement.Modules.Sms.Domain;
 
@@ -8,58 +7,59 @@ namespace SMSManagement.Modules.Sms.Providers;
 
 public sealed class EtrackerOptions
 {
-    public string BaseUrl { get; init; } = "https://www.etracker.cc/bulksms/mesapi.aspx";
-    /// <summary>Resolved from Key Vault at startup, never from appsettings.</summary>
-    public string Username { get; init; } = string.Empty;
-    public string Password { get; init; } = string.Empty;
-    public string DefaultSenderId { get; init; } = "Honda";
-    public string DefaultType { get; init; } = "0";
+    public string BaseUrl { get; set; } = "https://www.etracker.cc/bulksms/mesapi.aspx";
+    /// <summary>Resolved from Key Vault at startup, OR from
+    /// ProjectSmsProviderConfig (encrypted) per project.</summary>
+    public string Username { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+    public string DefaultSenderId { get; set; } = "Honda";
+    public string DefaultType { get; set; } = "0";
 }
 
 /// <summary>
-/// Modern replacement for the legacy <c>WebClient.DownloadString(buildUrlWithCreds…)</c>
-/// dispatch path. Differences from legacy:
-///  - async/await, uses IHttpClientFactory (pooled HttpMessageHandler).
-///  - resilience pipeline (Polly) wired up in DI; this class just throws on failure.
-///  - credentials sent via Basic auth header, not query string ⇒ no logging leak.
-///  - never logs body or recipient (only masked form).
+/// Etracker SMS dispatcher. Credentials are resolved per-request via
+/// <see cref="IProviderConfigResolver"/> so each project can override its
+/// own Etracker username/password without leaking into the global config.
 /// </summary>
 public sealed class EtrackerSmsProvider : ISmsProvider
 {
     public string Name => "etracker";
 
     private readonly HttpClient _http;
-    private readonly EtrackerOptions _opts;
+    private readonly IProviderConfigResolver _configResolver;
     private readonly ILogger<EtrackerSmsProvider> _log;
 
     public EtrackerSmsProvider(
         HttpClient http,
-        IOptions<EtrackerOptions> opts,
+        IProviderConfigResolver configResolver,
         ILogger<EtrackerSmsProvider> log)
     {
         _http = http;
-        _opts = opts.Value;
+        _configResolver = configResolver;
         _log = log;
     }
 
     public async Task<ProviderDispatchResult> DispatchAsync(SmsRequest request, CancellationToken ct)
     {
+        // Per-project config merged with global defaults.
+        var opts = await _configResolver.ResolveEtrackerAsync(request.ProjectId, ct);
+
         // Recipient normalisation (legacy did this inline with hard-coded "66" prefix).
         var normalised = NormaliseMsisdn(request.Recipient);
 
         // Build form-encoded body — no secrets in the URL.
         var form = new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            ["type"]   = _opts.DefaultType,
+            ["type"]   = opts.DefaultType,
             ["to"]     = normalised,
-            ["from"]   = request.SenderId ?? _opts.DefaultSenderId,
+            ["from"]   = request.SenderId ?? opts.DefaultSenderId,
             ["text"]   = request.Body,
             ["servid"] = request.ProjectId.ToString("N")
         });
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, _opts.BaseUrl) { Content = form };
+        using var req = new HttpRequestMessage(HttpMethod.Post, opts.BaseUrl) { Content = form };
         var basic = Convert.ToBase64String(
-            System.Text.Encoding.ASCII.GetBytes($"{_opts.Username}:{_opts.Password}"));
+            System.Text.Encoding.ASCII.GetBytes($"{opts.Username}:{opts.Password}"));
         req.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic);
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
