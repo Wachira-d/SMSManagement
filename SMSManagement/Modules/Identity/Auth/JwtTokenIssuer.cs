@@ -141,15 +141,21 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
     ///
     ///   AD Group           Perms granted (in addition to the baseline)
     ///   ─────────────────────────────────────────────────────────────────────
-    ///   CampaignAdmin      sms.dispatch, workflow.author, ingestion.upload,
-    ///                      audit.read
-    ///   CampaignOperator   sms.dispatch, ingestion.upload
-    ///   CampaignAuditor    audit.read
+    ///   CampaignAdmin      audit.read   (cross-project / system-wide audit)
+    ///   CampaignAuditor    audit.read   (cross-project / system-wide audit)
     ///
     /// Baseline (every authenticated user, regardless of AD group):
-    ///   project.create — anyone who can log in can start their own project
-    ///                    and becomes its Owner. Sensitive perms (sms.dispatch,
-    ///                    audit.read, etc.) still require the AD group.
+    ///   project.create     anyone can start their own project (becomes Owner)
+    ///   sms.dispatch       gated per-project by ProjectMembership level
+    ///   workflow.author    gated per-project by ProjectMembership level
+    ///   ingestion.upload   gated per-project by ProjectMembership level
+    ///
+    /// Rationale: these three are project-scoped capabilities — the
+    /// controllers already enforce ProjectAccessService.EnsureAsync per
+    /// request, so a stranger can't dispatch SMS into someone else's project
+    /// just because they hold the perm claim. Stripping the baseline blocks
+    /// project owners from using their own projects, which is not the goal.
+    /// audit.read is the only truly cross-project perm and stays AD-gated.
     ///
     /// Replace this hard-coded switch with a DB-driven mapping in production
     /// (PermissionMapping table + admin UI). Kept inline here so the token
@@ -157,23 +163,18 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
     /// </summary>
     private static IEnumerable<string> MapGroupsToPermissions(IReadOnlyList<string> groups)
     {
-        // Baseline for every signed-in user.
+        // Baseline for every signed-in user. Project-scoped perms are safe to
+        // grant universally because the controllers enforce per-project access.
         yield return "project.create";
+        yield return "sms.dispatch";
+        yield return "workflow.author";
+        yield return "ingestion.upload";
 
         foreach (var g in groups)
         {
             switch (g)
             {
                 case "CampaignAdmin":
-                    yield return "sms.dispatch";
-                    yield return "workflow.author";
-                    yield return "ingestion.upload";
-                    yield return "audit.read";
-                    break;
-                case "CampaignOperator":
-                    yield return "sms.dispatch";
-                    yield return "ingestion.upload";
-                    break;
                 case "CampaignAuditor":
                     yield return "audit.read";
                     break;
