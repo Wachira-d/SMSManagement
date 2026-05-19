@@ -97,7 +97,7 @@ public sealed class IngestionPoller : IIngestionPoller
         try
         {
             var files = client.ListDirectory(cfg.RemoteDirectory)
-                .Where(f => !f.IsDirectory && MatchesGlob(f.Name, cfg.FilePattern))
+                .Where(f => !f.IsDirectory && Utilities.GlobMatcher.IsMatch(f.Name, cfg.FilePattern))
                 .ToList();
 
             foreach (var file in files)
@@ -135,13 +135,6 @@ public sealed class IngestionPoller : IIngestionPoller
         {
             client.Disconnect();
         }
-    }
-
-    private static bool MatchesGlob(string name, string pattern)
-    {
-        // Cheap "*.csv" support — full glob support belongs in a library.
-        var ext = Path.GetExtension(pattern);
-        return ext.Length == 0 || name.EndsWith(ext, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void TryCreateRemoteDir(SftpClient client, string path)

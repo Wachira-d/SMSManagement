@@ -43,7 +43,7 @@ public sealed class SftpSource : IIngestionSource
         try
         {
             var files = client.ListDirectory(_opts.RemoteDirectory)
-                .Where(f => !f.IsDirectory && MatchesPattern(f.Name, _opts.FilePattern))
+                .Where(f => !f.IsDirectory && Utilities.GlobMatcher.IsMatch(f.Name, _opts.FilePattern))
                 .ToList();
 
             foreach (var file in files)
@@ -72,9 +72,4 @@ public sealed class SftpSource : IIngestionSource
         }
     }
 
-    private static bool MatchesPattern(string name, string pattern)
-    {
-        var ext = Path.GetExtension(pattern);
-        return ext.Length == 0 || name.EndsWith(ext, StringComparison.OrdinalIgnoreCase);
-    }
 }

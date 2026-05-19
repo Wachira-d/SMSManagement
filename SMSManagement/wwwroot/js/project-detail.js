@@ -355,6 +355,125 @@ document.getElementById('formMap').addEventListener('submit', async (ev) => {
     } catch (e) { toast(e.message, 'danger'); }
 });
 
+// ============ SAMPLE-FILE HEADER DETECTION ============
+// Drop or pick a CSV/XLSX → server parses headers + first 5 rows, comes back
+// with: existing mappings flagged, naming-heuristic suggestions for the rest.
+// Operator ticks the columns they want and clicks "Save selected" to upsert
+// in one batch.
+(function initMapHeaderDetect() {
+    const drop     = document.getElementById('mapDrop');
+    const fileInp  = document.getElementById('mapFile');
+    const pickLink = document.getElementById('mapPickFile');
+    const preview  = document.getElementById('mapPreview');
+    const fileName = document.getElementById('mapFileName');
+    const tbody    = document.getElementById('mapPreviewBody');
+    const btnApply = document.getElementById('btnMapApplyAll');
+    if (!drop) return;
+
+    const CANONICALS = ['phone', 'message', 'url', 'name', 'email', 'custom'];
+
+    pickLink.addEventListener('click', (e) => { e.preventDefault(); fileInp.click(); });
+    drop.addEventListener('click', (e) => {
+        // Don't double-trigger when the user clicks the "browse" link inside the box.
+        if (e.target.tagName !== 'A') fileInp.click();
+    });
+    drop.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        drop.classList.add('border-primary', 'bg-light');
+    });
+    drop.addEventListener('dragleave', () => drop.classList.remove('border-primary', 'bg-light'));
+    drop.addEventListener('drop', (e) => {
+        e.preventDefault();
+        drop.classList.remove('border-primary', 'bg-light');
+        if (e.dataTransfer.files.length) uploadSample(e.dataTransfer.files[0]);
+    });
+    fileInp.addEventListener('change', () => {
+        if (fileInp.files.length) uploadSample(fileInp.files[0]);
+    });
+
+    async function uploadSample(file) {
+        const fd = new FormData();
+        fd.append('file', file);
+        try {
+            // Bypass api.req — it always sets Content-Type: application/json.
+            // FormData needs the browser to set its own multipart boundary.
+            const resp = await fetch(`${api_proj}/column-mappings/preview-headers`, {
+                method: 'POST', body: fd, credentials: 'include'
+            });
+            const data = await resp.json();
+            if (!resp.ok) { toast(data?.message || 'Upload failed.', 'danger'); return; }
+            renderPreview(data);
+        } catch (e) { toast(e.message, 'danger'); }
+        finally { fileInp.value = ''; }
+    }
+
+    function renderPreview(data) {
+        fileName.textContent = data.fileName;
+        preview.classList.remove('d-none');
+
+        tbody.innerHTML = data.suggestions.map((s, i) => {
+            const samples = (data.sample || [])
+                .map(row => row[s.header]).filter(v => v && v.length)
+                .slice(0, 3).join(' · ');
+            const opts = ['<option value="">— skip —</option>']
+                .concat(CANONICALS.map(c =>
+                    `<option value="${c}" ${s.suggested === c ? 'selected' : ''}>${c}</option>`))
+                .join('');
+            const lockedBadge = s.alreadyMapped
+                ? `<span class="badge bg-secondary">already → ${esc(s.alreadyMapped)}</span>`
+                : '';
+            return `<tr data-header="${esc(s.header)}">
+                <td><strong>${esc(s.header)}</strong> ${lockedBadge}</td>
+                <td class="small text-muted">${esc(samples) || '<em>(blank)</em>'}</td>
+                <td>
+                    <select class="form-select form-select-sm mp-field" ${s.alreadyMapped ? 'disabled' : ''}>
+                        ${opts}
+                    </select>
+                </td>
+                <td>
+                    <input class="form-control form-control-sm mp-chain"
+                           placeholder="trim, digits"
+                           ${s.alreadyMapped ? 'disabled' : ''} />
+                </td>
+            </tr>`;
+        }).join('');
+
+        // "Save selected" enables once at least one row has a non-empty canonical pick.
+        const refresh = () => {
+            const any = Array.from(tbody.querySelectorAll('.mp-field'))
+                .some(s => !s.disabled && s.value);
+            btnApply.disabled = !any;
+        };
+        tbody.querySelectorAll('.mp-field').forEach(s => s.addEventListener('change', refresh));
+        refresh();
+    }
+
+    btnApply.addEventListener('click', async () => {
+        const rows = Array.from(tbody.querySelectorAll('tr'))
+            .map(tr => ({
+                header: tr.dataset.header,
+                field:  tr.querySelector('.mp-field').value,
+                chain:  tr.querySelector('.mp-chain').value
+            }))
+            .filter(r => r.field);
+        if (!rows.length) return;
+        btnApply.disabled = true;
+        let ok = 0, fail = 0;
+        for (const r of rows) {
+            try {
+                await api.post(`${api_proj}/column-mappings`, {
+                    sourceColumn:   r.header,
+                    canonicalField: r.field,
+                    transformChain: r.chain.split(',').map(s => s.trim()).filter(Boolean)
+                });
+                ok++;
+            } catch { fail++; }
+        }
+        toast(`Saved ${ok}${fail ? ` (${fail} failed)` : ''}.`, fail ? 'warning' : 'success');
+        loadMappings();
+    });
+})();
+
 // ==================== SOURCES ====================
 async function loadSources() {
     try {
