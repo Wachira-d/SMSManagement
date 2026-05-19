@@ -102,6 +102,16 @@
                             }
                         </ul>
                         <ul class="navbar-nav">
+                            <li class="nav-item">
+                                <a class="nav-link position-relative" href="#"
+                                   onclick="openToastHistory();return false;"
+                                   title="Notifications">
+                                    <i class="bi bi-bell"></i>
+                                    <span id="toastHistoryCount"
+                                          class="badge rounded-pill bg-danger position-absolute d-none"
+                                          style="top:0;right:0;font-size:.6rem">0</span>
+                                </a>
+                            </li>
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#">
                                     <i class="bi bi-person-circle"></i>
