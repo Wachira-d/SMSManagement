@@ -546,14 +546,121 @@ Other SFTP keys: <code>host, port, username, privateKeyPem, remoteDirectory</cod
                         </div>
                     </div>
                     <div class="card-body">
+                        <!-- Quick-start wizard generates a typical workflow from a small
+                             form so operators don't have to hand-edit steps + transitions.
+                             Common shapes: "send once", "send + reminder", "send + escalate". -->
+                        <div id="wfQuickStart" class="alert alert-light border mb-3">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                    <strong><i class="bi bi-magic"></i> Quick start</strong>
+                                    <div class="small text-muted">
+                                        Pick a scenario and fill in 3 fields — we'll build the steps for you.
+                                    </div>
+                                </div>
+                                <button id="btnWfQuickOpen" class="btn btn-sm btn-primary">
+                                    Use a template
+                                </button>
+                            </div>
+                            <div id="wfQuickForm" class="mt-3" style="display:none">
+                                <div class="row g-2">
+                                    <div class="col-12">
+                                        <label class="form-label small">Scenario</label>
+                                        <select id="qsScenario" class="form-select form-select-sm">
+                                            <option value="reminder">Send → check open → send again (most common)</option>
+                                            <option value="escalate">Send → check open → escalate to a different message</option>
+                                            <option value="once">Send once (fire-and-forget)</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label small">
+                                            SMS body
+                                            <span class="btn-group btn-group-sm ms-1" id="qsPlaceholders">
+                                                <button type="button" class="btn btn-outline-secondary btn-sm py-0"
+                                                        data-ph="{{name}}">+ name</button>
+                                                <button type="button" class="btn btn-outline-secondary btn-sm py-0"
+                                                        data-ph="{{phone}}">+ phone</button>
+                                                <button type="button" class="btn btn-outline-secondary btn-sm py-0"
+                                                        data-ph="{{url}}">+ url</button>
+                                            </span>
+                                        </label>
+                                        <textarea id="qsBody" class="form-control form-control-sm" rows="2"
+                                            placeholder="Hi {{name}}, please visit {{url}} — thanks!"></textarea>
+                                        <div class="form-text">
+                                            <span id="qsBodyCount">0</span> chars
+                                            <span class="text-muted">(160 = 1 SMS · 153 / part if longer)</span>
+                                        </div>
+                                    </div>
+                                    <div class="col-12 qs-escalate-only" style="display:none">
+                                        <label class="form-label small">Escalation body (sent on retry)</label>
+                                        <textarea id="qsEscBody" class="form-control form-control-sm" rows="2"
+                                            placeholder="Reminder — {{name}}, please open {{url}} today."></textarea>
+                                    </div>
+                                    <div class="col-md-5 qs-not-once">
+                                        <label class="form-label small">Wait before re-checking</label>
+                                        <div class="d-flex gap-1">
+                                            <input id="qsWaitN" type="number" min="1" max="999" value="2"
+                                                   class="form-control form-control-sm" style="width:80px" />
+                                            <select id="qsWaitU" class="form-select form-select-sm" style="width:auto">
+                                                <option value="minutes">minutes</option>
+                                                <option value="hours" selected>hours</option>
+                                                <option value="days">days</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3 qs-not-once">
+                                        <label class="form-label small">Max retries</label>
+                                        <input id="qsMaxRetries" type="number" min="1" max="10" value="3"
+                                               class="form-control form-control-sm" />
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small">Expires after</label>
+                                        <div class="d-flex gap-1">
+                                            <input id="qsExpN" type="number" min="1" max="999" value="60"
+                                                   class="form-control form-control-sm" style="width:80px" />
+                                            <select id="qsExpU" class="form-select form-select-sm" style="width:auto">
+                                                <option value="hours">hours</option>
+                                                <option value="days" selected>days</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-12">
+                                        <button id="btnWfQuickGen" class="btn btn-success btn-sm">
+                                            <i class="bi bi-stars"></i> Generate workflow
+                                        </button>
+                                        <button id="btnWfQuickCancel" class="btn btn-link btn-sm">Cancel</button>
+                                        <span class="text-muted small ms-2">
+                                            Replaces the current editor contents.
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="row g-2 mb-3">
                             <div class="col-md-7">
                                 <label class="form-label small">Workflow name</label>
                                 <input id="wfName" class="form-control form-control-sm" placeholder="reminder-flow" />
                             </div>
                             <div class="col-md-5">
-                                <label class="form-label small">Expiration (d.HH:MM:SS)</label>
-                                <input id="wfExp" class="form-control form-control-sm" value="60.00:00:00" />
+                                <label class="form-label small">
+                                    Expires after
+                                    <i class="bi bi-info-circle text-muted" tabindex="0"
+                                       data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                       data-bs-placement="left"
+                                       title="Expiration"
+                                       data-bs-content="Hard cap on a workflow instance's lifetime. Anything still pending after this is marked Expired and stops sending.">
+                                    </i>
+                                </label>
+                                <div class="d-flex gap-1">
+                                    <input id="wfExpN" type="number" min="1" max="999"
+                                           class="form-control form-control-sm" style="width:90px" />
+                                    <select id="wfExpU" class="form-select form-select-sm" style="width:auto">
+                                        <option value="minutes">minutes</option>
+                                        <option value="hours">hours</option>
+                                        <option value="days">days</option>
+                                    </select>
+                                    <input id="wfExp" type="hidden" value="60.00:00:00" />
+                                </div>
                             </div>
                         </div>
 

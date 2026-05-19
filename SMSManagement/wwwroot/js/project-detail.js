@@ -758,6 +758,35 @@ document.getElementById('btnBatchRefresh').addEventListener('click', loadBatches
 let wfModel = newWorkflowModel();
 let wfActiveView = 'form';
 
+// ============ DURATION HELPERS ============
+// Workflow durations are stored as .NET TimeSpan strings "[d.]HH:MM:SS".
+// Operators don't read those — they read "2 hours" or "3 days". These two
+// functions convert between the human-friendly {n, unit} shape and the
+// canonical string. Anything we can't recognise round-trips as-is so
+// hand-edited specs aren't clobbered.
+function tsToFriendly(ts) {
+    if (!ts) return { n: 0, unit: 'minutes', raw: '' };
+    const m = String(ts).trim().match(/^(?:(\d+)\.)?(\d{1,2}):(\d{2}):(\d{2})$/);
+    if (!m) return { n: 0, unit: 'minutes', raw: ts };
+    const days = parseInt(m[1] || '0', 10);
+    const hours = parseInt(m[2], 10);
+    const mins  = parseInt(m[3], 10);
+    const total = (days * 1440) + (hours * 60) + mins;
+    if (total === 0)                  return { n: 0,         unit: 'minutes', raw: ts };
+    if (total % 1440 === 0)           return { n: total / 1440, unit: 'days',    raw: ts };
+    if (total % 60 === 0)             return { n: total / 60,   unit: 'hours',   raw: ts };
+    return { n: total, unit: 'minutes', raw: ts };
+}
+function friendlyToTs(n, unit) {
+    n = Math.max(0, Number(n) || 0);
+    const mins = unit === 'days' ? n * 1440 : unit === 'hours' ? n * 60 : n;
+    const days = Math.floor(mins / 1440);
+    const hours = Math.floor((mins % 1440) / 60);
+    const m = mins % 60;
+    const hhmmss = `${String(hours).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`;
+    return days > 0 ? `${days}.${hhmmss}` : hhmmss;
+}
+
 function newWorkflowModel() {
     return {
         name: '',
@@ -844,6 +873,10 @@ document.querySelectorAll('#wfViewSwitch button').forEach(btn => {
 function renderWf() {
     document.getElementById('wfName').value = wfModel.name;
     document.getElementById('wfExp').value  = wfModel.expiration;
+    // Sync the friendly N+unit inputs from the canonical timespan string.
+    const ef = tsToFriendly(wfModel.expiration);
+    document.getElementById('wfExpN').value = ef.n || 60;
+    document.getElementById('wfExpU').value = ef.unit;
 
     document.getElementById('wfFormView').style.display    = wfActiveView === 'form'    ? '' : 'none';
     document.getElementById('wfJsonView').style.display    = wfActiveView === 'json'    ? '' : 'none';
@@ -1017,9 +1050,162 @@ function captureFormToModel() {
     });
     wfModel.steps = newSteps;
     wfModel.name = document.getElementById('wfName').value.trim();
-    wfModel.expiration = document.getElementById('wfExp').value.trim() || '60.00:00:00';
+    // Friendly N+unit inputs are the source of truth; the hidden timespan
+    // string follows them. Falls back to whatever was in the hidden input
+    // (preserves hand-typed exotic values like "0.06:30:00").
+    const expN = Number(document.getElementById('wfExpN').value) || 0;
+    const expU = document.getElementById('wfExpU').value;
+    wfModel.expiration = expN > 0
+        ? friendlyToTs(expN, expU)
+        : (document.getElementById('wfExp').value.trim() || '60.00:00:00');
     if (!(wfModel.initialStep in newSteps)) wfModel.initialStep = firstName;
 }
+
+// ============ QUICK-START WIZARD ============
+// Three preset workflow shapes that cover ~90% of real campaigns. Operator
+// picks a scenario, fills in the message + waits, and we synthesise the
+// step graph so they never touch the JSON spec for simple cases.
+(function initWfQuickStart() {
+    const openBtn   = document.getElementById('btnWfQuickOpen');
+    const form      = document.getElementById('wfQuickForm');
+    const genBtn    = document.getElementById('btnWfQuickGen');
+    const cancelBtn = document.getElementById('btnWfQuickCancel');
+    const scenario  = document.getElementById('qsScenario');
+    const bodyEl    = document.getElementById('qsBody');
+    const escBodyEl = document.getElementById('qsEscBody');
+    const countEl   = document.getElementById('qsBodyCount');
+    if (!openBtn) return;
+
+    function toggleScenarioFields() {
+        const isOnce = scenario.value === 'once';
+        const isEscalate = scenario.value === 'escalate';
+        document.querySelectorAll('.qs-not-once').forEach(el =>
+            el.style.display = isOnce ? 'none' : '');
+        document.querySelectorAll('.qs-escalate-only').forEach(el =>
+            el.style.display = isEscalate ? '' : 'none');
+    }
+    scenario.addEventListener('change', toggleScenarioFields);
+
+    openBtn.addEventListener('click', () => {
+        form.style.display = '';
+        openBtn.style.display = 'none';
+        toggleScenarioFields();
+        setTimeout(() => bodyEl.focus(), 100);
+    });
+    cancelBtn.addEventListener('click', () => {
+        form.style.display = 'none';
+        openBtn.style.display = '';
+    });
+
+    // Placeholder helper buttons — inserts at cursor in the focused textarea.
+    document.getElementById('qsPlaceholders').addEventListener('click', (ev) => {
+        const btn = ev.target.closest('button[data-ph]');
+        if (!btn) return;
+        const ph = btn.dataset.ph;
+        // Insert into whichever message textarea has focus, default to main body.
+        const target = (document.activeElement === escBodyEl) ? escBodyEl : bodyEl;
+        const start = target.selectionStart ?? target.value.length;
+        const end   = target.selectionEnd ?? target.value.length;
+        target.value = target.value.slice(0, start) + ph + target.value.slice(end);
+        target.focus();
+        target.selectionStart = target.selectionEnd = start + ph.length;
+        bodyEl.dispatchEvent(new Event('input'));
+    });
+
+    // SMS body char counter — encourages keeping the body under 160.
+    bodyEl.addEventListener('input', () => {
+        const n = bodyEl.value.length;
+        countEl.textContent = n;
+        countEl.className = n > 320 ? 'text-danger' : n > 160 ? 'text-warning' : '';
+    });
+
+    genBtn.addEventListener('click', () => {
+        const body = bodyEl.value.trim();
+        if (!body) { toast('Enter an SMS body first.', 'warning'); bodyEl.focus(); return; }
+        const wait = friendlyToTs(
+            Number(document.getElementById('qsWaitN').value) || 2,
+            document.getElementById('qsWaitU').value);
+        const exp = friendlyToTs(
+            Number(document.getElementById('qsExpN').value) || 60,
+            document.getElementById('qsExpU').value);
+        const retries = Math.max(1, Math.min(10,
+            parseInt(document.getElementById('qsMaxRetries').value, 10) || 3));
+
+        switch (scenario.value) {
+            case 'once':
+                // One-shot send. Workflow completes the moment the SMS leaves.
+                wfModel = {
+                    name: wfModel.name || 'send-once',
+                    expiration: exp,
+                    initialStep: 'send',
+                    steps: {
+                        send: {
+                            type: 'send_sms',
+                            template: body,
+                            wait: '00:01:00',  // brief settling window for provider DLR
+                            maxRepeats: 1,
+                            onSignal: { 'sms.sent': 'done' },
+                            onTimeout: 'done'
+                        },
+                        done: { type: 'complete' }
+                    }
+                };
+                break;
+            case 'escalate': {
+                const esc = (escBodyEl.value || body).trim();
+                wfModel = {
+                    name: wfModel.name || 'send-then-escalate',
+                    expiration: exp,
+                    initialStep: 'send',
+                    steps: {
+                        send: {
+                            type: 'send_sms',
+                            template: body,
+                            wait,
+                            maxRepeats: 1,
+                            onSignal: { 'shortlink.clicked': 'done' },
+                            onTimeout: 'escalate'
+                        },
+                        escalate: {
+                            type: 'send_sms',
+                            template: esc,
+                            wait,
+                            maxRepeats: retries,
+                            onSignal: { 'shortlink.clicked': 'done' },
+                            onTimeout: 'done'
+                        },
+                        done: { type: 'complete' }
+                    }
+                };
+                break;
+            }
+            default: // 'reminder'
+                wfModel = {
+                    name: wfModel.name || 'send-reminder',
+                    expiration: exp,
+                    initialStep: 'send',
+                    steps: {
+                        send: {
+                            // Self-loops up to retries times when nothing happens,
+                            // exits early on a click signal from the shortlink module.
+                            type: 'send_sms',
+                            template: body,
+                            wait,
+                            maxRepeats: retries,
+                            onSignal: { 'shortlink.clicked': 'done' },
+                            onTimeout: 'done'
+                        },
+                        done: { type: 'complete' }
+                    }
+                };
+        }
+
+        renderWf();
+        form.style.display = 'none';
+        openBtn.style.display = '';
+        toast('Workflow drafted from template — review and save.');
+    });
+})();
 
 // --- JSON VIEW ---
 function renderJsonView() {
