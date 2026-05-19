@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SMSManagement.Modules.Core.Logging;
+using SMSManagement.Modules.Core.Settings;
 using SMSManagement.Modules.Identity.Domain;
 using SMSManagement.Modules.Identity.Services;
 using SMSManagement.Modules.Ingestion.Domain;
@@ -55,6 +56,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<LoginAudit> LoginAudits => Set<LoginAudit>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<ErrorLog> ErrorLogs => Set<ErrorLog>();
+    public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -227,6 +229,14 @@ public sealed class AppDbContext : DbContext
             e.Property(x => x.TokenHash).HasMaxLength(64);
             e.Property(x => x.RevokedReason).HasMaxLength(64);
             e.Property(x => x.CreatedFromIp).HasMaxLength(64);
+        });
+
+        b.Entity<SystemSetting>(e =>
+        {
+            e.HasKey(x => x.Key);
+            e.Property(x => x.Key).HasMaxLength(128);
+            e.Property(x => x.Category).HasMaxLength(64);
+            e.HasIndex(x => x.Category);
         });
 
         b.Entity<ErrorLog>(e =>

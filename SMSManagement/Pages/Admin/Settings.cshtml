@@ -1,0 +1,382 @@
+@page
+@model SMSManagement.Pages.Admin.SettingsModel
+@{ ViewData["Title"] = "System settings"; }
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">System settings</h1>
+    <span class="small text-muted">
+        <i class="bi bi-info-circle"></i>
+        Changes persist to the database but require an app restart to take effect.
+    </span>
+</div>
+
+<ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tab-set-sms">SMS providers</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-set-smtp">SMTP</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-set-shortlink">Shortlink</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-set-security">Security</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-set-authen">AuthenAPI</a></li>
+</ul>
+
+<div class="tab-content">
+    <!-- ============ SMS PROVIDERS ============ -->
+    <div class="tab-pane fade show active" id="tab-set-sms">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">MacroKiosk (Etracker) defaults</div>
+                    <div class="card-body">
+                        <form id="formSetEtracker" class="row g-2">
+                            <div class="col-12"><label class="form-label small">Base URL</label>
+                                <input id="setEtBase" class="form-control form-control-sm" /></div>
+                            <div class="col-12"><label class="form-label small">Username</label>
+                                <input id="setEtUser" class="form-control form-control-sm" /></div>
+                            <div class="col-12"><label class="form-label small">Password
+                                <span id="setEtPwdMark" class="badge text-bg-secondary d-none">stored</span></label>
+                                <input id="setEtPwd" type="password" class="form-control form-control-sm"
+                                       placeholder="leave blank to keep current" autocomplete="new-password" /></div>
+                            <div class="col-8"><label class="form-label small">Default sender ID</label>
+                                <input id="setEtSender" class="form-control form-control-sm" /></div>
+                            <div class="col-4"><label class="form-label small">Default type</label>
+                                <input id="setEtType" class="form-control form-control-sm" /></div>
+                            <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">Infobip defaults</div>
+                    <div class="card-body">
+                        <form id="formSetInfobip" class="row g-2">
+                            <div class="col-12"><label class="form-label small">Base URL</label>
+                                <input id="setIbBase" class="form-control form-control-sm" /></div>
+                            <div class="col-12"><label class="form-label small">API key
+                                <span id="setIbKeyMark" class="badge text-bg-secondary d-none">stored</span></label>
+                                <input id="setIbKey" type="password" class="form-control form-control-sm"
+                                       placeholder="leave blank to keep current" autocomplete="new-password" /></div>
+                            <div class="col-12"><label class="form-label small">Default sender ID</label>
+                                <input id="setIbSender" class="form-control form-control-sm" /></div>
+                            <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ SMTP ============ -->
+    <div class="tab-pane fade" id="tab-set-smtp">
+        <div class="card">
+            <div class="card-body">
+                <form id="formSetSmtp" class="row g-2">
+                    <div class="col-md-6"><label class="form-label small">Host</label>
+                        <input id="smtpHost" class="form-control form-control-sm" placeholder="smtp.example.com" /></div>
+                    <div class="col-md-2"><label class="form-label small">Port</label>
+                        <input id="smtpPort" type="number" class="form-control form-control-sm" /></div>
+                    <div class="col-md-2"><label class="form-label small">SSL</label>
+                        <div class="form-check form-switch pt-1">
+                            <input id="smtpSsl" type="checkbox" class="form-check-input" />
+                        </div>
+                    </div>
+                    <div class="col-md-2"></div>
+                    <div class="col-md-6"><label class="form-label small">Username</label>
+                        <input id="smtpUser" class="form-control form-control-sm" /></div>
+                    <div class="col-md-6"><label class="form-label small">Password
+                        <span id="smtpPwdMark" class="badge text-bg-secondary d-none">stored</span></label>
+                        <input id="smtpPwd" type="password" class="form-control form-control-sm"
+                               autocomplete="new-password" placeholder="leave blank to keep current" /></div>
+                    <div class="col-md-6"><label class="form-label small">From address</label>
+                        <input id="smtpFrom" class="form-control form-control-sm" /></div>
+                    <div class="col-md-6"><label class="form-label small">From display name</label>
+                        <input id="smtpFromName" class="form-control form-control-sm" /></div>
+                    <div class="col-12"><label class="form-label small">Pickup directory (local dev)</label>
+                        <input id="smtpPickup" class="form-control form-control-sm"
+                               placeholder="blank = open real SMTP connection" /></div>
+                    <div class="col-12 d-flex gap-2">
+                        <button class="btn btn-primary btn-sm" type="submit">Save</button>
+                        <div class="ms-auto d-flex gap-1 align-items-center">
+                            <input id="smtpTestTo" class="form-control form-control-sm"
+                                   style="width:240px" placeholder="test@recipient.com" />
+                            <button id="btnSmtpTest" class="btn btn-outline-secondary btn-sm" type="button">
+                                <i class="bi bi-envelope-check"></i> Send test
+                            </button>
+                        </div>
+                    </div>
+                </form>
+                <pre id="smtpTestResult" class="small mt-2 d-none"></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ SHORTLINK ============ -->
+    <div class="tab-pane fade" id="tab-set-shortlink">
+        <div class="card">
+            <div class="card-body">
+                <form id="formSetShortlink" class="row g-2">
+                    <div class="col-md-6"><label class="form-label small">Public base URL</label>
+                        <input id="slBase" class="form-control form-control-sm" placeholder="https://s.your-domain.com" /></div>
+                    <div class="col-md-2"><label class="form-label small">Default slug length</label>
+                        <input id="slLen" type="number" class="form-control form-control-sm" min="4" max="32" /></div>
+                    <div class="col-md-4"><label class="form-label small">Default alphabet</label>
+                        <input id="slAlpha" class="form-control form-control-sm"
+                               placeholder="ABC…abc…0-9" /></div>
+                    <h6 class="mt-3">Abuse protection</h6>
+                    <div class="col-md-4"><label class="form-label small">Max failures / window</label>
+                        <input id="abFails" type="number" class="form-control form-control-sm" /></div>
+                    <div class="col-md-4"><label class="form-label small">Window (minutes)</label>
+                        <input id="abWindow" type="number" class="form-control form-control-sm" /></div>
+                    <div class="col-md-4"><label class="form-label small">Block duration (minutes)</label>
+                        <input id="abBlock" type="number" class="form-control form-control-sm" /></div>
+                    <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ SECURITY ============ -->
+    <div class="tab-pane fade" id="tab-set-security">
+        <div class="card">
+            <div class="card-body">
+                <form id="formSetSecurity" class="row g-2">
+                    <div class="col-md-3"><label class="form-label small">Cache duration (days)</label>
+                        <input id="secCacheDays" type="number" class="form-control form-control-sm" /></div>
+                    <div class="col-md-3"><label class="form-label small">Max failed attempts</label>
+                        <input id="secMaxFails" type="number" class="form-control form-control-sm" /></div>
+                    <div class="col-md-3"><label class="form-label small">Lockout duration (min)</label>
+                        <input id="secLockMin" type="number" class="form-control form-control-sm" /></div>
+                    <div class="col-md-3"><label class="form-label small">Session timeout (hours)</label>
+                        <input id="secSessHours" type="number" class="form-control form-control-sm" /></div>
+                    <div class="col-md-3"><label class="form-label small">Remember-me (days)</label>
+                        <input id="secRememberDays" type="number" class="form-control form-control-sm" /></div>
+                    <div class="col-md-3 d-flex align-items-end">
+                        <div class="form-check form-switch">
+                            <input id="secOffline" type="checkbox" class="form-check-input" />
+                            <label class="form-check-label small" for="secOffline">Allow offline fallback</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6"><label class="form-label small">System admin AD group</label>
+                        <input id="secAdminGroup" class="form-control form-control-sm"
+                               placeholder="SystemAdministrators" /></div>
+                    <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ AUTHEN API ============ -->
+    <div class="tab-pane fade" id="tab-set-authen">
+        <div class="card">
+            <div class="card-body">
+                <form id="formSetAuthen" class="row g-2">
+                    <div class="col-md-8"><label class="form-label small">Base URL</label>
+                        <input id="apBase" class="form-control form-control-sm" /></div>
+                    <div class="col-md-4"><label class="form-label small">Authenticate path</label>
+                        <input id="apPath" class="form-control form-control-sm" /></div>
+                    <div class="col-md-8"><label class="form-label small">API key
+                        <span id="apKeyMark" class="badge text-bg-secondary d-none">stored</span></label>
+                        <input id="apKey" type="password" class="form-control form-control-sm"
+                               autocomplete="new-password" placeholder="leave blank to keep current" /></div>
+                    <div class="col-md-2"><label class="form-label small">Timeout (s)</label>
+                        <input id="apTimeout" type="number" class="form-control form-control-sm" /></div>
+                    <div class="col-md-2"><label class="form-label small">Retries</label>
+                        <input id="apRetry" type="number" class="form-control form-control-sm" /></div>
+                    <div class="col-12 d-flex gap-2">
+                        <button class="btn btn-primary btn-sm" type="submit">Save</button>
+                        <button id="btnAuthenTest" class="btn btn-outline-secondary btn-sm ms-auto" type="button">
+                            <i class="bi bi-plug"></i> Test connection
+                        </button>
+                    </div>
+                </form>
+                <pre id="authenTestResult" class="small mt-2 d-none"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+(async function () {
+    async function load() {
+        try {
+            const s = await api.get('/api/admin/settings');
+            fillSms(s.sms); fillSmtp(s.smtp); fillShortlink(s.shortlink);
+            fillSecurity(s.security); fillAuthen(s.authenApi);
+        } catch (e) { toast(e.message, 'danger'); }
+    }
+    function isStored(v) { return v === '•••• (set)'; }
+
+    function fillSms(s) {
+        document.getElementById('setEtBase').value   = s.etracker.BaseUrl || '';
+        document.getElementById('setEtUser').value   = s.etracker.Username || '';
+        document.getElementById('setEtSender').value = s.etracker.DefaultSenderId || '';
+        document.getElementById('setEtType').value   = s.etracker.DefaultType || '';
+        document.getElementById('setEtPwdMark').classList.toggle('d-none', !isStored(s.etracker.Password));
+        document.getElementById('setIbBase').value   = s.infobip.BaseUrl || '';
+        document.getElementById('setIbSender').value = s.infobip.DefaultSenderId || '';
+        document.getElementById('setIbKeyMark').classList.toggle('d-none', !isStored(s.infobip.ApiKey));
+    }
+    function fillSmtp(s) {
+        document.getElementById('smtpHost').value     = s.Host || '';
+        document.getElementById('smtpPort').value     = s.Port ?? 587;
+        document.getElementById('smtpSsl').checked    = !!s.EnableSsl;
+        document.getElementById('smtpUser').value     = s.Username || '';
+        document.getElementById('smtpPwdMark').classList.toggle('d-none', !isStored(s.Password));
+        document.getElementById('smtpFrom').value     = s.FromAddress || '';
+        document.getElementById('smtpFromName').value = s.FromDisplayName || '';
+        document.getElementById('smtpPickup').value   = s.PickupDirectory || '';
+    }
+    function fillShortlink(s) {
+        document.getElementById('slBase').value    = s.publicBaseUrl || '';
+        document.getElementById('slLen').value     = s.slugLength ?? 8;
+        document.getElementById('slAlpha').value   = s.defaultAlphabet || '';
+        document.getElementById('abFails').value   = s.abuse.failureThreshold ?? 5;
+        document.getElementById('abWindow').value  = s.abuse.windowMinutes ?? 10;
+        document.getElementById('abBlock').value   = s.abuse.blockDurationMinutes ?? 60;
+    }
+    function fillSecurity(s) {
+        document.getElementById('secCacheDays').value    = s.cacheDurationDays ?? 90;
+        document.getElementById('secMaxFails').value     = s.maxFailedAttempts ?? 5;
+        document.getElementById('secLockMin').value      = s.lockoutDurationMinutes ?? 15;
+        document.getElementById('secSessHours').value    = s.sessionTimeoutHours ?? 8;
+        document.getElementById('secRememberDays').value = s.rememberMeDurationDays ?? 30;
+        document.getElementById('secOffline').checked    = !!s.allowOfflineFallback;
+        document.getElementById('secAdminGroup').value   = s.systemAdminGroup || '';
+    }
+    function fillAuthen(s) {
+        document.getElementById('apBase').value    = s.BaseUrl || '';
+        document.getElementById('apPath').value    = s.AuthenticatePath || '';
+        document.getElementById('apTimeout').value = s.TimeoutSeconds ?? 30;
+        document.getElementById('apRetry').value   = s.RetryAttempts ?? 1;
+        document.getElementById('apKeyMark').classList.toggle('d-none', !isStored(s.ApiKey));
+    }
+
+    // Save helpers: each form gathers field→value pairs and PUTs as a batch.
+    async function save(items) {
+        try {
+            const r = await api.put('/api/admin/settings', { items });
+            if (r.restartRequired)
+                toast(`Saved ${r.saved} setting(s). Restart required to apply.`, 'warning');
+            else
+                toast(`Saved ${r.saved} setting(s).`);
+        } catch (e) { toast(e.message, 'danger'); }
+    }
+    function num(v, fallback = null) {
+        if (v === '' || v === null || v === undefined) return fallback;
+        const n = Number(v); return Number.isFinite(n) ? n : fallback;
+    }
+    function nonBlank(v) { return v && String(v).trim().length > 0; }
+
+    document.getElementById('formSetEtracker').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const items = [
+            { key: 'Sms:Providers:Etracker:BaseUrl',         category: 'Sms', value: document.getElementById('setEtBase').value },
+            { key: 'Sms:Providers:Etracker:Username',        category: 'Sms', value: document.getElementById('setEtUser').value },
+            { key: 'Sms:Providers:Etracker:DefaultSenderId', category: 'Sms', value: document.getElementById('setEtSender').value },
+            { key: 'Sms:Providers:Etracker:DefaultType',     category: 'Sms', value: document.getElementById('setEtType').value }
+        ];
+        if (nonBlank(document.getElementById('setEtPwd').value))
+            items.push({ key: 'Sms:Providers:Etracker:Password', category: 'Sms',
+                         value: document.getElementById('setEtPwd').value });
+        await save(items);
+        document.getElementById('setEtPwd').value = '';
+        load();
+    });
+
+    document.getElementById('formSetInfobip').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const items = [
+            { key: 'Sms:Providers:Infobip:BaseUrl',         category: 'Sms', value: document.getElementById('setIbBase').value },
+            { key: 'Sms:Providers:Infobip:DefaultSenderId', category: 'Sms', value: document.getElementById('setIbSender').value }
+        ];
+        if (nonBlank(document.getElementById('setIbKey').value))
+            items.push({ key: 'Sms:Providers:Infobip:ApiKey', category: 'Sms',
+                         value: document.getElementById('setIbKey').value });
+        await save(items);
+        document.getElementById('setIbKey').value = '';
+        load();
+    });
+
+    document.getElementById('formSetSmtp').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const items = [
+            { key: 'Smtp:Host', category: 'Smtp', value: document.getElementById('smtpHost').value },
+            { key: 'Smtp:Port', category: 'Smtp', value: num(document.getElementById('smtpPort').value, 587) },
+            { key: 'Smtp:EnableSsl', category: 'Smtp', value: document.getElementById('smtpSsl').checked },
+            { key: 'Smtp:Username', category: 'Smtp', value: document.getElementById('smtpUser').value },
+            { key: 'Smtp:FromAddress', category: 'Smtp', value: document.getElementById('smtpFrom').value },
+            { key: 'Smtp:FromDisplayName', category: 'Smtp', value: document.getElementById('smtpFromName').value },
+            { key: 'Smtp:PickupDirectory', category: 'Smtp', value: document.getElementById('smtpPickup').value }
+        ];
+        if (nonBlank(document.getElementById('smtpPwd').value))
+            items.push({ key: 'Smtp:Password', category: 'Smtp', value: document.getElementById('smtpPwd').value });
+        await save(items);
+        document.getElementById('smtpPwd').value = '';
+        load();
+    });
+
+    document.getElementById('btnSmtpTest').addEventListener('click', async () => {
+        const to = document.getElementById('smtpTestTo').value.trim();
+        if (!to) { toast('Enter a recipient.', 'warning'); return; }
+        const out = document.getElementById('smtpTestResult');
+        out.classList.remove('d-none'); out.textContent = 'Sending…';
+        try {
+            const r = await api.post('/api/admin/settings/test/smtp', { to });
+            out.textContent = JSON.stringify(r, null, 2);
+        } catch (e) { out.textContent = e.message; }
+    });
+
+    document.getElementById('formSetShortlink').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        await save([
+            { key: 'Shortlink:PublicBaseUrl', category: 'Shortlink', value: document.getElementById('slBase').value },
+            { key: 'Shortlink:SlugLength',    category: 'Shortlink', value: num(document.getElementById('slLen').value, 8) },
+            { key: 'Shortlink:Abuse:FailureThreshold',     category: 'Shortlink', value: num(document.getElementById('abFails').value, 5) },
+            { key: 'Shortlink:Abuse:WindowMinutes',        category: 'Shortlink', value: num(document.getElementById('abWindow').value, 10) },
+            { key: 'Shortlink:Abuse:BlockDurationMinutes', category: 'Shortlink', value: num(document.getElementById('abBlock').value, 60) }
+        ]);
+        load();
+    });
+
+    document.getElementById('formSetSecurity').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        await save([
+            { key: 'UserCacheAuth:CacheDurationDays',      category: 'Security', value: num(document.getElementById('secCacheDays').value, 90) },
+            { key: 'UserCacheAuth:MaxFailedAttempts',      category: 'Security', value: num(document.getElementById('secMaxFails').value, 5) },
+            { key: 'UserCacheAuth:LockoutDurationMinutes', category: 'Security', value: num(document.getElementById('secLockMin').value, 15) },
+            { key: 'UserCacheAuth:SessionTimeoutHours',    category: 'Security', value: num(document.getElementById('secSessHours').value, 8) },
+            { key: 'UserCacheAuth:RememberMeDurationDays', category: 'Security', value: num(document.getElementById('secRememberDays').value, 30) },
+            { key: 'UserCacheAuth:AllowOfflineFallback',   category: 'Security', value: document.getElementById('secOffline').checked },
+            { key: 'Admin:SystemAdminGroup',               category: 'Security', value: document.getElementById('secAdminGroup').value }
+        ]);
+        load();
+    });
+
+    document.getElementById('formSetAuthen').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const items = [
+            { key: 'AuthenApi:BaseUrl',          category: 'AuthenAPI', value: document.getElementById('apBase').value },
+            { key: 'AuthenApi:AuthenticatePath', category: 'AuthenAPI', value: document.getElementById('apPath').value },
+            { key: 'AuthenApi:TimeoutSeconds',   category: 'AuthenAPI', value: num(document.getElementById('apTimeout').value, 30) },
+            { key: 'AuthenApi:RetryAttempts',    category: 'AuthenAPI', value: num(document.getElementById('apRetry').value, 1) }
+        ];
+        if (nonBlank(document.getElementById('apKey').value))
+            items.push({ key: 'AuthenApi:ApiKey', category: 'AuthenAPI', value: document.getElementById('apKey').value });
+        await save(items);
+        document.getElementById('apKey').value = '';
+        load();
+    });
+
+    document.getElementById('btnAuthenTest').addEventListener('click', async () => {
+        const out = document.getElementById('authenTestResult');
+        out.classList.remove('d-none'); out.textContent = 'Testing…';
+        try {
+            const r = await api.post('/api/admin/settings/test/authen-api');
+            out.textContent = JSON.stringify(r, null, 2);
+        } catch (e) { out.textContent = e.message; }
+    });
+
+    load();
+})();
+</script>
+}
