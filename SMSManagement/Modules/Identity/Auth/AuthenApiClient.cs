@@ -36,7 +36,7 @@ public sealed class AuthenApiClient : IAuthenApiClient
         if (string.IsNullOrWhiteSpace(_opts.BaseUrl))
             throw new AuthenApiException("AuthenAPI BaseUrl not configured.");
 
-        var url = $"{_opts.BaseUrl.TrimEnd('/')}{_opts.AuthenticatePath}";
+        var url = BuildUrl(_opts.BaseUrl, _opts.AuthenticatePath);
 
         using var req = new HttpRequestMessage(HttpMethod.Post, url)
         {
@@ -52,14 +52,17 @@ public sealed class AuthenApiClient : IAuthenApiClient
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _log.LogWarning(ex, "AuthenAPI transport failure.");
-            throw new AuthenApiException("AuthenAPI unreachable.", ex);
+            _log.LogWarning(ex, "AuthenAPI transport failure calling {Url}.", url);
+            throw new AuthenApiException($"AuthenAPI unreachable ({url}).", ex);
         }
 
         using (resp)
         {
             if ((int)resp.StatusCode >= 500)
+            {
+                _log.LogWarning("AuthenAPI {Url} returned {Status}.", url, (int)resp.StatusCode);
                 throw new AuthenApiException($"AuthenAPI returned {(int)resp.StatusCode}.");
+            }
 
             // Even non-2xx responses may carry a structured envelope; try to parse it.
             ApiEnvelope? envelope = null;
@@ -73,7 +76,14 @@ public sealed class AuthenApiClient : IAuthenApiClient
             }
 
             if (envelope is null)
+            {
+                // 404 here typically means BaseUrl + AuthenticatePath don't line up.
+                // Surface the URL in logs so the operator can spot misconfig fast.
+                _log.LogWarning(
+                    "AuthenAPI {Url} returned HTTP {Status} with no envelope — check BaseUrl/AuthenticatePath.",
+                    url, (int)resp.StatusCode);
                 return Fail(username, $"HTTP_{(int)resp.StatusCode}");
+            }
 
             if (!envelope.Success || envelope.Data is null)
                 return Fail(username, envelope.Message ?? "rejected");
@@ -95,6 +105,35 @@ public sealed class AuthenApiClient : IAuthenApiClient
 
     private static AuthenApiResult Fail(string username, string reason) =>
         new(false, username, null, null, null, null, null, Array.Empty<string>(), false, reason);
+
+    /// <summary>
+    /// Combines BaseUrl + AuthenticatePath, tolerating an overlapping leading segment
+    /// (a common misconfig). All of these produce the same URL:
+    ///
+    ///   BaseUrl=https://host           Path=/api/ldap/authenticate
+    ///   BaseUrl=https://host/api       Path=/api/ldap/authenticate   ← user's config
+    ///   BaseUrl=https://host/api       Path=/ldap/authenticate
+    ///   BaseUrl=https://host/api/      Path=ldap/authenticate
+    ///
+    /// → https://host/api/ldap/authenticate
+    /// </summary>
+    public static string BuildUrl(string baseUrl, string path)
+    {
+        var b = baseUrl.TrimEnd('/');
+        var p = string.IsNullOrEmpty(path) ? string.Empty
+              : path.StartsWith('/') ? path : "/" + path;
+
+        if (!Uri.TryCreate(b, UriKind.Absolute, out var uri)) return b + p;
+
+        var basePath = uri.AbsolutePath.TrimEnd('/');
+        // If AuthenticatePath repeats the BaseUrl's path prefix, drop the duplicate.
+        if (basePath.Length > 0
+            && p.StartsWith(basePath + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            p = p.Substring(basePath.Length);
+        }
+        return b + p;
+    }
 
     // ---- response shape ----
     private sealed class ApiEnvelope
