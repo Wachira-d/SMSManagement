@@ -1,0 +1,186 @@
+@page
+@model SMSManagement.Pages.Admin.AllProjectsModel
+@{ ViewData["Title"] = "All projects"; }
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">All projects</h1>
+    <div class="d-flex gap-2 align-items-center">
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="includeArchived">
+            <label class="form-check-label small" for="includeArchived">Include archived</label>
+        </div>
+        <input id="projSearch" class="form-control form-control-sm" style="width:240px"
+               placeholder="Search code / name" />
+        <button id="btnProjRefresh" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-arrow-clockwise"></i>
+        </button>
+    </div>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-sm mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Code / Name</th>
+                    <th>Owner</th>
+                    <th>Provider</th>
+                    <th class="text-end">Members</th>
+                    <th class="text-end">SMS</th>
+                    <th class="text-end">Shortlinks</th>
+                    <th class="text-end">Batches</th>
+                    <th>Created</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="projBody"><tr><td colspan="9" class="text-muted">Loading…</td></tr></tbody>
+        </table>
+    </div>
+    <div class="card-footer small text-muted" id="projCount"></div>
+</div>
+
+<!-- Transfer ownership modal -->
+<div class="modal fade" id="xferModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Transfer ownership</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted">
+                    Pick the new owner. The current owner (if any) will be demoted to Admin.
+                </p>
+                <div class="mb-2">
+                    <label class="form-label small">Project</label>
+                    <input id="xferProj" class="form-control form-control-sm" readonly />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small">New owner (search by email / name)</label>
+                    <input id="xferSearch" class="form-control form-control-sm" autocomplete="off"
+                           placeholder="type 2+ chars…" />
+                    <div id="xferResults" class="list-group mt-1" style="max-height:200px;overflow:auto"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                <button id="btnXferGo" class="btn btn-primary btn-sm" disabled>Transfer</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+(function () {
+    let q = '', includeArchived = false;
+    let xferProjectId = null, xferUserId = null;
+
+    async function load() {
+        const qs = `?q=${encodeURIComponent(q)}&includeArchived=${includeArchived}`;
+        try {
+            const data = await api.get(`/api/admin/projects${qs}`);
+            const body = document.getElementById('projBody');
+            if (!data.items.length) {
+                body.innerHTML = '<tr><td colspan="9" class="text-muted">No projects.</td></tr>';
+            } else {
+                body.innerHTML = data.items.map(p => `<tr>
+                    <td>
+                        <a href="/Projects/Detail?id=${esc(p.id)}"><code class="small">${esc(p.code)}</code></a>
+                        ${p.archivedAt ? '<span class="badge bg-secondary ms-1">archived</span>' : ''}
+                        <br><span class="small">${esc(p.name)}</span>
+                    </td>
+                    <td class="small">${esc(p.ownerEmail || '—')}</td>
+                    <td>${esc(p.defaultProvider || '')}</td>
+                    <td class="text-end">${p.memberCount}</td>
+                    <td class="text-end">${p.smsCount}</td>
+                    <td class="text-end">${p.shortlinkCount}</td>
+                    <td class="text-end">${p.batchCount}</td>
+                    <td class="small">${fmtDate(p.createdAt)}</td>
+                    <td class="text-end">
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-primary"
+                                    onclick="openXfer('${esc(p.id)}','${esc(p.code)}')"
+                                    title="Transfer ownership"><i class="bi bi-arrow-left-right"></i></button>
+                            ${p.archivedAt
+                                ? `<button class="btn btn-outline-success" onclick="restoreProj('${esc(p.id)}')"
+                                        title="Restore"><i class="bi bi-arrow-counterclockwise"></i></button>`
+                                : `<button class="btn btn-outline-warning" onclick="archiveProj('${esc(p.id)}')"
+                                        title="Archive"><i class="bi bi-archive"></i></button>`}
+                        </div>
+                    </td>
+                </tr>`).join('');
+            }
+            document.getElementById('projCount').textContent = `${data.items.length} of ${data.total}`;
+        } catch (e) { toast(e.message, 'danger'); }
+    }
+
+    window.archiveProj = async function (id) {
+        if (!confirm('Archive this project? It becomes invisible to all members until restored.')) return;
+        try { await api.post(`/api/admin/projects/${id}/archive`); toast('Archived.'); load(); }
+        catch (e) { toast(e.message, 'danger'); }
+    };
+    window.restoreProj = async function (id) {
+        try { await api.post(`/api/admin/projects/${id}/restore`); toast('Restored.'); load(); }
+        catch (e) { toast(e.message, 'danger'); }
+    };
+
+    window.openXfer = function (id, code) {
+        xferProjectId = id; xferUserId = null;
+        document.getElementById('xferProj').value = code;
+        document.getElementById('xferSearch').value = '';
+        document.getElementById('xferResults').innerHTML = '';
+        document.getElementById('btnXferGo').disabled = true;
+        new bootstrap.Modal(document.getElementById('xferModal')).show();
+    };
+
+    let searchT = 0;
+    document.getElementById('xferSearch').addEventListener('input', (ev) => {
+        clearTimeout(searchT);
+        const v = ev.target.value.trim();
+        const box = document.getElementById('xferResults');
+        if (v.length < 2) { box.innerHTML = ''; return; }
+        searchT = setTimeout(async () => {
+            try {
+                const rows = await api.get(`/api/users/search?q=${encodeURIComponent(v)}`);
+                box.innerHTML = rows.map(u => `
+                    <button type="button" class="list-group-item list-group-item-action small"
+                            onclick="pickXferUser('${esc(u.id)}','${esc(u.email)}','${esc(u.displayName || '')}')">
+                        <strong>${esc(u.email)}</strong> — ${esc(u.displayName || '')}
+                    </button>`).join('') ||
+                    '<div class="text-muted small px-2 py-1">No matches.</div>';
+            } catch (e) { toast(e.message, 'danger'); }
+        }, 250);
+    });
+
+    window.pickXferUser = function (id, email, name) {
+        xferUserId = id;
+        document.getElementById('xferSearch').value = `${email} (${name})`;
+        document.getElementById('xferResults').innerHTML = '';
+        document.getElementById('btnXferGo').disabled = false;
+    };
+
+    document.getElementById('btnXferGo').addEventListener('click', async () => {
+        if (!xferProjectId || !xferUserId) return;
+        try {
+            await api.post(`/api/admin/projects/${xferProjectId}/transfer-ownership`,
+                           { newOwnerUserId: xferUserId });
+            bootstrap.Modal.getInstance(document.getElementById('xferModal')).hide();
+            toast('Ownership transferred.');
+            load();
+        } catch (e) { toast(e.message, 'danger'); }
+    });
+
+    document.getElementById('btnProjRefresh').addEventListener('click', load);
+    document.getElementById('includeArchived').addEventListener('change', (ev) => {
+        includeArchived = ev.target.checked; load();
+    });
+    let t = 0;
+    document.getElementById('projSearch').addEventListener('input', (ev) => {
+        clearTimeout(t);
+        t = setTimeout(() => { q = ev.target.value.trim(); load(); }, 300);
+    });
+    load();
+})();
+</script>
+}
