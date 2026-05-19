@@ -1,5 +1,6 @@
 @page "{handler?}"
 @model SMSManagement.Pages.Projects.DetailModel
+@inject SMSManagement.Modules.Core.Localization.Localizer Loc
 @{ ViewData["Title"] = "Project"; }
 
 <nav aria-label="breadcrumb">
@@ -15,15 +16,15 @@
 </div>
 
 <ul class="nav nav-tabs mb-3" role="tablist">
-    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tab-settings">Settings</a></li>
-    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-members">Members</a></li>
-    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-mappings">Mappings</a></li>
-    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-sources">Sources</a></li>
-    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-workflows">Workflows</a></li>
-    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-sms">SMS</a></li>
-    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-shortlinks">Shortlinks</a></li>
-    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-reports">Reports</a></li>
-    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-audit">Audit</a></li>
+    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tab-settings">@Loc.Get("tab.settings")</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-members">@Loc.Get("tab.members")</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-mappings">@Loc.Get("tab.mappings")</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-sources">@Loc.Get("tab.sources")</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-workflows">@Loc.Get("tab.workflows")</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-sms">@Loc.Get("tab.sms")</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-shortlinks">@Loc.Get("tab.shortlinks")</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-reports">@Loc.Get("tab.reports")</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-audit">@Loc.Get("tab.audit")</a></li>
 </ul>
 
 <!-- Setup checklist — only shown when something the project needs is missing.

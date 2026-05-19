@@ -297,6 +297,18 @@ app.UseRouting();
 
 if (corsOrigins.Length > 0) app.UseCors();
 
+// Pick the request's UI culture from the .AspNetCore.Culture cookie set by
+// the language switcher (/api/i18n/set-culture). Operators land in English
+// by default; switching is one click in the navbar.
+var supported = SMSManagement.Modules.Core.Localization.Localizer.SupportedCultures
+    .Select(c => new System.Globalization.CultureInfo(c)).ToList();
+app.UseRequestLocalization(new Microsoft.AspNetCore.Builder.RequestLocalizationOptions
+{
+    DefaultRequestCulture = new Microsoft.AspNetCore.Localization.RequestCulture("en"),
+    SupportedCultures = supported,
+    SupportedUICultures = supported
+});
+
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();

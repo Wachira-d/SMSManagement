@@ -1,6 +1,8 @@
 @using System.Security.Claims
+@using System.Globalization
+@inject SMSManagement.Modules.Core.Localization.Localizer Loc
 <!DOCTYPE html>
-<html lang="en">
+<html lang="@CultureInfo.CurrentUICulture.TwoLetterISOLanguageName">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -73,7 +75,7 @@
                             <li class="nav-item">
                                 <a class="nav-link" asp-page="/Projects/Index"
                                    data-hotkey="g p" title="Projects (g p)">
-                                    <i class="bi bi-folder"></i> Projects
+                                    <i class="bi bi-folder"></i> @Loc.Get("nav.projects")
                                 </a>
                             </li>
                             <a hidden data-hotkey="g h" href="/Projects/Index"></a>
@@ -85,7 +87,7 @@
                             {
                                 <li class="nav-item dropdown">
                                     <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#">
-                                        <i class="bi bi-shield-lock"></i> Admin
+                                        <i class="bi bi-shield-lock"></i> @Loc.Get("nav.admin")
                                     </a>
                                     <ul class="dropdown-menu">
                                         @if (User.HasClaim("role", "system_admin"))
@@ -110,11 +112,34 @@
                             }
                         </ul>
                         <ul class="navbar-nav">
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#"
+                                   title="Language">
+                                    <i class="bi bi-translate" aria-hidden="true"></i>
+                                    @CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.ToUpper()
+                                </a>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    @foreach (var c in SMSManagement.Modules.Core.Localization.Localizer.SupportedCultures)
+                                    {
+                                        <li>
+                                            <form method="post" action="/api/i18n/set-culture" class="px-2 py-1">
+                                                <input type="hidden" name="culture" value="@c" />
+                                                <input type="hidden" name="returnUrl"
+                                                       value="@(Context.Request.Path + Context.Request.QueryString)" />
+                                                <button type="submit"
+                                                        class="btn btn-link p-0 dropdown-item @(CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == c ? "active" : "")">
+                                                    @(c == "en" ? "English" : "ไทย")
+                                                </button>
+                                            </form>
+                                        </li>
+                                    }
+                                </ul>
+                            </li>
                             <li class="nav-item">
                                 <a class="nav-link" href="#"
                                    onclick="showHotkeyHelp();return false;"
-                                   title="Keyboard shortcuts (?)">
-                                    <i class="bi bi-keyboard"></i>
+                                   title="@Loc.Get("nav.shortcuts")">
+                                    <i class="bi bi-keyboard" aria-hidden="true"></i>
                                 </a>
                             </li>
                             <li class="nav-item">
@@ -140,7 +165,7 @@
                                     <li>
                                         <form method="post" asp-page="/Account/Logout">
                                             <button type="submit" class="dropdown-item">
-                                                <i class="bi bi-box-arrow-right"></i> Logout
+                                                <i class="bi bi-box-arrow-right"></i> @Loc.Get("nav.signout")
                                             </button>
                                         </form>
                                     </li>
@@ -169,6 +194,13 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
             integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script>
+        // Expose the current-culture dictionary so JS can do window.t(key) for
+        // user-facing strings without round-tripping. Keys match Localizer.cs.
+        window.__culture = '@CultureInfo.CurrentUICulture.Name';
+        window.__i18n = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Loc.All()));
+        window.t = function (key) { return (window.__i18n && window.__i18n[key]) || key; };
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/@@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>
     @if (isAuth)

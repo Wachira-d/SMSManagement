@@ -39,6 +39,7 @@ public static class ModuleRegistration
         services.AddSingleton<CampaignMetrics>();
         services.AddSignalR();
         services.AddSingleton<IUserNotifier, UserNotifier>();
+        services.AddSingleton<Modules.Core.Localization.Localizer>();
 
         // ---------- Identity / authorization context ----------
         services.AddHttpContextAccessor();
