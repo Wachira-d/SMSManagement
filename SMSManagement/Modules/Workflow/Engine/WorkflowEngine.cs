@@ -153,7 +153,21 @@ public sealed class WorkflowEngine : IWorkflowEngine
         {
             case "send_sms":
             {
-                var body = Render(step.Template ?? "{{message}}", payload);
+                // Inject per-attempt placeholders that aren't part of the row data.
+                //   {{attempt}}      — 1-based count for THIS step (1 on first send,
+                //                      2 on the first retry, etc.)
+                //   {{step}}         — current step name (drip flows use this for
+                //                      "Reminder {{attempt}} of {{step}}")
+                //   {{step_repeats}} — server-side StepRepeatCount (0-based)
+                // These never clash with row columns because the column mapper
+                // lowercases everything and these keys are namespaced enough.
+                var contextual = new Dictionary<string, string>(payload, StringComparer.OrdinalIgnoreCase)
+                {
+                    ["attempt"]       = (instance.StepRepeatCount + 1).ToString(),
+                    ["step"]          = instance.CurrentStep,
+                    ["step_repeats"]  = instance.StepRepeatCount.ToString(),
+                };
+                var body = Render(step.Template ?? "{{message}}", contextual);
 
                 // Auto-substitute long URLs with shortlinks
                 body = await ReplaceUrlsWithShortlinksAsync(body, instance, ct);

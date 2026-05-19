@@ -1452,14 +1452,58 @@ function captureFormToModel() {
     if (!openBtn) return;
 
     function toggleScenarioFields() {
-        const isOnce = scenario.value === 'once';
+        const isOnce     = scenario.value === 'once';
         const isEscalate = scenario.value === 'escalate';
+        const isDrip     = scenario.value === 'drip';
         document.querySelectorAll('.qs-not-once').forEach(el =>
-            el.style.display = isOnce ? 'none' : '');
+            el.style.display = (isOnce || isDrip) ? 'none' : '');
         document.querySelectorAll('.qs-escalate-only').forEach(el =>
             el.style.display = isEscalate ? '' : 'none');
+        document.querySelectorAll('.qs-drip-only').forEach(el =>
+            el.style.display = isDrip ? '' : 'none');
+        if (isDrip && document.getElementById('qsDripList').children.length === 0) {
+            // Seed two initial stages so the new scenario isn't empty.
+            addDripStage(2, 'hours', 'Hi {{name}}, visit {{url}}');
+            addDripStage(5, 'days',  'Reminder {{attempt}}: {{name}}, please open {{url}}');
+        }
     }
     scenario.addEventListener('change', toggleScenarioFields);
+
+    // Drip stages — each row is { n, unit, template }. JS keeps them in a
+    // tiny in-DOM list; generation reads them in document order.
+    function addDripStage(n = 2, unit = 'hours', template = '') {
+        const list = document.getElementById('qsDripList');
+        const idx = list.children.length + 1;
+        const row = document.createElement('div');
+        row.className = 'card mb-2';
+        row.innerHTML = `
+            <div class="card-body p-2">
+                <div class="d-flex justify-content-between mb-1">
+                    <strong class="small">Stage ${idx}</strong>
+                    <button type="button" class="btn-close btn-sm" aria-label="Remove stage"></button>
+                </div>
+                <div class="d-flex gap-1 align-items-center mb-1">
+                    <span class="small text-muted">wait</span>
+                    <input type="number" min="1" max="999" value="${n}"
+                           class="form-control form-control-sm drip-n" style="width:80px" />
+                    <select class="form-select form-select-sm drip-u" style="width:auto">
+                        <option value="minutes"${unit==='minutes'?' selected':''}>minutes</option>
+                        <option value="hours"  ${unit==='hours'  ?' selected':''}>hours</option>
+                        <option value="days"   ${unit==='days'   ?' selected':''}>days</option>
+                    </select>
+                    <span class="small text-muted">then send</span>
+                </div>
+                <textarea class="form-control form-control-sm drip-template" rows="2"
+                          placeholder="Use {{name}}, {{url}}, {{attempt}}…">${esc(template)}</textarea>
+            </div>`;
+        row.querySelector('.btn-close').addEventListener('click', () => {
+            row.remove();
+            // Renumber labels.
+            list.querySelectorAll('strong').forEach((el, i) => el.textContent = `Stage ${i + 1}`);
+        });
+        list.appendChild(row);
+    }
+    document.getElementById('btnQsDripAdd').addEventListener('click', () => addDripStage());
 
     openBtn.addEventListener('click', () => {
         form.style.display = '';
@@ -1569,6 +1613,42 @@ function captureFormToModel() {
                         },
                         done: { type: 'complete' }
                     }
+                };
+                break;
+            }
+            case 'drip': {
+                // Chain of N stages — stage[i] waits then sends template[i],
+                // exiting any stage on shortlink.clicked. Last stage hands
+                // off to 'done'.
+                const stages = Array.from(document.querySelectorAll('#qsDripList .card'))
+                    .map(card => ({
+                        n: Number(card.querySelector('.drip-n').value) || 1,
+                        unit: card.querySelector('.drip-u').value,
+                        template: card.querySelector('.drip-template').value.trim()
+                    }))
+                    .filter(s => s.template);
+                if (stages.length === 0) {
+                    toast('Add at least one drip stage.', 'warning');
+                    return;
+                }
+                const steps = { done: { type: 'complete' } };
+                stages.forEach((s, i) => {
+                    const name = 'stage' + (i + 1);
+                    const next = i + 1 < stages.length ? 'stage' + (i + 2) : 'done';
+                    steps[name] = {
+                        type: 'send_sms',
+                        template: s.template,
+                        wait: friendlyToTs(s.n, s.unit),
+                        maxRepeats: 1,
+                        onSignal: { 'shortlink.clicked': 'done' },
+                        onTimeout: next
+                    };
+                });
+                wfModel = {
+                    name: wfModel.name || `drip-${stages.length}-stage`,
+                    expiration: exp,
+                    initialStep: 'stage1',
+                    steps
                 };
                 break;
             }

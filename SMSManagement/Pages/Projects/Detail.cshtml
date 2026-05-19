@@ -354,6 +354,16 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
                                 <td>Anywhere a free-form column is needed</td>
                                 <td>Catch-all for one extra field. For multiple extras, request the canonical list be expanded.</td>
                             </tr>
+                            <tr class="table-light">
+                                <td colspan="4" class="small text-muted">
+                                    <strong>Workflow-injected placeholders</strong> (not from the row):
+                                    <code>{{attempt}}</code> 1-based round counter on the current step ·
+                                    <code>{{step}}</code> current step name ·
+                                    <code>{{step_repeats}}</code> 0-based self-loop count.
+                                    Use these in drip / reminder templates to phrase by attempt
+                                    (e.g. <em>"Final reminder ({{attempt}}/3): {{name}}…"</em>).
+                                </td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -814,8 +824,24 @@ Other SFTP keys: <code>host, port, username, privateKeyPem, remoteDirectory</cod
                                         <select id="qsScenario" class="form-select form-select-sm">
                                             <option value="reminder">Send → check open → send again (most common)</option>
                                             <option value="escalate">Send → check open → escalate to a different message</option>
+                                            <option value="drip">Drip (3+ messages, each with own delay + text)</option>
                                             <option value="once">Send once (fire-and-forget)</option>
                                         </select>
+                                    </div>
+                                    <!-- Drip-only: list of {wait, template} entries the operator builds
+                                         step-by-step. JS adds/removes rows. -->
+                                    <div class="col-12 qs-drip-only" style="display:none">
+                                        <label class="form-label small">
+                                            Drip stages
+                                            <i class="bi bi-info-circle text-muted" tabindex="0"
+                                               data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                               data-bs-placement="right" data-bs-html="true"
+                                               title="Drip stages"
+                                               data-bs-content="One row per stage. The workflow exits as soon as <code>shortlink.clicked</code> arrives. <code>{{attempt}}</code> = round number; <code>{{step}}</code> = stage name."></i>
+                                        </label>
+                                        <div id="qsDripList"></div>
+                                        <button type="button" id="btnQsDripAdd"
+                                                class="btn btn-outline-secondary btn-sm">+ Add stage</button>
                                     </div>
                                     <div class="col-12">
                                         <label class="form-label small">
