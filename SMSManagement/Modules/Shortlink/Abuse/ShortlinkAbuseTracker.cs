@@ -24,7 +24,8 @@ public sealed class ShortlinkAbuseTracker : IShortlinkAbuseTracker
 {
     private readonly AppDbContext _db;
     private readonly ShortlinkAbuseOptions _opts;
-    private readonly byte[] _ipSalt;
+    private readonly IOptions<ShortlinkOptions> _shortlinkOpts;
+    private byte[]? IpSaltCache;
     private readonly TimeProvider _clock;
     private readonly ILogger<ShortlinkAbuseTracker> _log;
 
@@ -37,17 +38,32 @@ public sealed class ShortlinkAbuseTracker : IShortlinkAbuseTracker
     {
         _db = db;
         _opts = opts.Value;
-        _ipSalt = Convert.FromBase64String(shortlinkOpts.Value.IpHashSaltBase64);
+        _shortlinkOpts = shortlinkOpts;
         _clock = clock;
         _log = log;
+    }
+
+    /// <summary>Lazy — see <c>Sha256PasswordHasher</c> for the deferral rationale.</summary>
+    private byte[] IpSalt
+    {
+        get
+        {
+            if (IpSaltCache is not null) return IpSaltCache;
+            var b64 = _shortlinkOpts.Value.IpHashSaltBase64;
+            if (string.IsNullOrWhiteSpace(b64))
+                throw new InvalidOperationException(
+                    "Shortlink:IpHashSaltBase64 is not configured. " +
+                    "In Development, set Secrets:AutoGenerateInDev=true to auto-generate.");
+            return IpSaltCache = Convert.FromBase64String(b64);
+        }
     }
 
     public byte[] HashIp(string ip)
     {
         var buf = Encoding.UTF8.GetBytes(ip ?? string.Empty);
-        var combined = new byte[_ipSalt.Length + buf.Length];
-        Buffer.BlockCopy(_ipSalt, 0, combined, 0, _ipSalt.Length);
-        Buffer.BlockCopy(buf, 0, combined, _ipSalt.Length, buf.Length);
+        var combined = new byte[IpSalt.Length + buf.Length];
+        Buffer.BlockCopy(IpSalt, 0, combined, 0, IpSalt.Length);
+        Buffer.BlockCopy(buf, 0, combined, IpSalt.Length, buf.Length);
         return SHA256.HashData(combined);
     }
 

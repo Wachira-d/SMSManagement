@@ -30,6 +30,19 @@ var builder = WebApplication.CreateBuilder(args);
 // works even when the test factory injects IConfiguration via ConfigureAppConfiguration.
 var testingEnabled = builder.Environment.IsEnvironment("Testing");
 
+// ---------- Dev-secrets auto-generate (must run BEFORE builder.Build) ----------
+// Generates any missing crypto secret (password pepper, AES data key,
+// shortlink IP-hash salt, JWT signing key) when running in Development with
+// Secrets:AutoGenerateInDev=true. Persists to dev-secrets.json so encrypted
+// data survives across restarts. No-op in Production — secrets must come
+// from Key Vault / env vars there.
+if (!testingEnabled)
+{
+    using var bootstrapLog = LoggerFactory.Create(b => b.AddConsole());
+    DevSecretsHelper.EnsureSecrets(
+        builder.Environment, builder.Configuration, builder.Configuration, bootstrapLog);
+}
+
 // ---------- DataProtection: persist keys across restarts / instances ----------
 var keyDir = builder.Configuration["DataProtection:KeyDirectory"];
 if (!string.IsNullOrWhiteSpace(keyDir))
@@ -227,9 +240,20 @@ if (!testingEnabled)
 
 var app = builder.Build();
 
-// ---------- Pre-flight DB probe + migrations (idempotent) ----------
+// ---------- Pre-flight checks (fail-loud before serving traffic) ----------
 if (!testingEnabled)
 {
+    // 0) Validate that every required secret is present. In Production this
+    //    is the load-bearing safety net — if Key Vault wasn't wired we fail
+    //    here, not when a user opens /Account/Login and gets a 500 page.
+    using (var scope = app.Services.CreateScope())
+    {
+        var secretsLog = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        StartupSecretsCheck.Validate(
+            scope.ServiceProvider.GetRequiredService<IConfiguration>(),
+            app.Environment, secretsLog);
+    }
+
     // 1) Fast (8s) connection probe — translates well-known SqlException
     //    numbers (login failed, password expired, host unreachable, …)
     //    into actionable log entries with the SQL to run to fix them.

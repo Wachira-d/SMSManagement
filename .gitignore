@@ -363,3 +363,6 @@ MigrationBackup/
 FodyWeavers.xsd
 # Local secrets
 .env
+
+# Auto-generated dev crypto secrets
+dev-secrets.json

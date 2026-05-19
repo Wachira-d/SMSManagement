@@ -13,17 +13,34 @@ public sealed class EncryptionOptions
 /// <summary>
 /// AES-GCM envelope encryption for PII at rest. Output format:
 ///   [12 bytes nonce][16 bytes tag][ciphertext]
+///
+/// Configuration validation is DEFERRED to first Encrypt/Decrypt call.
+/// See <c>Sha256PasswordHasher</c> for the rationale — startup checks
+/// fail-fast on missing secrets so the deferred throw is the safety net.
 /// </summary>
 public sealed class FieldEncryptor
 {
-    private readonly byte[] _key;
+    private readonly IOptions<EncryptionOptions> _options;
+    private byte[]? _key;
 
-    public FieldEncryptor(IOptions<EncryptionOptions> options)
+    public FieldEncryptor(IOptions<EncryptionOptions> options) => _options = options;
+
+    private byte[] Key
     {
-        var raw = Convert.FromBase64String(options.Value.DataKeyBase64);
-        if (raw.Length != 32)
-            throw new InvalidOperationException("Data key must be 32 bytes (AES-256-GCM).");
-        _key = raw;
+        get
+        {
+            if (_key is not null) return _key;
+            var raw = _options.Value.DataKeyBase64;
+            if (string.IsNullOrWhiteSpace(raw))
+                throw new InvalidOperationException(
+                    "Encryption:DataKeyBase64 is not configured. " +
+                    "In Development, set Secrets:AutoGenerateInDev=true to auto-generate.");
+            var bytes = Convert.FromBase64String(raw);
+            if (bytes.Length != 32)
+                throw new InvalidOperationException(
+                    $"Encryption:DataKeyBase64 must be 32 bytes; got {bytes.Length}.");
+            return _key = bytes;
+        }
     }
 
     public byte[] Encrypt(string plaintext)
@@ -33,7 +50,7 @@ public sealed class FieldEncryptor
         var tag = new byte[16];
         var ptBytes = System.Text.Encoding.UTF8.GetBytes(plaintext);
         var ct = new byte[ptBytes.Length];
-        using var gcm = new AesGcm(_key, tag.Length);
+        using var gcm = new AesGcm(Key, tag.Length);
         gcm.Encrypt(nonce, ptBytes, ct, tag);
 
         var output = new byte[nonce.Length + tag.Length + ct.Length];
@@ -51,7 +68,7 @@ public sealed class FieldEncryptor
         var tag = envelope.AsSpan(12, 16);
         var ct = envelope.AsSpan(28);
         var pt = new byte[ct.Length];
-        using var gcm = new AesGcm(_key, tag.Length);
+        using var gcm = new AesGcm(Key, tag.Length);
         gcm.Decrypt(nonce, ct, tag, pt);
         return System.Text.Encoding.UTF8.GetString(pt);
     }

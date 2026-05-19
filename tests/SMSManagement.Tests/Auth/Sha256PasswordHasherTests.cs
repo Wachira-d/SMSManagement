@@ -10,9 +10,13 @@ public sealed class Sha256PasswordHasherTests
         new(Options.Create(new UserCacheAuthOptions { PasswordSalt = pepper }));
 
     [Fact]
-    public void Throws_when_pepper_missing()
+    public void Throws_when_pepper_missing_at_first_call()
     {
-        var act = () => new Sha256PasswordHasher(Options.Create(new UserCacheAuthOptions()));
+        // The throw is deferred from constructor to first Hash/Verify so the
+        // DI graph doesn't blow up at request-render time (StartupSecretsCheck
+        // is the load-bearing prod safety net).
+        var hasher = new Sha256PasswordHasher(Options.Create(new UserCacheAuthOptions()));
+        var act = () => hasher.Hash("p", "s");
         act.Should().Throw<InvalidOperationException>()
            .WithMessage("*PasswordSalt is not configured*");
     }

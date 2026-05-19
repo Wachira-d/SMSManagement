@@ -24,7 +24,7 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
     private readonly UserCacheAuthOptions _sessionOpts;
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
-    private readonly SigningCredentials _signing;
+    private SigningCredentials? _signing;
 
     public JwtTokenIssuer(
         IOptions<LocalJwtOptions> opts,
@@ -36,15 +36,25 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
         _sessionOpts = sessionOpts.Value;
         _db = db;
         _clock = clock;
+    }
 
-        if (string.IsNullOrWhiteSpace(_opts.SigningKeyBase64))
-            throw new InvalidOperationException("Auth:LocalJwt:SigningKeyBase64 not configured.");
-
-        var keyBytes = Convert.FromBase64String(_opts.SigningKeyBase64);
-        if (keyBytes.Length < 32)
-            throw new InvalidOperationException("JWT signing key must be at least 32 bytes.");
-        _signing = new SigningCredentials(new SymmetricSecurityKey(keyBytes),
-            SecurityAlgorithms.HmacSha256);
+    /// <summary>Lazy — see <c>Sha256PasswordHasher</c> for the deferral rationale.</summary>
+    private SigningCredentials Signing
+    {
+        get
+        {
+            if (_signing is not null) return _signing;
+            if (string.IsNullOrWhiteSpace(_opts.SigningKeyBase64))
+                throw new InvalidOperationException(
+                    "Auth:LocalJwt:SigningKeyBase64 is not configured. " +
+                    "In Development, set Secrets:AutoGenerateInDev=true to auto-generate.");
+            var keyBytes = Convert.FromBase64String(_opts.SigningKeyBase64);
+            if (keyBytes.Length < 32)
+                throw new InvalidOperationException(
+                    $"JWT signing key must be at least 32 bytes; got {keyBytes.Length}.");
+            return _signing = new SigningCredentials(new SymmetricSecurityKey(keyBytes),
+                SecurityAlgorithms.HmacSha256);
+        }
     }
 
     public async Task<IssuedToken> IssueForCachedUserAsync(UserCache user, CancellationToken ct = default)
@@ -78,7 +88,7 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
             claims: claims,
             notBefore: now.UtcDateTime,
             expires: exp.UtcDateTime,
-            signingCredentials: _signing);
+            signingCredentials: Signing);
 
         return new IssuedToken(
             new JwtSecurityTokenHandler().WriteToken(jwt), exp);
