@@ -113,13 +113,25 @@
                 <div class="card border-danger">
                     <div class="card-header bg-danger text-white">Danger zone</div>
                     <div class="card-body">
-                        <button id="btnArchive" class="btn btn-outline-danger btn-sm">
-                            <i class="bi bi-archive"></i> Archive project
-                        </button>
-                        <span class="text-muted small ms-2">
-                            Hides the project + cancels in-flight workflows and queued SMS.
-                            Reversible by an admin.
-                        </span>
+                        <div class="d-flex gap-3 align-items-center mb-2">
+                            <button id="btnArchive" class="btn btn-outline-danger btn-sm">
+                                <i class="bi bi-archive"></i> Archive project
+                            </button>
+                            <span class="text-muted small">
+                                Hides the project + cancels in-flight workflows and queued SMS.
+                                Reversible by an admin.
+                            </span>
+                        </div>
+                        <div class="d-flex gap-2 align-items-center">
+                            <input id="xferUser" class="form-control form-control-sm"
+                                   style="max-width:280px" placeholder="New owner — search by email" />
+                            <input id="xferUserId" type="hidden" />
+                            <button id="btnTransfer" class="btn btn-outline-warning btn-sm" disabled>
+                                <i class="bi bi-arrow-left-right"></i> Transfer ownership
+                            </button>
+                            <span class="text-muted small">You stop being Owner after this.</span>
+                        </div>
+                        <div id="xferResults" class="mt-1"></div>
                     </div>
                 </div>
             </div>
@@ -146,10 +158,15 @@
                 <div class="card">
                     <div class="card-header">Share project</div>
                     <div class="card-body">
-                        <form id="formShare">
-                            <div class="mb-2">
-                                <label class="form-label small">User ID (Guid)</label>
-                                <input id="shareUserId" class="form-control" placeholder="00000000-..." required />
+                        <form id="formShare" autocomplete="off">
+                            <div class="mb-2 position-relative">
+                                <label class="form-label small">Find user (email / name)</label>
+                                <input id="shareQuery" class="form-control" required
+                                       placeholder="Type 2+ characters…" />
+                                <input id="shareUserId" type="hidden" />
+                                <div id="shareResults" class="list-group position-absolute w-100"
+                                     style="z-index:10; max-height:200px; overflow:auto"></div>
+                                <div id="sharePicked" class="form-text text-success"></div>
                             </div>
                             <div class="mb-2">
                                 <label class="form-label small">Level</label>
@@ -159,7 +176,9 @@
                                     <option value="Admin">Admin (configure + share)</option>
                                 </select>
                             </div>
-                            <button type="submit" class="btn btn-primary btn-sm">Share</button>
+                            <button type="submit" class="btn btn-primary btn-sm" id="btnShare" disabled>
+                                <i class="bi bi-person-plus"></i> Share
+                            </button>
                         </form>
                     </div>
                 </div>
@@ -207,9 +226,12 @@
     <!-- ============ SOURCES ============ -->
     <div class="tab-pane fade" id="tab-sources">
         <div class="row g-3">
-            <div class="col-md-7">
+            <div class="col-md-6">
                 <div class="card">
-                    <div class="card-header">Ingestion source bindings</div>
+                    <div class="card-header d-flex justify-content-between">
+                        <span>Source bindings</span>
+                        <button class="btn btn-sm btn-link p-0" id="btnSrcNew">+ New</button>
+                    </div>
                     <div class="table-responsive">
                         <table class="table table-sm mb-0">
                             <thead><tr><th>Type</th><th>Archive dir</th><th>Action</th><th>Dup</th><th>On</th><th></th></tr></thead>
@@ -218,21 +240,91 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-5">
+            <div class="col-md-6" id="srcEditor" style="display:none">
+                <div class="card">
+                    <div class="card-header" id="srcEditTitle">New source binding</div>
+                    <div class="card-body">
+                        <form id="formSrc">
+                            <input id="srcId" type="hidden" />
+                            <div class="row g-2">
+                                <div class="col-6"><label class="form-label small">Type</label>
+                                    <select id="srcType" class="form-select form-select-sm">
+                                        <option value="SFTP">SFTP</option>
+                                        <option value="MANUAL_CSV">MANUAL_CSV</option>
+                                        <option value="SHAREPOINT">SHAREPOINT</option>
+                                        <option value="REST">REST</option>
+                                        <option value="CLOUD">CLOUD</option>
+                                    </select></div>
+                                <div class="col-6"><label class="form-label small">Polling cron</label>
+                                    <input id="srcCron" class="form-control form-control-sm"
+                                           value="*/5 * * * *" /></div>
+                                <div class="col-12"><label class="form-label small">Archive directory</label>
+                                    <input id="srcArchive" class="form-control form-control-sm"
+                                           placeholder="/data/honda/archive" /></div>
+                                <div class="col-12"><label class="form-label small">Rejected directory</label>
+                                    <input id="srcRejected" class="form-control form-control-sm"
+                                           placeholder="/data/honda/rejected" /></div>
+                                <div class="col-6"><label class="form-label small">After action</label>
+                                    <select id="srcAction" class="form-select form-select-sm">
+                                        <option value="0">Archive</option>
+                                        <option value="1">Delete</option>
+                                        <option value="2">Leave</option>
+                                    </select></div>
+                                <div class="col-6"><label class="form-label small">Duplicate policy</label>
+                                    <select id="srcDup" class="form-select form-select-sm">
+                                        <option value="0">Skip</option>
+                                        <option value="1">Fail</option>
+                                        <option value="2">Reprocess</option>
+                                    </select></div>
+                                <div class="col-12 form-check ms-1 mt-2">
+                                    <input id="srcEnabled" type="checkbox" class="form-check-input" checked />
+                                    <label class="form-check-label small" for="srcEnabled">Enabled</label>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label small">Source-specific config (JSON, encrypted at rest)</label>
+                                    <textarea id="srcConfig" class="form-control font-monospace" rows="6"
+                                              spellcheck="false"></textarea>
+                                </div>
+                                <div class="col-12">
+                                    <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                                    <button type="button" id="btnSrcCancel" class="btn btn-link btn-sm">Cancel</button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
                 <div class="card">
                     <div class="card-header">Manual file upload</div>
                     <div class="card-body">
                         <form id="formUpload" enctype="multipart/form-data">
-                            <div class="mb-2"><label class="form-label small">Source binding ID (Guid)</label>
-                                <input id="upSrcId" class="form-control" required
-                                       placeholder="paste from sources table" /></div>
+                            <div class="mb-2"><label class="form-label small">Source binding</label>
+                                <select id="upSrcSelect" class="form-select form-select-sm" required>
+                                    <option value="">— pick from your bindings —</option>
+                                </select></div>
                             <div class="mb-2"><label class="form-label small">File (.csv or .xlsx)</label>
-                                <input id="upFile" type="file" class="form-control" accept=".csv,.xlsx" required /></div>
+                                <input id="upFile" type="file" class="form-control form-control-sm"
+                                       accept=".csv,.xlsx" required /></div>
                             <div class="form-check"><input type="checkbox" id="upForce" class="form-check-input">
                                 <label class="form-check-label small" for="upForce">Force re-ingest (bypass dedup)</label></div>
                             <button type="submit" class="btn btn-primary btn-sm mt-2">Upload</button>
                         </form>
-                        <pre id="upResult" class="mt-3 d-none"></pre>
+                        <pre id="upResult" class="mt-3 d-none small"></pre>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between">
+                        <span>Recent ingestion batches</span>
+                        <button id="btnBatchRefresh" class="btn btn-sm btn-link p-0">Refresh</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead><tr><th>When</th><th>Source</th><th>Ref</th><th>Total</th><th>Accepted</th><th>Rejected</th><th>Status</th></tr></thead>
+                            <tbody id="batchBody"><tr><td colspan="7" class="text-muted">Loading…</td></tr></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -278,7 +370,7 @@
     <!-- ============ SMS ============ -->
     <div class="tab-pane fade" id="tab-sms">
         <div class="row g-3">
-            <div class="col-md-6">
+            <div class="col-md-5">
                 <div class="card">
                     <div class="card-header">Send SMS</div>
                     <div class="card-body">
@@ -295,7 +387,28 @@
                                 <i class="bi bi-send"></i> Dispatch
                             </button>
                         </form>
-                        <pre id="smsResult" class="mt-3 d-none"></pre>
+                        <pre id="smsResult" class="mt-3 d-none small"></pre>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-7">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Recent SMS</span>
+                        <div class="d-flex gap-2 align-items-center">
+                            <select id="smsFilter" class="form-select form-select-sm" style="width:auto">
+                                <option value="">All statuses</option>
+                                <option>Queued</option><option>Sending</option><option>Sent</option>
+                                <option>Delivered</option><option>Failed</option><option>Rejected</option>
+                            </select>
+                            <button id="btnSmsRefresh" class="btn btn-sm btn-link p-0">Refresh</button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead><tr><th>Created</th><th>To</th><th>Provider</th><th>Status</th><th>Attempts</th></tr></thead>
+                            <tbody id="smsBody"><tr><td colspan="5" class="text-muted">Loading…</td></tr></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -349,6 +462,7 @@
                     <option value="shortlinks">Shortlinks</option>
                     <option value="reminder-effectiveness">Reminders</option>
                     <option value="ingestion-quality">Ingestion Quality</option>
+                    <option value="audit-trail">Audit Trail</option>
                 </select>
             </div>
             <div class="col-auto">

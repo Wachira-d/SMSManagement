@@ -86,4 +86,37 @@ public sealed class SmsController : ControllerBase
             .FirstOrDefaultAsync(ct);
         return m is null ? NotFound() : Ok(m);
     }
+
+    /// <summary>Recent SMS dispatched for this project — used by the SMS tab
+    /// history list. Latest first, capped at <paramref name="take"/>.</summary>
+    [HttpGet]
+    public async Task<IActionResult> List(
+        Guid projectId,
+        [FromQuery] int take = 50,
+        [FromQuery] string? status = null,
+        CancellationToken ct = default)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
+
+        var q = _db.SmsMessages
+            .AsNoTracking()
+            .Where(x => x.ProjectId == projectId);
+
+        if (!string.IsNullOrWhiteSpace(status)
+            && Enum.TryParse<SmsStatus>(status, ignoreCase: true, out var s))
+            q = q.Where(x => x.Status == s);
+
+        var rows = await q
+            .OrderByDescending(x => x.CreatedAt)
+            .Take(Math.Clamp(take, 1, 500))
+            .Select(x => new
+            {
+                x.Id, x.Provider, x.Status, x.MaskedTo, x.Attempts,
+                x.CreatedAt, x.ScheduledFor, x.SentAt, x.DeliveredAt,
+                x.ErrorCode
+            })
+            .ToListAsync(ct);
+
+        return Ok(rows);
+    }
 }

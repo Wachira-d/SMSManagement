@@ -48,10 +48,12 @@
                                         <i class="bi bi-shield-lock"></i> Admin
                                     </a>
                                     <ul class="dropdown-menu">
+                                        <li><a class="dropdown-item" asp-page="/Admin/Reports">Global reports</a></li>
                                         <li><a class="dropdown-item" asp-page="/Admin/BlockedIps">Blocked IPs</a></li>
-                                        <li><a class="dropdown-item" href="/jobs" target="_blank">Hangfire</a></li>
-                                        <li><a class="dropdown-item" href="/metrics" target="_blank">Metrics</a></li>
-                                        <li><a class="dropdown-item" href="/health/ready" target="_blank">Health</a></li>
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li><a class="dropdown-item" href="/jobs" target="_blank">Hangfire dashboard</a></li>
+                                        <li><a class="dropdown-item" href="/metrics" target="_blank">Metrics (/metrics)</a></li>
+                                        <li><a class="dropdown-item" href="/health/ready" target="_blank">Health (/health/ready)</a></li>
                                     </ul>
                                 </li>
                             }

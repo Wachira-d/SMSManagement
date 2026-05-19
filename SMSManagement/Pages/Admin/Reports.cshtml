@@ -1,0 +1,73 @@
+@page
+@model SMSManagement.Pages.Admin.ReportsModel
+@{ ViewData["Title"] = "Global Reports"; }
+
+<h1 class="h3 mb-3">Global reports</h1>
+<p class="text-muted small">
+    Cross-project aggregates — requires <code>audit.read</code> permission.
+    Use these to compare provider quality across all your campaigns and to
+    spot anomalous user activity.
+</p>
+
+<div class="row g-2 mb-3">
+    <div class="col-auto"><input type="date" id="rptFrom" class="form-control form-control-sm" /></div>
+    <div class="col-auto"><input type="date" id="rptTo" class="form-control form-control-sm" /></div>
+    <div class="col-auto">
+        <select id="rptKind" class="form-select form-select-sm">
+            <option value="provider-performance">Provider Performance</option>
+            <option value="user-activity">User Activity</option>
+        </select>
+    </div>
+    <div class="col-auto"><button id="btnRpt" class="btn btn-primary btn-sm">Run</button></div>
+    <div class="col-auto"><a id="btnCsv" class="btn btn-outline-secondary btn-sm">CSV</a></div>
+</div>
+
+<div id="rptOut" class="card"><div class="card-body text-muted small">
+    Pick a date range + report and click Run.
+</div></div>
+
+@section Scripts {
+<script>
+(function () {
+    const to = new Date();
+    const from = new Date(); from.setDate(from.getDate() - 30);
+    document.getElementById('rptFrom').value = from.toISOString().slice(0,10);
+    document.getElementById('rptTo').value   = to.toISOString().slice(0,10);
+})();
+
+function qs() {
+    const from = document.getElementById('rptFrom').value;
+    const to   = document.getElementById('rptTo').value;
+    return `?from=${from}T00:00:00Z&to=${to}T23:59:59Z`;
+}
+
+document.getElementById('btnRpt').addEventListener('click', async () => {
+    const kind = document.getElementById('rptKind').value;
+    try {
+        const data = await api.get(`/api/reports/${kind}${qs()}`);
+        const out = document.getElementById('rptOut');
+        if (!Array.isArray(data) || !data.length) {
+            out.innerHTML = '<div class="card-body text-muted small">No data in this range.</div>';
+            return;
+        }
+        const cols = Object.keys(data[0]);
+        out.innerHTML = `
+          <div class="table-responsive">
+            <table class="table table-sm mb-0">
+              <thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+              <tbody>${data.map(r => `<tr>${cols.map(c =>
+                  `<td>${typeof r[c] === 'number' && r[c] < 1 && r[c] > 0
+                      ? (r[c]*100).toFixed(1) + '%'
+                      : esc(String(r[c] ?? ''))}</td>`).join('')}</tr>`).join('')}
+              </tbody>
+            </table>
+          </div>`;
+    } catch (e) { toast(e.message, 'danger'); }
+});
+
+document.getElementById('btnCsv').addEventListener('click', () => {
+    document.getElementById('btnCsv').href =
+        `/api/reports/${document.getElementById('rptKind').value}/export.csv${qs()}`;
+});
+</script>
+}
