@@ -165,7 +165,9 @@ public sealed class AuthController : ControllerBase
             name = user.FindFirstValue(ClaimTypes.Name),
             email = user.FindFirstValue(ClaimTypes.Email),
             groups = user.FindAll("group").Select(c => c.Value).ToArray(),
-            permissions = user.FindAll("perm").Select(c => c.Value).ToArray()
+            permissions = user.FindAll("perm").Select(c => c.Value).ToArray(),
+            roles = user.FindAll("role").Select(c => c.Value).ToArray(),
+            isSystemAdmin = user.HasClaim("role", "system_admin")
         });
     }
 
