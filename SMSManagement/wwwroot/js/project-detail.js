@@ -843,7 +843,7 @@ async function loadSmsList() {
         const filter = document.getElementById('smsFilter').value;
         const qs = filter ? `?take=50&status=${encodeURIComponent(filter)}` : '?take=50';
         const rows = await api.get(`${api_proj}/sms${qs}`);
-        const body = document.getElementById('smsBody');
+        const body = document.getElementById('smsListBody');
         if (!rows.length) {
             body.innerHTML = '<tr><td colspan="5" class="text-muted">No SMS sent yet.</td></tr>';
             return;
