@@ -322,6 +322,105 @@ window.openToastHistory = function () {
     new bootstrap.Offcanvas(drawer).show();
 };
 
+// ============ KEYBOARD SHORTCUTS ============
+// Global hotkeys driven by data-attributes on links — pages opt in by tagging
+// their nav links with data-hotkey="g p" (etc.). The chord prefix is "g"
+// (mnemonic for "go to"); pressing g then a second letter within 1.5s
+// navigates. "/" focuses the first visible search/filter input; "?" opens
+// help. Standard prevent-default rules apply (ignore when typing in an input).
+window._hotkeyChord = null;
+window._hotkeyChordTimer = null;
+
+document.addEventListener('keydown', (ev) => {
+    // Don't hijack when the user is typing.
+    const t = ev.target;
+    const inField = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'
+                       || t.tagName === 'SELECT' || t.isContentEditable);
+    if (inField) return;
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+
+    // Escape closes any open modal/offcanvas (Bootstrap handles native, but
+    // does nothing for our custom drawers when focus is elsewhere).
+    if (ev.key === 'Escape') {
+        const open = document.querySelector('.modal.show, .offcanvas.show');
+        if (open) bootstrap.Modal.getInstance(open)?.hide()
+                ?? bootstrap.Offcanvas.getInstance(open)?.hide();
+        return;
+    }
+
+    // "/" — focus the first visible search-style input on the page.
+    if (ev.key === '/') {
+        const search = Array.from(document.querySelectorAll(
+            'input[type="search"], input[data-filter-target], #usrSearch, #projSearch'
+        )).find(el => el.offsetParent !== null);
+        if (search) { ev.preventDefault(); search.focus(); search.select(); }
+        return;
+    }
+
+    // "?" — open shortcuts help.
+    if (ev.key === '?' && ev.shiftKey) {
+        ev.preventDefault();
+        window.showHotkeyHelp();
+        return;
+    }
+
+    // Chord prefix "g" → wait for next key.
+    if (ev.key === 'g' && !window._hotkeyChord) {
+        window._hotkeyChord = 'g';
+        clearTimeout(window._hotkeyChordTimer);
+        window._hotkeyChordTimer = setTimeout(() => { window._hotkeyChord = null; }, 1500);
+        return;
+    }
+
+    // Resolve chord.
+    if (window._hotkeyChord === 'g') {
+        const chord = 'g ' + ev.key;
+        window._hotkeyChord = null;
+        clearTimeout(window._hotkeyChordTimer);
+        const target = document.querySelector(`[data-hotkey="${chord}"]`);
+        if (target) {
+            ev.preventDefault();
+            if (target.href) window.location.href = target.href;
+            else target.click();
+        }
+    }
+});
+
+window.showHotkeyHelp = function () {
+    let modal = document.getElementById('hotkeyHelpModal');
+    if (!modal) {
+        const wrap = document.createElement('div');
+        wrap.innerHTML = `
+        <div class="modal fade" id="hotkeyHelpModal" tabindex="-1">
+          <div class="modal-dialog">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title">Keyboard shortcuts</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+              </div>
+              <div class="modal-body">
+                <table class="table table-sm mb-0">
+                  <tr><td><kbd>/</kbd></td><td>Focus the search / filter input</td></tr>
+                  <tr><td><kbd>?</kbd></td><td>Show this help</td></tr>
+                  <tr><td><kbd>Esc</kbd></td><td>Close open modal / drawer</td></tr>
+                  <tr><td><kbd>g</kbd> <kbd>p</kbd></td><td>Go to Projects</td></tr>
+                  <tr><td><kbd>g</kbd> <kbd>a</kbd></td><td>Go to Admin → Users</td></tr>
+                  <tr><td><kbd>g</kbd> <kbd>h</kbd></td><td>Go to home dashboard</td></tr>
+                </table>
+                <p class="text-muted small mt-2 mb-0">
+                    Chords (<kbd>g</kbd> then a letter) have a 1.5-second window.
+                    Disabled while typing in a field.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>`;
+        document.body.appendChild(wrap.firstElementChild);
+        modal = document.getElementById('hotkeyHelpModal');
+    }
+    new bootstrap.Modal(modal).show();
+};
+
 document.addEventListener('DOMContentLoaded', () => {
     window.initBsHints();
     window.initTable();

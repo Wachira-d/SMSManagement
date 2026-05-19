@@ -69,10 +69,16 @@
                     <div class="collapse navbar-collapse" id="navMain">
                         <ul class="navbar-nav me-auto">
                             <li class="nav-item">
-                                <a class="nav-link" asp-page="/Projects/Index">
+                                <a class="nav-link" asp-page="/Projects/Index"
+                                   data-hotkey="g p" title="Projects (g p)">
                                     <i class="bi bi-folder"></i> Projects
                                 </a>
                             </li>
+                            <a hidden data-hotkey="g h" href="/Projects/Index"></a>
+                            @if (User!.HasClaim("role", "system_admin"))
+                            {
+                                <a hidden data-hotkey="g a" href="/Admin/Users"></a>
+                            }
                             @if (User!.HasClaim("perm", "audit.read") || User.HasClaim("role", "system_admin"))
                             {
                                 <li class="nav-item dropdown">
@@ -102,6 +108,13 @@
                             }
                         </ul>
                         <ul class="navbar-nav">
+                            <li class="nav-item">
+                                <a class="nav-link" href="#"
+                                   onclick="showHotkeyHelp();return false;"
+                                   title="Keyboard shortcuts (?)">
+                                    <i class="bi bi-keyboard"></i>
+                                </a>
+                            </li>
                             <li class="nav-item">
                                 <a class="nav-link position-relative" href="#"
                                    onclick="openToastHistory();return false;"

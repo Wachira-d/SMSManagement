@@ -20,3 +20,45 @@ html {
 body {
   margin-bottom: 60px;
 }
+
+/* ============ MOBILE TWEAKS ============
+   Tabs scroll horizontally below md so 9-tab project detail doesn't wrap
+   into a multi-row tab strip that eats half the viewport. */
+@media (max-width: 767.98px) {
+    .nav-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: thin;
+    }
+    .nav-tabs .nav-link {
+        white-space: nowrap;
+    }
+    /* Tables — wrap is OK for short data, but the wider operational tables
+       (SMS history, audit, batches) get a horizontal scroll under the card
+       to preserve the column layout. Project cards adopt single-column. */
+    .table-responsive table {
+        font-size: 0.85rem;
+    }
+    .table-responsive table .btn-group-sm .btn {
+        padding: 0.15rem 0.35rem;
+    }
+    /* Modal dialogs go full-width on phones so the form doesn't squeeze. */
+    .modal-dialog {
+        margin: 0.5rem;
+    }
+    .modal-dialog.modal-lg {
+        max-width: calc(100% - 1rem);
+    }
+}
+
+/* Keyboard-shortcut hint badge in tooltips. */
+kbd {
+    display: inline-block;
+    padding: 2px 6px;
+    font-size: 0.75rem;
+    background: #f8f9fa;
+    border: 1px solid #ced4da;
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    line-height: 1;
+}
