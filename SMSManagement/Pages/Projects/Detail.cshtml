@@ -77,7 +77,21 @@
                                 <div class="form-text">Blank = use platform default (8).</div>
                             </div>
                             <div class="mb-2">
-                                <label class="form-label small">Custom alphabet</label>
+                                <label class="form-label small">
+                                    Custom alphabet
+                                    <i class="bi bi-info-circle text-muted" tabindex="0"
+                                       data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                       data-bs-placement="right" data-bs-html="true"
+                                       title="Custom alphabet"
+                                       data-bs-content="Characters that slug generation may pick from. Each character used 0+ times; uniqueness is enforced.<br><br>
+<strong>Examples:</strong><br>
+<code>ABCDEFGHIJKLMNPQRSTUVWXYZ23456789</code> &mdash; uppercase + digits, no <code>O/0/I/1/L</code> (easy to type by phone)<br>
+<code>0123456789</code> &mdash; numeric-only (great for SMS, but short = collision risk &mdash; pair with longer slug length)<br>
+<code>abcdefghijkmnpqrstuvwxyz</code> &mdash; lowercase, ambiguous chars stripped<br>
+<code>ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789</code> &mdash; balanced default-style<br><br>
+Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Case-sensitive. Blank = platform default (57-char URL-safe).">
+                                    </i>
+                                </label>
                                 <input id="slAlpha" class="form-control" maxlength="80"
                                        pattern="[A-Za-z0-9_\-]+"
                                        placeholder="A-Z a-z 0-9 _ - (10–80 unique chars; case-sensitive)" />
@@ -133,6 +147,42 @@
                         </div>
                         <div id="xferResults" class="mt-1"></div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ ARCHIVE CONFIRMATION MODAL ============ -->
+    <!-- Math challenge: forces a deliberate keystroke pattern that no double-
+         click or hammer-on-Enter can satisfy. Sum is regenerated each open. -->
+    <div class="modal fade" id="archiveModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content border-danger">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title">
+                        <i class="bi bi-exclamation-triangle"></i> Archive project
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>This will hide the project and cancel in-flight workflows + queued SMS.</p>
+                    <p class="small text-muted">An admin can restore the project later from
+                        <strong>Admin → All projects</strong> (toggle "Include archived").</p>
+                    <hr>
+                    <p class="mb-2"><strong>To confirm, solve:</strong></p>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="fw-bold font-monospace fs-5" id="archMath"></span>
+                        <span>=</span>
+                        <input id="archAnswer" type="number" class="form-control form-control-sm"
+                               style="width:90px" autocomplete="off" />
+                        <span id="archHint" class="small text-danger ms-2"></span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button id="btnArchiveGo" class="btn btn-danger" disabled>
+                        <i class="bi bi-archive"></i> Archive
+                    </button>
                 </div>
             </div>
         </div>

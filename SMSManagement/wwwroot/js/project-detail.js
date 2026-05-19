@@ -111,14 +111,66 @@ document.getElementById('formNotif').addEventListener('submit', (ev) => {
         notifyOnIngestFailure:    document.getElementById('notifFailure').checked
     }, 'Notifications saved.');
 });
-document.getElementById('btnArchive').addEventListener('click', async () => {
-    if (!confirm('Archive this project? This cancels in-flight workflows and queued SMS. Reversible by an admin.')) return;
-    try {
-        await api.delete(api_proj);
-        toast('Project archived.');
-        setTimeout(() => window.location = '/Projects/Index', 800);
-    } catch (e) { toast(e.message, 'danger'); }
-});
+// ============ ARCHIVE PROJECT ============
+// Two-factor confirmation: the operator must answer a fresh math sum (a+b)
+// generated when the modal opens. Defeats double-click and stale browser-
+// session "yes I really clicked archive" mistakes. The sum is two small
+// numbers (5–19 + 1–9) so it's solvable in <2s.
+(function initArchiveFlow() {
+    const btnOpen   = document.getElementById('btnArchive');
+    const modal     = document.getElementById('archiveModal');
+    const mathEl    = document.getElementById('archMath');
+    const ansEl     = document.getElementById('archAnswer');
+    const hintEl    = document.getElementById('archHint');
+    const btnGo     = document.getElementById('btnArchiveGo');
+    if (!btnOpen) return;
+
+    let expected = 0;
+    function refreshChallenge() {
+        const a = 5 + Math.floor(Math.random() * 15);
+        const b = 1 + Math.floor(Math.random() * 9);
+        expected = a + b;
+        mathEl.textContent = `${a} + ${b}`;
+        ansEl.value = '';
+        hintEl.textContent = '';
+        btnGo.disabled = true;
+    }
+
+    btnOpen.addEventListener('click', () => {
+        refreshChallenge();
+        new bootstrap.Modal(modal).show();
+        setTimeout(() => ansEl.focus(), 200);
+    });
+    modal.addEventListener('hidden.bs.modal', () => {
+        // Clear state so the next open re-generates fresh numbers.
+        ansEl.value = ''; hintEl.textContent = ''; btnGo.disabled = true;
+    });
+    ansEl.addEventListener('input', () => {
+        const v = Number(ansEl.value);
+        if (Number.isFinite(v) && v === expected) {
+            btnGo.disabled = false;
+            hintEl.textContent = '';
+        } else {
+            btnGo.disabled = true;
+            hintEl.textContent = ansEl.value === '' ? '' : 'Not quite.';
+        }
+    });
+    ansEl.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' && !btnGo.disabled) btnGo.click();
+    });
+    btnGo.addEventListener('click', async () => {
+        btnGo.disabled = true;
+        try {
+            await api.delete(api_proj);
+            bootstrap.Modal.getInstance(modal).hide();
+            toast('Project archived.');
+            setTimeout(() => window.location = '/Projects/Index', 800);
+        } catch (e) {
+            toast(e.message, 'danger');
+            btnGo.disabled = false;
+        }
+    });
+})();
 
 // Transfer ownership picker (debounced typeahead)
 (function initTransferPicker() {

@@ -59,3 +59,16 @@ window.esc = function (s) {
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 };
+
+// Initialise Bootstrap popovers + tooltips for any element with the right
+// data attributes. Re-runnable: subsequent calls only attach to elements that
+// don't have an instance yet, so AJAX-rendered content can call this too.
+window.initBsHints = function () {
+    document.querySelectorAll('[data-bs-toggle="popover"]').forEach(el => {
+        if (!bootstrap.Popover.getInstance(el)) new bootstrap.Popover(el);
+    });
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+        if (!bootstrap.Tooltip.getInstance(el)) new bootstrap.Tooltip(el);
+    });
+};
+document.addEventListener('DOMContentLoaded', window.initBsHints);
