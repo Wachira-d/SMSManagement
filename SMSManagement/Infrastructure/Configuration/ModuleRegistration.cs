@@ -132,6 +132,10 @@ public static class ModuleRegistration
         services.AddSingleton<IEmailSender, SmtpEmailSender>();
         services.AddScoped<IIngestionBatchNotifier, IngestionBatchNotifier>();
 
+        // ---------- Coupon ----------
+        services.AddScoped<Modules.Coupon.Services.ICouponImportService,
+            Modules.Coupon.Services.CouponImportService>();
+
         // ---------- Reporting ----------
         services.AddScoped<IReportingService, ReportingService>();
 
