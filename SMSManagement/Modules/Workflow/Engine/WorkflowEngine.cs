@@ -206,7 +206,14 @@ public sealed class WorkflowEngine : IWorkflowEngine
                     SenderId: null,
                     Priority: SmsPriority.Immediate,
                     ScheduledFor: null,
-                    WorkflowInstanceId: instance.Id), ct);
+                    WorkflowInstanceId: instance.Id,
+                    // Discriminator = instance + step + loop iteration. A reminder
+                    // self-loop renders the same body each round; without this the
+                    // 2nd+ reminder would collide on the dedup key and be dropped.
+                    // A re-run of the SAME iteration (engine ticked twice) still
+                    // dedups correctly.
+                    DedupDiscriminator:
+                        $"{instance.Id:N}:{instance.CurrentStep}:{instance.StepRepeatCount}"), ct);
 
                 instance.State = WorkflowState.AwaitingAction;
                 instance.NextCheckAt = step.Wait is { } sendWait ? _clock.GetUtcNow().Add(sendWait) : null;
@@ -273,9 +280,17 @@ public sealed class WorkflowEngine : IWorkflowEngine
         var from = instance.State;
         var to = forceState ?? (nextStep == "__expired__" ? WorkflowState.Expired : WorkflowState.Dispatching);
 
+        // Compute step-change BEFORE mutating CurrentStep. The previous code
+        // assigned CurrentStep first then compared nextStep against it — which
+        // was always equal, so StepRepeatCount never reset on a real step
+        // change. That broke multi-step drip chains: stage2 inherited stage1's
+        // repeat count and was treated as already exhausted.
+        var isExpiry = nextStep == "__expired__";
+        var stepChanged = !isExpiry && nextStep != instance.CurrentStep;
+
         instance.State = to;
-        instance.CurrentStep = nextStep == "__expired__" ? instance.CurrentStep : nextStep;
-        instance.StepRepeatCount = nextStep == instance.CurrentStep ? instance.StepRepeatCount : 0;
+        if (!isExpiry) instance.CurrentStep = nextStep;
+        instance.StepRepeatCount = stepChanged ? 0 : instance.StepRepeatCount;
 
         _db.WorkflowTransitions.Add(new WorkflowTransition
         {

@@ -174,7 +174,10 @@ public sealed class SmsDispatcher : ISmsDispatcher
     private static string ComputeDedupKey(SmsRequest r)
     {
         var bodyHash = SHA256.HashData(Encoding.UTF8.GetBytes(r.Body));
-        var raw = $"{r.ProjectId:N}|{r.Recipient}|{Convert.ToHexString(bodyHash)}";
+        // DedupDiscriminator (e.g. workflow "{instanceId}:{step}:{repeat}")
+        // makes each intentional resend its own key while a re-run of the
+        // exact same logical send still collides. Empty for ad-hoc API sends.
+        var raw = $"{r.ProjectId:N}|{r.Recipient}|{Convert.ToHexString(bodyHash)}|{r.DedupDiscriminator}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw)));
     }
 }

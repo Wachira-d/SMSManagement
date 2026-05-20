@@ -320,6 +320,20 @@ public sealed class AdminUsersController : ControllerBase
             return BadRequest(new { Message = "Cannot disable your own account in a bulk op." });
 
         var ids = req.UserIds.Distinct().ToArray();
+
+        // Last-admin guard: refuse a bulk disable that would leave zero active
+        // system administrators. Without this, admin A can disable admin B
+        // and C in one call and lock the whole org out of the admin surface.
+        if (act == "disable")
+        {
+            var activeAdmins = await _db.Users
+                .Where(u => u.IsSystemAdmin && u.Status == "Active")
+                .Select(u => u.Id)
+                .ToListAsync(ct);
+            if (activeAdmins.Count > 0 && activeAdmins.All(a => ids.Contains(a)))
+                return BadRequest(new { Message =
+                    "This would disable every active system administrator. Keep at least one." });
+        }
         var users = await _db.Users.Where(u => ids.Contains(u.Id)).ToListAsync(ct);
         var byExternal = users.ToDictionary(u => u.ExternalSubject, u => u, StringComparer.OrdinalIgnoreCase);
         var caches = await _db.UserCaches

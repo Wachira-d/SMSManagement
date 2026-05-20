@@ -111,6 +111,7 @@ public sealed class AuthController : ControllerBase
 
     /// <summary>Exchange a Remember-Me cookie for a fresh JWT + rotated refresh token.</summary>
     [HttpPost("refresh")]
+    [EnableRateLimiting("login")]
     public async Task<IActionResult> Refresh(CancellationToken ct)
     {
         if (!Request.Cookies.TryGetValue(RememberMeCookie, out var raw)
@@ -166,8 +167,10 @@ public sealed class AuthController : ControllerBase
     //
     // Anti-enumeration: the request endpoint always returns 200 OK regardless
     // of whether the email matches a row, so an attacker can't probe for
-    // valid emails. The reset endpoint constant-time compares the hashed
-    // raw token, sets UsedAt, and rejects expired / already-used tokens.
+    // valid emails. The reset endpoint looks the token up by its SHA-256 hash
+    // (the raw token is never stored), sets UsedAt on redemption, and returns
+    // one identical generic message for not-found / used / expired so a used
+    // link can't be distinguished from an invalid one.
 
     public sealed record ForgotRequest(string Email);
     public sealed record ResetRequest(string Token, string NewPassword);
@@ -185,6 +188,15 @@ public sealed class AuthController : ControllerBase
                     && u.Email.ToLower() == email.ToLower(), ct);
             if (cache is not null && cache.IsEnabled)
             {
+                // Invalidate any earlier unused tokens for this user — issuing
+                // a fresh link should void the old ones so only the latest
+                // email works.
+                var now = DateTimeOffset.UtcNow;
+                var stale = await _db.PasswordResetTokens
+                    .Where(t => t.UserCacheId == cache.Id && t.UsedAt == null)
+                    .ToListAsync(ct);
+                foreach (var t in stale) t.UsedAt = now;
+
                 var raw = Convert.ToBase64String(
                     System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
                     .Replace('+', '-').Replace('/', '_').TrimEnd('=');
@@ -193,7 +205,7 @@ public sealed class AuthController : ControllerBase
                 {
                     UserCacheId = cache.Id,
                     TokenHash   = hash,
-                    ExpiresAt   = DateTimeOffset.UtcNow.AddHours(1),
+                    ExpiresAt   = now.AddHours(1),
                     RequestIp   = HttpContext.Connection.RemoteIpAddress?.ToString()
                 });
                 await _db.SaveChangesAsync(ct);
@@ -234,14 +246,18 @@ public sealed class AuthController : ControllerBase
         var hash = HashToken(req.Token);
         var row = await _db.PasswordResetTokens
             .FirstOrDefaultAsync(r => r.TokenHash == hash, ct);
-        if (row is null) return BadRequest(new { Message = "Invalid or expired link." });
-        if (row.UsedAt is not null) return BadRequest(new { Message = "This link has already been used." });
+        // Identical generic message for not-found / used / expired / disabled —
+        // a distinct "already used" message would be an oracle confirming a
+        // valid token once existed.
+        const string genericReject = "Invalid or expired link.";
+        if (row is null) return BadRequest(new { Message = genericReject });
+        if (row.UsedAt is not null) return BadRequest(new { Message = genericReject });
         if (row.ExpiresAt < DateTimeOffset.UtcNow)
-            return BadRequest(new { Message = "Invalid or expired link." });
+            return BadRequest(new { Message = genericReject });
 
         var cache = await _db.UserCaches.FirstOrDefaultAsync(u => u.Id == row.UserCacheId, ct);
         if (cache is null || !cache.IsEnabled)
-            return BadRequest(new { Message = "Invalid or expired link." });
+            return BadRequest(new { Message = genericReject });
 
         var newSalt = _hasher.NewSalt();
         cache.Salt = newSalt;
