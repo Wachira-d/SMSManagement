@@ -29,6 +29,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
     private readonly Modules.Core.Notifications.IUserNotifier _notify;
+    private readonly Modules.Coupon.Services.ICouponAllocator _coupons;
 
     public WorkflowEngine(
         AppDbContext db,
@@ -39,7 +40,8 @@ public sealed class WorkflowEngine : IWorkflowEngine
         CampaignMetrics metrics,
         TimeProvider clock,
         ILogger<WorkflowEngine> log,
-        Modules.Core.Notifications.IUserNotifier notify)
+        Modules.Core.Notifications.IUserNotifier notify,
+        Modules.Coupon.Services.ICouponAllocator coupons)
     {
         _db = db;
         _crypto = crypto;
@@ -50,6 +52,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
         _clock = clock;
         _log = log;
         _notify = notify;
+        _coupons = coupons;
     }
 
     public async Task<Guid> StartAsync(
@@ -226,6 +229,49 @@ public sealed class WorkflowEngine : IWorkflowEngine
                 instance.NextCheckAt = step.Wait is { } sendWait ? _clock.GetUtcNow().Add(sendWait) : null;
                 instance.StepRepeatCount++;
                 await _db.SaveChangesAsync(ct);
+                break;
+            }
+            case "issue_coupon":
+            {
+                // Reserve a coupon for this recipient and inject
+                // {{coupon_code}} / {{coupon_url}} into the payload so any
+                // later send_sms step can render them. Pass-through: no wait,
+                // immediately transition to OnTimeout (the next step).
+                if (step.CouponBatchId is { } batchId)
+                {
+                    var alloc = await _coupons.AllocateAsync(batchId, instance.Id, ct);
+                    if (alloc is not null)
+                    {
+                        payload["coupon_code"] = alloc.Token;
+                        payload["coupon_url"]  = alloc.RedeemUrl;
+                        instance.EncryptedPayload = _crypto.Encrypt(
+                            JsonSerializer.Serialize(payload, JsonOpts));
+                        await _db.SaveChangesAsync(ct);
+                    }
+                    else
+                    {
+                        // Batch exhausted — log and continue; the SMS just
+                        // won't carry a coupon rather than the whole instance
+                        // failing.
+                        _log.LogWarning(
+                            "issue_coupon: batch {Batch} exhausted for instance {Instance}.",
+                            batchId, instance.Id);
+                    }
+                }
+
+                if (step.OnTimeout is { } nextStep && spec.Steps.ContainsKey(nextStep))
+                {
+                    await TransitionAsync(instance, nextStep, "coupon_issued", ct);
+                    await ExecuteStepAsync(instance, spec, ct);
+                }
+                else
+                {
+                    // No next step wired — treat as terminal so the instance
+                    // doesn't hang in Dispatching forever.
+                    instance.State = WorkflowState.Completed;
+                    instance.NextCheckAt = null;
+                    await _db.SaveChangesAsync(ct);
+                }
                 break;
             }
             case "wait":

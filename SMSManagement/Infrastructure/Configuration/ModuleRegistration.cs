@@ -133,10 +133,13 @@ public static class ModuleRegistration
         services.AddScoped<IIngestionBatchNotifier, IngestionBatchNotifier>();
 
         // ---------- Coupon ----------
+        services.Configure<Modules.Coupon.Services.CouponOptions>(cfg.GetSection("Coupon"));
         services.AddScoped<Modules.Coupon.Services.ICouponImportService,
             Modules.Coupon.Services.CouponImportService>();
         services.AddScoped<Modules.Coupon.Services.ICouponRedeemer,
             Modules.Coupon.Services.CouponRedeemer>();
+        services.AddScoped<Modules.Coupon.Services.ICouponAllocator,
+            Modules.Coupon.Services.CouponAllocator>();
         services.AddSingleton<Modules.Coupon.Services.IBarcodeService,
             Modules.Coupon.Services.BarcodeService>();
 

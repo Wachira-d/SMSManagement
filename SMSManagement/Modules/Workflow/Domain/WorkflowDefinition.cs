@@ -26,7 +26,7 @@ public sealed class WorkflowSpec
 
 public sealed class WorkflowStep
 {
-    /// <summary>"send_sms" | "shortlink" | "wait" | "complete"</summary>
+    /// <summary>"send_sms" | "issue_coupon" | "wait" | "complete"</summary>
     public string Type { get; set; } = "send_sms";
 
     /// <summary>Template for body / URL — supports {{column}} substitution.</summary>
@@ -43,4 +43,11 @@ public sealed class WorkflowStep
 
     /// <summary>Fallback transition when wait elapses with no signal.</summary>
     public string? OnTimeout { get; set; }
+
+    /// <summary>
+    /// For an <c>issue_coupon</c> step: the CouponBatch to allocate from.
+    /// The step reserves one Available coupon for this instance and exposes
+    /// {{coupon_code}} / {{coupon_url}} to every later send_sms template.
+    /// </summary>
+    public Guid? CouponBatchId { get; set; }
 }
