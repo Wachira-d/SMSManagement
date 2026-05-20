@@ -212,6 +212,10 @@ builder.Services.AddRazorPages(o =>
     o.Conventions.AllowAnonymousToPage("/Blocked");
     o.Conventions.AllowAnonymousToPage("/Error");
     o.Conventions.AllowAnonymousToPage("/Index"); // landing — handles its own redirect
+    o.Conventions.AllowAnonymousToPage("/Redeem"); // public coupon redemption
+    // Second, short route for the shared-domain coupon link: /r/{ref}/{token}.
+    // The page's own @page route handles the dedicated-domain /redeem/{token}.
+    o.Conventions.AddPageRoute("/Redeem", "/r/{ref:int}/{token}");
 });
 builder.Services.Configure<BootstrapOptions>(builder.Configuration.GetSection("Bootstrap"));
 builder.Services.AddCampaignPlatform(builder.Configuration);

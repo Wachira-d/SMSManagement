@@ -9,8 +9,11 @@ using SMSManagement.Modules.Workflow.Engine;
 namespace SMSManagement.Pages;
 
 /// <summary>
-/// Public, anonymous coupon redemption page. GET shows the brand-themed
-/// landing; POST does the race-safe redeem and reveals the barcode.
+/// Public, anonymous coupon redemption page. Reachable two ways so the SMS
+/// link can be as short as the deployment allows:
+///   /r/{ref}/{token}   — shared domain; {ref} is the project running number.
+///   /redeem/{token}    — dedicated domain; the request Host pins the project.
+/// GET shows the brand-themed landing; POST does the race-safe redeem.
 /// </summary>
 [AllowAnonymous]
 public sealed class RedeemModel : PageModel
@@ -35,10 +38,13 @@ public sealed class RedeemModel : PageModel
     public string? BarcodeSvg { get; private set; }
     public bool Blocked { get; private set; }
 
-    public async Task OnGetAsync(string projectCode, string token, CancellationToken ct)
+    public async Task OnGetAsync(string token, int? @ref, CancellationToken ct)
     {
         if (await IsBlockedAsync(ct)) { Blocked = true; return; }
-        Coupon = await _redeemer.ResolveAsync(projectCode, token, ct);
+        var projectId = await ResolveProjectAsync(@ref, ct);
+        if (projectId is null) return;
+
+        Coupon = await _redeemer.ResolveAsync(projectId.Value, token, ct);
         if (Coupon is { Status: CouponStatus.Redeemed })
         {
             Outcome = RedeemResult.AlreadyRedeemed;
@@ -46,13 +52,15 @@ public sealed class RedeemModel : PageModel
         }
     }
 
-    public async Task<IActionResult> OnPostAsync(string projectCode, string token, CancellationToken ct)
+    public async Task<IActionResult> OnPostAsync(string token, int? @ref, CancellationToken ct)
     {
         if (await IsBlockedAsync(ct)) { Blocked = true; return Page(); }
+        var projectId = await ResolveProjectAsync(@ref, ct);
+        if (projectId is null) return Page();
 
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
         var ua = Request.Headers.UserAgent.ToString();
-        var result = await _redeemer.RedeemAsync(projectCode, token, ip, ua, ct);
+        var result = await _redeemer.RedeemAsync(projectId.Value, token, ip, ua, ct);
         Outcome = result.Result;
         Coupon = result.Coupon;
 
@@ -66,6 +74,11 @@ public sealed class RedeemModel : PageModel
         if (Coupon is { Status: CouponStatus.Redeemed }) BuildBarcode();
         return Page();
     }
+
+    /// <summary>ref present → shared domain (lookup by running number);
+    /// ref absent → dedicated domain (lookup by request Host).</summary>
+    private Task<Guid?> ResolveProjectAsync(int? @ref, CancellationToken ct) =>
+        _redeemer.ResolveProjectAsync(@ref, @ref is null ? Request.Host.Host : null, ct);
 
     private void BuildBarcode()
     {

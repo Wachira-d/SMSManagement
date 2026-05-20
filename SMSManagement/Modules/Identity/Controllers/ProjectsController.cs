@@ -47,7 +47,8 @@ public sealed class ProjectsController : ControllerBase
         bool? ShortlinkEnabled = null,
         bool? WorkflowEnabled = null,
         bool? IngestionEnabled = null,
-        bool? EmailAlertsEnabled = null);
+        bool? EmailAlertsEnabled = null,
+        string? CouponRedeemDomain = null);
 
     private static readonly System.Text.RegularExpressions.Regex AlphabetRegex =
         new("^[A-Za-z0-9_-]+$", System.Text.RegularExpressions.RegexOptions.Compiled);
@@ -148,6 +149,7 @@ public sealed class ProjectsController : ControllerBase
         return Ok(new
         {
             p.Id, p.Code, p.Name, p.DefaultProvider, p.CreatedAt, p.ArchivedAt,
+            p.RunningNumber, p.CouponRedeemDomain,
             Shortlink = new { p.ShortlinkSlugLength, p.ShortlinkAlphabet },
             Features = new
             {
@@ -196,10 +198,17 @@ public sealed class ProjectsController : ControllerBase
         // Atomic: project + owner membership must succeed together.
         using var tx = await _db.Database.BeginTransactionAsync(ct);
 
+        // Short sequential RunningNumber — used in the shared-domain coupon
+        // redeem URL. (max + 1); the unique index is the final guard against
+        // a rare concurrent-create race.
+        var nextRunning = (await _db.Projects.IgnoreQueryFilters()
+            .MaxAsync(p => (int?)p.RunningNumber, ct) ?? 0) + 1;
+
         var project = new Project
         {
             Code = code,
             Name = req.Name.Trim(),
+            RunningNumber = nextRunning,
             DefaultProvider = string.IsNullOrWhiteSpace(req.DefaultProvider)
                 ? "etracker"
                 : req.DefaultProvider.Trim().ToLowerInvariant()
@@ -298,6 +307,25 @@ public sealed class ProjectsController : ControllerBase
         if (req.WorkflowEnabled   is { } w)  project.WorkflowEnabled   = w;
         if (req.IngestionEnabled  is { } i)  project.IngestionEnabled  = i;
         if (req.EmailAlertsEnabled is { } e) project.EmailAlertsEnabled = e;
+
+        if (req.CouponRedeemDomain is not null)
+        {
+            var domain = req.CouponRedeemDomain.Trim().TrimEnd('/').ToLowerInvariant();
+            if (domain.Length == 0)
+            {
+                project.CouponRedeemDomain = null;   // clear → shared-domain /r/{n}/{token}
+            }
+            else
+            {
+                // Enforce uniqueness in code (no DB unique index — see AppDbContext).
+                var clash = await _db.Projects.IgnoreQueryFilters()
+                    .AnyAsync(p => p.Id != projectId && p.CouponRedeemDomain == domain, ct);
+                if (clash)
+                    return Conflict(new { Message =
+                        $"Domain '{domain}' is already the coupon domain of another project." });
+                project.CouponRedeemDomain = domain;
+            }
+        }
 
         await _db.SaveChangesAsync(ct);
 

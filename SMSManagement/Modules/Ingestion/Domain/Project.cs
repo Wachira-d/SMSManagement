@@ -72,6 +72,22 @@ public sealed class Project
     public bool WorkflowEnabled { get; set; } = true;
     public bool IngestionEnabled { get; set; } = true;
     public bool EmailAlertsEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Short sequential per-project number (1, 2, 3, …) assigned at creation.
+    /// Used in the shared-domain coupon redeem URL — /r/{RunningNumber}/{token}
+    /// — keeping the link far shorter than the human-readable Code.
+    /// </summary>
+    public int RunningNumber { get; set; }
+
+    /// <summary>
+    /// Optional dedicated host for this project's coupon redemption (e.g.
+    /// "coupon.honda.co.th"). When set, the redeem URL drops the project
+    /// segment entirely — /redeem/{token} — since the domain itself pins the
+    /// project. When null the project shares the platform domain and uses
+    /// the /r/{RunningNumber}/{token} form.
+    /// </summary>
+    public string? CouponRedeemDomain { get; set; }
 }
 
 public sealed class ColumnMapping

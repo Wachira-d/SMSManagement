@@ -102,7 +102,7 @@ document.querySelectorAll('[data-bs-toggle="tab"]').forEach(el => {
             case '#tab-sources':    if (!loaded.sources)    { loaded.sources    = true; loadSources(); loadBatches(); } break;
             case '#tab-workflows':  if (!loaded.workflows)  { loaded.workflows  = true; loadWorkflows(); loadWfInstances(); loadWfCouponBatches(); } break;
             case '#tab-shortlinks': if (!loaded.shortlinks) { loaded.shortlinks = true; loadShortlinks(); } break;
-            case '#tab-coupons':    if (!loaded.coupons)    { loaded.coupons    = true; loadCouponBrands(); loadCouponBatches(); } break;
+            case '#tab-coupons':    if (!loaded.coupons)    { loaded.coupons    = true; loadCouponBrands(); loadCouponBatches(); initCouponDomain(); } break;
             case '#tab-sms':        if (!loaded.sms)        { loaded.sms        = true; loadSmsList(); loadProviderConfig('etracker'); loadProviderConfig('infobip'); } break;
         }
     });
@@ -2488,4 +2488,31 @@ document.getElementById('formCpnImport').addEventListener('submit', async (ev) =
         document.getElementById('cpnImpAlpha').value = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
         loadCouponBatches();
     } catch (e) { out.innerHTML = `<div class="text-danger small">${esc(e.message)}</div>`; }
+});
+
+// Coupon redemption-link config (dedicated domain vs shared running number).
+function couponUrlPreview() {
+    const domain = document.getElementById('cpnDomain').value.trim();
+    const token = 'A7K9PQ';
+    if (domain) return `https://${domain.replace(/^https?:\/\//,'').replace(/\/+$/,'')}/redeem/${token}`;
+    const n = (project && project.runningNumber) || 1;
+    return `https://<platform>/r/${n}/${token}`;
+}
+function initCouponDomain() {
+    const inp = document.getElementById('cpnDomain');
+    if (!inp) return;
+    inp.value = (project && project.couponRedeemDomain) || '';
+    document.getElementById('cpnUrlPreview').textContent = couponUrlPreview();
+    inp.addEventListener('input', () => {
+        document.getElementById('cpnUrlPreview').textContent = couponUrlPreview();
+    });
+}
+document.getElementById('formCpnDomain')?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    try {
+        await api.put(api_proj, { couponRedeemDomain: document.getElementById('cpnDomain').value.trim() });
+        if (project) project.couponRedeemDomain = document.getElementById('cpnDomain').value.trim() || null;
+        toast('Redemption domain saved.');
+        document.getElementById('cpnUrlPreview').textContent = couponUrlPreview();
+    } catch (e) { toast(e.message, 'danger'); }
 });

@@ -13,16 +13,21 @@ namespace SMSManagement.Modules.Coupon.Services;
 public interface ICouponRedeemer
 {
     /// <summary>
-    /// Look up a coupon for display (no state change). The redemption URL
-    /// carries BOTH the project code and the token because Token is only
-    /// unique per project — two projects can mint the same token, so the
-    /// project code disambiguates on a shared domain. Null = not found.
+    /// Resolve the project a redeem request belongs to. The page passes
+    /// EITHER a running number (shared-domain URL /r/{n}/{token}) or the
+    /// request Host (dedicated-domain URL /redeem/{token}). Null = no match.
     /// </summary>
-    Task<CouponView?> ResolveAsync(string projectCode, string token, CancellationToken ct = default);
+    Task<Guid?> ResolveProjectAsync(int? runningNumber, string? host, CancellationToken ct = default);
+
+    /// <summary>
+    /// Look up a coupon for display (no state change). Token is unique only
+    /// per project, so the project must already be resolved. Null = not found.
+    /// </summary>
+    Task<CouponView?> ResolveAsync(Guid projectId, string token, CancellationToken ct = default);
 
     /// <summary>Atomically redeem. The outcome enum tells the caller exactly
     /// what happened so the page can show the right message.</summary>
-    Task<RedeemOutcome> RedeemAsync(string projectCode, string token,
+    Task<RedeemOutcome> RedeemAsync(Guid projectId, string token,
         string? clientIp, string? userAgent, CancellationToken ct = default);
 }
 
@@ -74,39 +79,60 @@ public sealed class CouponRedeemer : ICouponRedeemer
         _log = log;
     }
 
+    public async Task<Guid?> ResolveProjectAsync(
+        int? runningNumber, string? host, CancellationToken ct = default)
+    {
+        // IgnoreQueryFilters — anonymous redeem path, no user context.
+        if (runningNumber is { } n)
+        {
+            var byNumber = await _db.Projects.IgnoreQueryFilters().AsNoTracking()
+                .Where(p => p.RunningNumber == n)
+                .Select(p => (Guid?)p.Id)
+                .FirstOrDefaultAsync(ct);
+            return byNumber;
+        }
+        if (!string.IsNullOrWhiteSpace(host))
+        {
+            // Dedicated-domain form: the request Host pins the project.
+            // Strip any :port the proxy may have left on the header.
+            var h = host.Split(':')[0].Trim().ToLowerInvariant();
+            return await _db.Projects.IgnoreQueryFilters().AsNoTracking()
+                .Where(p => p.CouponRedeemDomain != null
+                         && p.CouponRedeemDomain.ToLower() == h)
+                .Select(p => (Guid?)p.Id)
+                .FirstOrDefaultAsync(ct);
+        }
+        return null;
+    }
+
     public async Task<CouponView?> ResolveAsync(
-        string projectCode, string token, CancellationToken ct = default)
+        Guid projectId, string token, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(token) || token.Length > 64) return null;
-        if (string.IsNullOrWhiteSpace(projectCode) || projectCode.Length > 64) return null;
+        if (projectId == Guid.Empty) return null;
 
         // IgnoreQueryFilters — the redemption page is public/anonymous, the
         // token itself is the capability (high-entropy random, not guessable).
-        // Scoped by Project.Code: Token is unique only WITHIN a project, so
-        // the URL must pin the project or two projects' coupons collide.
+        // Token is unique only WITHIN a project, hence the projectId scope.
         var row = await (
             from c in _db.Coupons.IgnoreQueryFilters().AsNoTracking()
             join br in _db.CouponBrands.IgnoreQueryFilters().AsNoTracking()
                 on c.BrandId equals br.Id
-            join p in _db.Projects.IgnoreQueryFilters().AsNoTracking()
-                on c.ProjectId equals p.Id
-            where p.Code == projectCode && c.Token == token
-            select new { c, br, p.Code }).FirstOrDefaultAsync(ct);
+            where c.ProjectId == projectId && c.Token == token
+            select new { c, br }).FirstOrDefaultAsync(ct);
         if (row is null) return null;
-        // Case-sensitive guard (Token / Code columns may be on a CI collation).
-        if (!string.Equals(row.c.Token, token, StringComparison.Ordinal)
-            || !string.Equals(row.Code, projectCode, StringComparison.Ordinal))
-            return null;
+        // Case-sensitive guard (Token column may be on a CI collation).
+        if (!string.Equals(row.c.Token, token, StringComparison.Ordinal)) return null;
 
         return ToView(row.c, row.br,
             includeRealCode: row.c.Status == CouponStatus.Redeemed);
     }
 
     public async Task<RedeemOutcome> RedeemAsync(
-        string projectCode, string token, string? clientIp, string? userAgent,
+        Guid projectId, string token, string? clientIp, string? userAgent,
         CancellationToken ct = default)
     {
-        var view = await ResolveAsync(projectCode, token, ct);
+        var view = await ResolveAsync(projectId, token, ct);
         if (view is null)
         {
             // Record the miss for the abuse tracker — a flood of bad tokens
@@ -144,7 +170,7 @@ public sealed class CouponRedeemer : ICouponRedeemer
         if (rows == 0)
         {
             // Lost the race (or it expired between resolve and update).
-            var fresh = await ResolveAsync(projectCode, token, ct);
+            var fresh = await ResolveAsync(projectId, token, ct);
             return new RedeemOutcome(
                 fresh?.Status == CouponStatus.Expired ? RedeemResult.Expired
                                                       : RedeemResult.AlreadyRedeemed,
@@ -167,7 +193,7 @@ public sealed class CouponRedeemer : ICouponRedeemer
         _log.LogInformation("Coupon redeemed token={Token} coupon={CouponId}", token, view.CouponId);
 
         // Re-resolve so the success view carries the now-decryptable real code.
-        var redeemed = await ResolveAsync(projectCode, token, ct);
+        var redeemed = await ResolveAsync(projectId, token, ct);
         return new RedeemOutcome(RedeemResult.Redeemed, redeemed);
     }
 

@@ -1148,6 +1148,34 @@ Other SFTP keys: <code>host, port, username, privateKeyPem, remoteDirectory</cod
             coupon per recipient and exposes <code>{{coupon_url}}</code> / <code>{{coupon_code}}</code>
             to the SMS template.
         </div>
+
+        <!-- Redemption URL shape — shortest link depends on whether this
+             project gets a dedicated domain or shares the platform one. -->
+        <div class="card mb-3">
+            <div class="card-header">Redemption link</div>
+            <div class="card-body">
+                <form id="formCpnDomain" class="row g-2 align-items-end">
+                    <div class="col-md-6">
+                        <label class="form-label small">
+                            Dedicated coupon domain
+                            <i class="bi bi-info-circle text-muted" tabindex="0"
+                               data-bs-toggle="popover" data-bs-trigger="hover focus"
+                               data-bs-html="true" title="Redemption link"
+                               data-bs-content="Set a domain this project owns (e.g. <code>coupon.honda.co.th</code>) &mdash; the redeem link drops the project segment entirely: <code>/redeem/{token}</code>.<br><br>Leave blank to share the platform domain; the link then uses the short running number: <code>/r/{n}/{token}</code>."></i>
+                        </label>
+                        <input id="cpnDomain" class="form-control form-control-sm"
+                               placeholder="(blank = shared domain)" />
+                    </div>
+                    <div class="col-md-3">
+                        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                    </div>
+                    <div class="col-12">
+                        <span class="small text-muted">Link preview: </span>
+                        <code id="cpnUrlPreview" class="small"></code>
+                    </div>
+                </form>
+            </div>
+        </div>
         <div class="row g-3">
             <!-- Brands -->
             <div class="col-md-5">

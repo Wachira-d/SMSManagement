@@ -50,15 +50,16 @@ public sealed class CouponAllocator : ICouponAllocator
     public async Task<CouponAllocation?> AllocateAsync(
         Guid batchId, Guid workflowInstanceId, CancellationToken ct = default)
     {
-        // The redeem URL is /redeem/{projectCode}/{token} — Token is unique
-        // only per project, so the URL must pin the project. Resolve the
-        // batch's project code once up front.
-        var projectCode = await _db.CouponBatches.IgnoreQueryFilters().AsNoTracking()
+        // The redeem URL shape depends on the project's deployment:
+        //   dedicated domain → https://{domain}/redeem/{token}
+        //   shared domain    → {PublicBaseUrl}/r/{runningNumber}/{token}
+        // Resolve the batch's project once up front.
+        var proj = await _db.CouponBatches.IgnoreQueryFilters().AsNoTracking()
             .Where(b => b.Id == batchId)
             .Join(_db.Projects.IgnoreQueryFilters(), b => b.ProjectId, p => p.Id,
-                  (b, p) => p.Code)
+                  (b, p) => new { p.RunningNumber, p.CouponRedeemDomain })
             .FirstOrDefaultAsync(ct);
-        if (projectCode is null)
+        if (proj is null)
         {
             _log.LogWarning("Coupon allocate: batch {BatchId} not found.", batchId);
             return null;
@@ -72,7 +73,8 @@ public sealed class CouponAllocator : ICouponAllocator
             .Select(c => new { c.Id, c.Token })
             .FirstOrDefaultAsync(ct);
         if (already is not null)
-            return new CouponAllocation(already.Id, already.Token, BuildUrl(projectCode, already.Token));
+            return new CouponAllocation(already.Id, already.Token,
+                BuildUrl(proj.RunningNumber, proj.CouponRedeemDomain, already.Token));
 
         // Race-safe claim: pick an Available id, then a conditional UPDATE
         // that only succeeds if it's still Available. Retry on a lost race.
@@ -104,23 +106,27 @@ public sealed class CouponAllocator : ICouponAllocator
                     .SetProperty(b => b.AllocatedCount, b => b.AllocatedCount + 1), ct);
 
             return new CouponAllocation(candidate.Id, candidate.Token,
-                BuildUrl(projectCode, candidate.Token));
+                BuildUrl(proj.RunningNumber, proj.CouponRedeemDomain, candidate.Token));
         }
 
         _log.LogWarning("Coupon allocation for batch {BatchId} gave up after contention.", batchId);
         return null;
     }
 
-    private string BuildUrl(string projectCode, string token)
+    private string BuildUrl(int runningNumber, string? redeemDomain, string token)
     {
-        // /redeem/{projectCode}/{token} — the project code disambiguates a
-        // token that is only unique per project (a shared domain otherwise
-        // couldn't tell two projects' identical tokens apart).
-        var path = $"redeem/{Uri.EscapeDataString(projectCode)}/{Uri.EscapeDataString(token)}";
+        var t = Uri.EscapeDataString(token);
+
+        // Dedicated domain → shortest possible: the domain pins the project,
+        // so no project segment is needed.
+        if (!string.IsNullOrWhiteSpace(redeemDomain))
+            return $"https://{redeemDomain.Trim().TrimEnd('/')}/redeem/{t}";
+
+        // Shared domain → /r/{runningNumber}/{token}. The running number
+        // (1, 2, 3, …) is far shorter than the project Code.
+        var path = $"r/{runningNumber}/{t}";
         if (string.IsNullOrWhiteSpace(_opts.PublicBaseUrl))
         {
-            // No base configured — emit a relative path. The shortlink step
-            // can't shorten a relative URL, so warn the operator to set it.
             _log.LogWarning("Coupon:PublicBaseUrl not configured — emitting a relative redeem path.");
             return "/" + path;
         }

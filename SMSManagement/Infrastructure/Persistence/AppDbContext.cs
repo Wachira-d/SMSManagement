@@ -72,6 +72,14 @@ public sealed class AppDbContext : DbContext
         b.Entity<Project>(e =>
         {
             e.HasIndex(x => x.Code).IsUnique();
+            e.HasIndex(x => x.RunningNumber).IsUnique();
+            // CouponRedeemDomain uniqueness is enforced in ProjectsController
+            // (a non-filtered unique index on a nullable column allows only
+            // one NULL on SQL Server; a filtered index needs provider-specific
+            // SQL that wouldn't translate on the SQLite test build). Indexed
+            // non-unique for the host → project lookup on the redeem hot path.
+            e.HasIndex(x => x.CouponRedeemDomain);
+            e.Property(x => x.CouponRedeemDomain).HasMaxLength(253);
             // Soft-delete + scope filter combined. Archived projects are
             // invisible to everyone (system admins use IgnoreQueryFilters
             // to restore). Non-archived projects scope by membership.
