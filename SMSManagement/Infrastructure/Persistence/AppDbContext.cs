@@ -73,12 +73,16 @@ public sealed class AppDbContext : DbContext
         {
             e.HasIndex(x => x.Code).IsUnique();
             e.HasIndex(x => x.RunningNumber).IsUnique();
-            // CouponRedeemDomain uniqueness is enforced in ProjectsController
-            // (a non-filtered unique index on a nullable column allows only
-            // one NULL on SQL Server; a filtered index needs provider-specific
-            // SQL that wouldn't translate on the SQLite test build). Indexed
-            // non-unique for the host → project lookup on the redeem hot path.
-            e.HasIndex(x => x.CouponRedeemDomain);
+            // Filtered UNIQUE index — two projects must never share a redeem
+            // domain (the redeem path resolves a project purely by Host). The
+            // filter excludes NULLs so unconfigured projects don't collide.
+            // Partial indexes are supported by both SQL Server and SQLite; the
+            // identifier quoting differs, hence the provider branch.
+            e.HasIndex(x => x.CouponRedeemDomain)
+                .IsUnique()
+                .HasFilter(Database.ProviderName?.Contains("Sqlite", StringComparison.Ordinal) == true
+                    ? "\"CouponRedeemDomain\" IS NOT NULL"
+                    : "[CouponRedeemDomain] IS NOT NULL");
             e.Property(x => x.CouponRedeemDomain).HasMaxLength(253);
             // Soft-delete + scope filter combined. Archived projects are
             // invisible to everyone (system admins use IgnoreQueryFilters

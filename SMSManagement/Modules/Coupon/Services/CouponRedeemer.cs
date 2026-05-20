@@ -150,9 +150,17 @@ public sealed class CouponRedeemer : ICouponRedeemer
         if (view.ExpiresAt is { } exp && exp < now)
         {
             // Lazily flip Available/Allocated → Expired so the inventory is honest.
-            await _db.Coupons.IgnoreQueryFilters()
+            var flipped = await _db.Coupons.IgnoreQueryFilters()
                 .Where(c => c.Id == view.CouponId && c.Status != CouponStatus.Redeemed)
                 .ExecuteUpdateAsync(s => s.SetProperty(c => c.Status, CouponStatus.Expired), ct);
+            // An Allocated coupon counted towards the batch's AllocatedCount —
+            // expiring it must release that count, or the dashboard overcounts
+            // the batch's live allocations forever.
+            if (flipped == 1 && view.Status == CouponStatus.Allocated)
+                await _db.CouponBatches.IgnoreQueryFilters()
+                    .Where(bt => _db.Coupons.Any(c => c.Id == view.CouponId && c.BatchId == bt.Id))
+                    .ExecuteUpdateAsync(s => s.SetProperty(bt => bt.AllocatedCount,
+                        bt => bt.AllocatedCount > 0 ? bt.AllocatedCount - 1 : 0), ct);
             return new RedeemOutcome(RedeemResult.Expired, view with { Status = CouponStatus.Expired });
         }
 
@@ -160,6 +168,10 @@ public sealed class CouponRedeemer : ICouponRedeemer
         // in a non-terminal state. Two concurrent tabs → exactly one gets
         // rowsAffected == 1; the loser sees AlreadyRedeemed. This is the fix
         // for the legacy "UPDATE Coupon SET Used_Status=1" with no guard.
+        // The status flip, the audit row and the counter bump all commit
+        // together so a crash can't leave a Redeemed coupon with no audit row.
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
         var rows = await _db.Coupons.IgnoreQueryFilters()
             .Where(c => c.Id == view.CouponId
                      && (c.Status == CouponStatus.Available || c.Status == CouponStatus.Allocated))
@@ -170,6 +182,7 @@ public sealed class CouponRedeemer : ICouponRedeemer
         if (rows == 0)
         {
             // Lost the race (or it expired between resolve and update).
+            await tx.RollbackAsync(ct);
             var fresh = await ResolveAsync(projectId, token, ct);
             return new RedeemOutcome(
                 fresh?.Status == CouponStatus.Expired ? RedeemResult.Expired
@@ -189,6 +202,7 @@ public sealed class CouponRedeemer : ICouponRedeemer
             .Where(bt => _db.Coupons.Any(c => c.Id == view.CouponId && c.BatchId == bt.Id))
             .ExecuteUpdateAsync(s => s.SetProperty(bt => bt.RedeemedCount, bt => bt.RedeemedCount + 1), ct);
         await _db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
 
         _log.LogInformation("Coupon redeemed token={Token} coupon={CouponId}", token, view.CouponId);
 

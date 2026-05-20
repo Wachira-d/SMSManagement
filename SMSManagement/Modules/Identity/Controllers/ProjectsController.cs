@@ -195,36 +195,49 @@ public sealed class ProjectsController : ControllerBase
         if (await _db.Projects.IgnoreQueryFilters().AnyAsync(p => p.Code == code, ct))
             return Conflict(new { Message = $"Project code '{code}' already exists." });
 
-        // Atomic: project + owner membership must succeed together.
-        using var tx = await _db.Database.BeginTransactionAsync(ct);
+        var defaultProvider = string.IsNullOrWhiteSpace(req.DefaultProvider)
+            ? "etracker"
+            : req.DefaultProvider.Trim().ToLowerInvariant();
 
         // Short sequential RunningNumber — used in the shared-domain coupon
-        // redeem URL. (max + 1); the unique index is the final guard against
-        // a rare concurrent-create race.
-        var nextRunning = (await _db.Projects.IgnoreQueryFilters()
-            .MaxAsync(p => (int?)p.RunningNumber, ct) ?? 0) + 1;
-
-        var project = new Project
+        // redeem URL. MAX+1 is computed outside any lock, so two concurrent
+        // creates can pick the same number; the unique index rejects the
+        // loser. Retry with a freshly computed number rather than 500-ing.
+        Project project;
+        for (var attempt = 0; ; attempt++)
         {
-            Code = code,
-            Name = req.Name.Trim(),
-            RunningNumber = nextRunning,
-            DefaultProvider = string.IsNullOrWhiteSpace(req.DefaultProvider)
-                ? "etracker"
-                : req.DefaultProvider.Trim().ToLowerInvariant()
-        };
-        _db.Projects.Add(project);
+            project = new Project
+            {
+                Code = code,
+                Name = req.Name.Trim(),
+                DefaultProvider = defaultProvider
+            };
+            try
+            {
+                // Atomic: project + owner membership must succeed together.
+                await using var tx = await _db.Database.BeginTransactionAsync(ct);
 
-        _db.Set<ProjectMembership>().Add(new ProjectMembership
-        {
-            ProjectId = project.Id,
-            UserId = _me.UserId,
-            AccessLevel = ProjectAccessLevel.Owner,
-            GrantedByUserId = _me.UserId
-        });
+                project.RunningNumber = (await _db.Projects.IgnoreQueryFilters()
+                    .MaxAsync(p => (int?)p.RunningNumber, ct) ?? 0) + 1;
+                _db.Projects.Add(project);
+                _db.Set<ProjectMembership>().Add(new ProjectMembership
+                {
+                    ProjectId = project.Id,
+                    UserId = _me.UserId,
+                    AccessLevel = ProjectAccessLevel.Owner,
+                    GrantedByUserId = _me.UserId
+                });
 
-        await _db.SaveChangesAsync(ct);
-        await tx.CommitAsync(ct);
+                await _db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+                break;
+            }
+            catch (DbUpdateException) when (attempt < 5)
+            {
+                // Drop the failed tracked entities and retry the allocation.
+                _db.ChangeTracker.Clear();
+            }
+        }
 
         await _audit.WriteAsync(new AuditEntry(
             _me.UserId, "project.create", "Project", project.Id.ToString(),

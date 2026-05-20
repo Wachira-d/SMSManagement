@@ -57,11 +57,20 @@ public sealed class CouponAllocator : ICouponAllocator
         var proj = await _db.CouponBatches.IgnoreQueryFilters().AsNoTracking()
             .Where(b => b.Id == batchId)
             .Join(_db.Projects.IgnoreQueryFilters(), b => b.ProjectId, p => p.Id,
-                  (b, p) => new { p.RunningNumber, p.CouponRedeemDomain })
+                  (b, p) => new { p.RunningNumber, p.CouponRedeemDomain, b.ExpiresAt })
             .FirstOrDefaultAsync(ct);
         if (proj is null)
         {
             _log.LogWarning("Coupon allocate: batch {BatchId} not found.", batchId);
+            return null;
+        }
+
+        // Every coupon in a batch shares the batch's expiry — if that has
+        // passed, the whole batch is dead. Handing a customer a coupon that's
+        // expired on arrival burns inventory and fails at redeem time.
+        if (proj.ExpiresAt is { } batchExpiry && batchExpiry <= _clock.GetUtcNow())
+        {
+            _log.LogWarning("Coupon allocate: batch {BatchId} has expired.", batchId);
             return null;
         }
 
@@ -80,6 +89,8 @@ public sealed class CouponAllocator : ICouponAllocator
         // that only succeeds if it's still Available. Retry on a lost race.
         for (var attempt = 0; attempt < 10; attempt++)
         {
+            var now = _clock.GetUtcNow();
+
             var candidate = await _db.Coupons.IgnoreQueryFilters().AsNoTracking()
                 .Where(c => c.BatchId == batchId && c.Status == CouponStatus.Available)
                 .Select(c => new { c.Id, c.Token })
@@ -91,19 +102,26 @@ public sealed class CouponAllocator : ICouponAllocator
                 return null;
             }
 
-            var now = _clock.GetUtcNow();
+            // Claim + counter bump commit together so a crash between them
+            // can't desync AllocatedCount from the coupon rows.
+            await using var tx = await _db.Database.BeginTransactionAsync(ct);
             var rows = await _db.Coupons.IgnoreQueryFilters()
                 .Where(c => c.Id == candidate.Id && c.Status == CouponStatus.Available)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(c => c.Status, CouponStatus.Allocated)
                     .SetProperty(c => c.WorkflowInstanceId, workflowInstanceId)
                     .SetProperty(c => c.AllocatedAt, now), ct);
-            if (rows == 0) continue; // someone else took it — retry
+            if (rows == 0)
+            {
+                await tx.RollbackAsync(ct); // someone else took it — retry
+                continue;
+            }
 
             await _db.CouponBatches.IgnoreQueryFilters()
                 .Where(b => b.Id == batchId)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(b => b.AllocatedCount, b => b.AllocatedCount + 1), ct);
+            await tx.CommitAsync(ct);
 
             return new CouponAllocation(candidate.Id, candidate.Token,
                 BuildUrl(proj.RunningNumber, proj.CouponRedeemDomain, candidate.Token));

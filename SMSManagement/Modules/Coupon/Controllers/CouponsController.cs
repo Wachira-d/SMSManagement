@@ -66,6 +66,17 @@ public sealed class CouponsController : ControllerBase
         if (format is not ("code128" or "qr"))
             return BadRequest(new { Message = "BarcodeFormat must be code128 or qr." });
 
+        // ThemeColor and LogoUrl land in style/src attributes on the PUBLIC,
+        // anonymous redemption page — validate them as the trust boundary so a
+        // crafted value can't break out into stored XSS.
+        var theme = string.IsNullOrWhiteSpace(req.ThemeColor) ? "#0066cc" : req.ThemeColor.Trim();
+        if (!System.Text.RegularExpressions.Regex.IsMatch(theme, "^#[0-9A-Fa-f]{3,8}$"))
+            return BadRequest(new { Message = "ThemeColor must be a hex colour, e.g. #0066cc." });
+        if (!string.IsNullOrWhiteSpace(req.LogoUrl)
+            && !(Uri.TryCreate(req.LogoUrl, UriKind.Absolute, out var logo)
+                 && (logo.Scheme == Uri.UriSchemeHttp || logo.Scheme == Uri.UriSchemeHttps)))
+            return BadRequest(new { Message = "LogoUrl must be an absolute http(s) URL." });
+
         var name = req.Name.Trim().ToLowerInvariant();
         CouponBrand row;
         if (req.Id is { } id)
@@ -88,7 +99,7 @@ public sealed class CouponsController : ControllerBase
         row.Name = name;
         row.DisplayName = req.DisplayName.Trim();
         row.LogoUrl = req.LogoUrl;
-        row.ThemeColor = string.IsNullOrWhiteSpace(req.ThemeColor) ? "#0066cc" : req.ThemeColor!;
+        row.ThemeColor = theme;
         row.RedemptionInstructions = req.RedemptionInstructions;
         row.BarcodeFormat = format;
         row.Enabled = req.Enabled;

@@ -12,6 +12,10 @@ public interface IWorkflowEngine
     Task SignalAsync(Guid instanceId, string signal, CancellationToken ct = default);
 
     /// <summary>Time-based pass: handles reminders and hard expiration.
-    /// Run by a scheduler (Hangfire recurring job) every minute.</summary>
+    /// Run by a scheduler (Hangfire recurring job) every minute. The
+    /// DisableConcurrentExecution filter stops a slow tick from overlapping the
+    /// next one (and serialises ticks across multiple app servers); per-instance
+    /// leases inside the engine guard against signal races.</summary>
+    [Hangfire.DisableConcurrentExecution(timeoutInSeconds: 600)]
     Task TickAsync(CancellationToken ct = default);
 }

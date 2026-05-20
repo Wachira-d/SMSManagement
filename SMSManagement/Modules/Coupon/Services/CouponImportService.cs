@@ -183,7 +183,25 @@ public sealed class CouponImportService : ICouponImportService
             return new CouponImportResult(null, 0, rejections.Count, rejections);
         }
 
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            // A concurrent import committed an overlapping RealCodeHash (system-
+            // wide unique) or Token (per-project unique) between our in-memory
+            // dedup check and this save. Surface it as a clean rejection so the
+            // operator re-uploads, instead of bubbling a raw 500.
+            _log.LogWarning(ex,
+                "Coupon import: save conflicted with a concurrent import (batch {BatchId}).",
+                batch.Id);
+            return new CouponImportResult(null, 0, codes.Count, new[]
+            {
+                new CouponImportRejection(0, "",
+                    "import_conflict — a code or token collided with a concurrent import; please retry")
+            });
+        }
         _log.LogInformation(
             "Coupon import: batch={BatchId} accepted={Accepted} rejected={Rejected}",
             batch.Id, accepted, rejections.Count);

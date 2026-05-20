@@ -932,7 +932,9 @@ namespace SMSManagement.Infrastructure.Persistence.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.HasIndex("CouponRedeemDomain");
+                    b.HasIndex("CouponRedeemDomain")
+                        .IsUnique()
+                        .HasFilter("[CouponRedeemDomain] IS NOT NULL");
 
                     b.HasIndex("RunningNumber")
                         .IsUnique();
@@ -1274,6 +1276,9 @@ namespace SMSManagement.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset?>("NextCheckAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("ProcessingLockedUntil")
                         .HasColumnType("datetimeoffset");
 
                     b.Property<int>("State")

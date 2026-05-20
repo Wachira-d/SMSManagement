@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SMSManagement.Infrastructure.Persistence;
@@ -27,6 +28,19 @@ public sealed class WorkflowEngine : IWorkflowEngine
     private readonly ILogger<WorkflowEngine> _log;
 
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>Matches any leftover {{placeholder}} a template render didn't fill.</summary>
+    private static readonly Regex UnresolvedPlaceholder =
+        new(@"\{\{[^{}]*\}\}", RegexOptions.Compiled);
+
+    /// <summary>How long a processing lease is held. Long enough to cover the
+    /// slowest step (an SMS enqueue), short enough that a crashed worker's lease
+    /// frees the instance within a few ticks.</summary>
+    private static readonly TimeSpan LeaseDuration = TimeSpan.FromMinutes(10);
+
+    /// <summary>Recursion budget for pass-through (issue_coupon) step chains —
+    /// a misconfigured cycle is caught here instead of overflowing the stack.</summary>
+    private const int MaxStepDepth = 50;
 
     private readonly Modules.Core.Notifications.IUserNotifier _notify;
     private readonly Modules.Coupon.Services.ICouponAllocator _coupons;
@@ -91,20 +105,76 @@ public sealed class WorkflowEngine : IWorkflowEngine
             _log.LogWarning("Signal {Signal} for unknown instance {Id}", signal, instanceId);
             return;
         }
-        if (instance.State is WorkflowState.Completed or WorkflowState.Expired or WorkflowState.Failed)
-            return;
+        if (IsTerminal(instance.State)) return;
 
-        var def = await LoadSpecAsync(instance.DefinitionId, ct);
-        if (!def.Spec.Steps.TryGetValue(instance.CurrentStep, out var step)) return;
-
-        if (!step.OnSignal.TryGetValue(signal, out var next))
+        // Claim the lease before touching the instance — if a tick (or another
+        // signal) is mid-processing, skip rather than double-advance. The
+        // timeout path is the backstop for a signal dropped under contention.
+        if (!await TryClaimAsync(instanceId, ct))
         {
-            _log.LogDebug("Signal {Signal} not handled by step {Step}", signal, instance.CurrentStep);
+            _log.LogDebug("Signal {Signal}: instance {Id} is busy — skipped.", signal, instanceId);
             return;
         }
+        try
+        {
+            // Re-read: a concurrent pass may have advanced the step between the
+            // initial Find and the moment the lease was won.
+            await _db.Entry(instance).ReloadAsync(ct);
+            if (IsTerminal(instance.State)) return;
 
-        await TransitionAsync(instance, next, signal, ct);
-        await ExecuteStepAsync(instance, def.Spec, ct);
+            var def = await LoadSpecAsync(instance.DefinitionId, ct);
+            if (!def.Spec.Steps.TryGetValue(instance.CurrentStep, out var step)) return;
+
+            if (!step.OnSignal.TryGetValue(signal, out var next))
+            {
+                _log.LogDebug("Signal {Signal} not handled by step {Step}", signal, instance.CurrentStep);
+                return;
+            }
+
+            await TransitionAsync(instance, next, signal, ct);
+            await ExecuteStepAsync(instance, def.Spec, ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Signal {Signal} processing failed for instance {Id}", signal, instanceId);
+        }
+        finally
+        {
+            await ReleaseAsync(instanceId, ct);
+        }
+    }
+
+    private static bool IsTerminal(WorkflowState s) =>
+        s is WorkflowState.Completed or WorkflowState.Expired or WorkflowState.Failed;
+
+    /// <summary>Atomically take the processing lease. Returns false when another
+    /// pass holds a live lease.</summary>
+    private async Task<bool> TryClaimAsync(Guid instanceId, CancellationToken ct)
+    {
+        var now = _clock.GetUtcNow();
+        var until = now.Add(LeaseDuration);
+        var claimed = await _db.WorkflowInstances
+            .Where(i => i.Id == instanceId
+                        && (i.ProcessingLockedUntil == null || i.ProcessingLockedUntil < now))
+            .ExecuteUpdateAsync(s => s.SetProperty(i => i.ProcessingLockedUntil, until), ct);
+        return claimed == 1;
+    }
+
+    private async Task ReleaseAsync(Guid instanceId, CancellationToken ct)
+    {
+        try
+        {
+            await _db.WorkflowInstances
+                .Where(i => i.Id == instanceId)
+                .ExecuteUpdateAsync(s => s.SetProperty(
+                    i => i.ProcessingLockedUntil, (DateTimeOffset?)null), ct);
+        }
+        catch (Exception ex)
+        {
+            // A stale lease just expires on its own — never let release failure
+            // mask the real outcome of the step.
+            _log.LogWarning(ex, "Failed to release workflow lease for {Id}", instanceId);
+        }
     }
 
     public async Task TickAsync(CancellationToken ct = default)
@@ -118,20 +188,41 @@ public sealed class WorkflowEngine : IWorkflowEngine
                         && i.State != WorkflowState.Expired
                         && i.State != WorkflowState.Failed)
             .ToListAsync(ct);
+
+        // Only the instances THIS tick actually expired (a concurrent signal
+        // may have claimed some) feed the notification roll-up.
+        var expiredHere = new List<WorkflowInstance>();
         foreach (var inst in expired)
-            await TransitionAsync(inst, "__expired__", "expiration", ct, WorkflowState.Expired);
+        {
+            if (!await TryClaimAsync(inst.Id, ct)) continue;
+            try
+            {
+                await _db.Entry(inst).ReloadAsync(ct);
+                if (IsTerminal(inst.State)) continue;
+                await TransitionAsync(inst, "__expired__", "expiration", ct, WorkflowState.Expired);
+                expiredHere.Add(inst);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Workflow expire failed for instance {Id}", inst.Id);
+            }
+            finally
+            {
+                await ReleaseAsync(inst.Id, ct);
+            }
+        }
 
         // Notify project members in bulk so the Workflows tab badge update
         // shows up live. One toast per project (not per instance) so a tick
         // that expires 1000 rows doesn't fire 1000 toasts.
-        if (expired.Count > 0)
+        if (expiredHere.Count > 0)
         {
             var byProject = await _db.WorkflowDefinitions
-                .Where(d => expired.Select(e => e.DefinitionId).Contains(d.Id))
+                .Where(d => expiredHere.Select(e => e.DefinitionId).Contains(d.Id))
                 .Select(d => new { d.Id, d.ProjectId })
                 .ToListAsync(ct);
             var projMap = byProject.ToDictionary(x => x.Id, x => x.ProjectId);
-            var perProject = expired
+            var perProject = expiredHere
                 .GroupBy(e => projMap.GetValueOrDefault(e.DefinitionId))
                 .Where(g => g.Key != Guid.Empty);
             foreach (var g in perProject)
@@ -153,35 +244,73 @@ public sealed class WorkflowEngine : IWorkflowEngine
 
         foreach (var inst in due)
         {
-            var def = await LoadSpecAsync(inst.DefinitionId, ct);
-            if (!def.Spec.Steps.TryGetValue(inst.CurrentStep, out var step) || step.OnTimeout is null)
-                continue;
-
-            // StepRepeatCount = how many times this step has executed (the
-            // initial run + each timeout re-run). It reaches MaxRepeats after
-            // exactly MaxRepeats executions, so the guard is a plain >= with
-            // no +1 — the previous "+1 >=" stopped one send early. Only
-            // applies to a self-loop (OnTimeout == current step); a timeout
-            // pointing at a DIFFERENT step is a one-way transition and the
-            // target step enforces its own MaxRepeats.
-            if (inst.StepRepeatCount >= step.MaxRepeats && step.OnTimeout == inst.CurrentStep)
+            if (!await TryClaimAsync(inst.Id, ct)) continue;
+            try
             {
-                // Reminders exhausted — let expiry handle final state.
-                inst.NextCheckAt = null;
-                await _db.SaveChangesAsync(ct);
-                continue;
-            }
+                // Re-read under the lease: a signal may have advanced this
+                // instance between the query above and the lease being won.
+                await _db.Entry(inst).ReloadAsync(ct);
+                if (inst.NextCheckAt is null || inst.NextCheckAt > now) continue;
+                if (inst.State is not (WorkflowState.AwaitingAction or WorkflowState.ReminderDue))
+                    continue;
 
-            await TransitionAsync(inst, step.OnTimeout, "timeout", ct);
-            await ExecuteStepAsync(inst, def.Spec, ct);
+                var def = await LoadSpecAsync(inst.DefinitionId, ct);
+                if (!def.Spec.Steps.TryGetValue(inst.CurrentStep, out var step) || step.OnTimeout is null)
+                    continue;
+
+                // StepRepeatCount = how many times this step has executed (the
+                // initial run + each timeout re-run). It reaches MaxRepeats after
+                // exactly MaxRepeats executions, so the guard is a plain >= with
+                // no +1 — the previous "+1 >=" stopped one send early. Only
+                // applies to a self-loop (OnTimeout == current step); a timeout
+                // pointing at a DIFFERENT step is a one-way transition and the
+                // target step enforces its own MaxRepeats.
+                if (inst.StepRepeatCount >= step.MaxRepeats && step.OnTimeout == inst.CurrentStep)
+                {
+                    // Reminders exhausted — let expiry handle final state.
+                    inst.NextCheckAt = null;
+                    await _db.SaveChangesAsync(ct);
+                    continue;
+                }
+
+                await TransitionAsync(inst, step.OnTimeout, "timeout", ct);
+                await ExecuteStepAsync(inst, def.Spec, ct);
+            }
+            catch (Exception ex)
+            {
+                // Isolate failures — one bad instance must not abort the batch.
+                _log.LogError(ex, "Workflow tick failed for instance {Id}", inst.Id);
+            }
+            finally
+            {
+                await ReleaseAsync(inst.Id, ct);
+            }
         }
     }
 
     // ---------------- internal ----------------
 
-    private async Task ExecuteStepAsync(WorkflowInstance instance, WorkflowSpec spec, CancellationToken ct)
+    private async Task ExecuteStepAsync(
+        WorkflowInstance instance, WorkflowSpec spec, CancellationToken ct, int depth = 0)
     {
-        if (!spec.Steps.TryGetValue(instance.CurrentStep, out var step)) return;
+        if (depth > MaxStepDepth)
+        {
+            // A pass-through (issue_coupon) chain that loops back on itself —
+            // fail loud instead of overflowing the stack.
+            _log.LogError(
+                "Workflow instance {Id} exceeded step depth {Depth} — failing (cyclic spec?).",
+                instance.Id, MaxStepDepth);
+            await FailAsync(instance, ct);
+            return;
+        }
+
+        if (!spec.Steps.TryGetValue(instance.CurrentStep, out var step))
+        {
+            _log.LogError("Workflow instance {Id}: step '{Step}' not found in spec — failing.",
+                instance.Id, instance.CurrentStep);
+            await FailAsync(instance, ct);
+            return;
+        }
 
         var payload = JsonSerializer.Deserialize<Dictionary<string, string>>(
             _crypto.Decrypt(instance.EncryptedPayload), JsonOpts) ?? new();
@@ -226,7 +355,9 @@ public sealed class WorkflowEngine : IWorkflowEngine
                         $"{instance.Id:N}:{instance.CurrentStep}:{instance.StepRepeatCount}"), ct);
 
                 instance.State = WorkflowState.AwaitingAction;
-                instance.NextCheckAt = step.Wait is { } sendWait ? _clock.GetUtcNow().Add(sendWait) : null;
+                instance.NextCheckAt = step.Wait is { } sendWait
+                    ? ScheduleAnchor(instance.NextCheckAt).Add(sendWait)
+                    : null;
                 instance.StepRepeatCount++;
                 await _db.SaveChangesAsync(ct);
                 break;
@@ -262,7 +393,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
                 if (step.OnTimeout is { } nextStep && spec.Steps.ContainsKey(nextStep))
                 {
                     await TransitionAsync(instance, nextStep, "coupon_issued", ct);
-                    await ExecuteStepAsync(instance, spec, ct);
+                    await ExecuteStepAsync(instance, spec, ct, depth + 1);
                 }
                 else
                 {
@@ -276,7 +407,9 @@ public sealed class WorkflowEngine : IWorkflowEngine
             }
             case "wait":
                 instance.State = WorkflowState.AwaitingAction;
-                instance.NextCheckAt = step.Wait is { } waitDur ? _clock.GetUtcNow().Add(waitDur) : null;
+                instance.NextCheckAt = step.Wait is { } waitDur
+                    ? ScheduleAnchor(instance.NextCheckAt).Add(waitDur)
+                    : null;
                 // Count this execution too — without it a self-looping wait
                 // step (OnTimeout = itself) never advances StepRepeatCount and
                 // the MaxRepeats guard in TickAsync can never terminate it.
@@ -289,7 +422,31 @@ public sealed class WorkflowEngine : IWorkflowEngine
                 instance.NextCheckAt = null;
                 await _db.SaveChangesAsync(ct);
                 break;
+
+            default:
+                // Unknown step type — fail rather than silently stranding the
+                // instance in Dispatching, invisible to the tick forever.
+                _log.LogError("Workflow instance {Id}: unknown step type '{Type}' — failing.",
+                    instance.Id, step.Type);
+                await FailAsync(instance, ct);
+                break;
         }
+    }
+
+    /// <summary>Anchor the next wait to the time the current timer was DUE (so a
+    /// drip cadence never drifts and a missed tick catches up). A timer still in
+    /// the future means a signal superseded the step — anchor to now instead.</summary>
+    private DateTimeOffset ScheduleAnchor(DateTimeOffset? pendingCheck)
+    {
+        var now = _clock.GetUtcNow();
+        return pendingCheck is { } p && p <= now ? p : now;
+    }
+
+    private async Task FailAsync(WorkflowInstance instance, CancellationToken ct)
+    {
+        instance.State = WorkflowState.Failed;
+        instance.NextCheckAt = null;
+        await _db.SaveChangesAsync(ct);
     }
 
     private async Task<string> ReplaceUrlsWithShortlinksAsync(
@@ -390,6 +547,10 @@ public sealed class WorkflowEngine : IWorkflowEngine
         var s = template;
         foreach (var kv in data)
             s = s.Replace("{{" + kv.Key + "}}", kv.Value, StringComparison.OrdinalIgnoreCase);
+        // Strip any placeholder left unresolved — e.g. {{coupon_url}} when a
+        // coupon batch was exhausted. Sending the customer a literal "{{...}}"
+        // is worse than sending the message without it.
+        s = UnresolvedPlaceholder.Replace(s, string.Empty);
         return s;
     }
 }

@@ -207,6 +207,27 @@ public sealed class WorkflowDefinitionsController : ControllerBase
                 { error = $"Step '{name}' OnTimeout targets unknown step '{t}'."; return false; }
             }
 
+            // Reject multi-step OnTimeout cycles. OnTimeout edges auto-advance
+            // with no user action, so a 2-step loop (A→B→A) reminds forever —
+            // the MaxRepeats guard only ever catches a single-step self-loop.
+            // Repeated reminders must be modelled as one self-looping step.
+            foreach (var start in parsed.Steps.Keys)
+            {
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                var cur = start;
+                while (parsed.Steps.TryGetValue(cur, out var s) && s.OnTimeout is { } next)
+                {
+                    if (next == cur) break;            // self-loop — bounded by MaxRepeats
+                    if (!seen.Add(cur) || seen.Contains(next))
+                    {
+                        error = $"OnTimeout transitions form a cycle through step '{next}'. "
+                              + "Model repeated reminders as a single self-looping step with MaxRepeats.";
+                        return false;
+                    }
+                    cur = next;
+                }
+            }
+
             error = null;
             return true;
         }

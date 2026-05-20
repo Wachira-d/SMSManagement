@@ -31,6 +31,13 @@ public sealed class WorkflowInstance
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? NextCheckAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
+
+    /// <summary>Coarse processing lease. A tick or signal claims the instance by
+    /// setting this to a short future time before touching it; a second pass sees
+    /// the live lease and skips, so the same instance is never processed (and
+    /// never double-sent) concurrently. A crash leaves a stale lease that simply
+    /// expires, so the row is never permanently stuck.</summary>
+    public DateTimeOffset? ProcessingLockedUntil { get; set; }
 }
 
 public sealed class WorkflowTransition

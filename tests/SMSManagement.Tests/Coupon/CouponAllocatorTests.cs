@@ -61,6 +61,24 @@ public sealed class CouponAllocatorTests
     }
 
     [Fact]
+    public async Task Expired_batch_allocates_nothing()
+    {
+        using var f = new CouponFixture();
+        var (projectId, _, batchId, _) = f.Seed(3);
+        // Push the batch's expiry into the past — a coupon dead on arrival
+        // must not be handed to a customer.
+        var batch = await f.Db.CouponBatches.IgnoreQueryFilters().FirstAsync(b => b.Id == batchId);
+        batch.ExpiresAt = f.Clock.Now.AddDays(-1);
+        await f.Db.SaveChangesAsync();
+
+        var result = await Build(f).AllocateAsync(batchId, f.SeedWorkflowInstance(projectId));
+
+        result.Should().BeNull();
+        (await f.Db.Coupons.IgnoreQueryFilters().AsNoTracking()
+            .CountAsync(c => c.Status == CouponStatus.Allocated)).Should().Be(0);
+    }
+
+    [Fact]
     public async Task Shared_domain_url_uses_running_number()
     {
         using var f = new CouponFixture();
