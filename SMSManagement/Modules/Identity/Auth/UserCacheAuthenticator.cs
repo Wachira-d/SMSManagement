@@ -63,7 +63,13 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
         var cached = await LoadCacheAsync(username, ct);
         var cacheLoadMs = sw.ElapsedMilliseconds;
 
-        // 1. Lockout (independent of the upstream IdP)
+        // 1. Disabled accounts reject first — before any state mutation. A
+        //    disabled account must not have its lockout silently cleared as a
+        //    side effect of a (rejected) login attempt.
+        if (cached is { IsEnabled: false })
+            return Reject(AuthOutcome.AccountDisabled, "Account is disabled.");
+
+        // 2. Lockout (independent of the upstream IdP).
         if (cached is { IsLocked: true } && StillLocked(cached))
         {
             await Audit(username, "auth.locked", cached, ct);
@@ -77,9 +83,6 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
             cached.FailedAttempts = 0;
             await _db.SaveChangesAsync(ct);
         }
-
-        if (cached is { IsEnabled: false })
-            return Reject(AuthOutcome.AccountDisabled, "Account is disabled.");
 
         // 2. Cache hit + fresh + hash matches → skip the API entirely.
         var isFresh = cached is not null && IsFresh(cached);

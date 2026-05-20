@@ -154,7 +154,14 @@ public sealed class WorkflowEngine : IWorkflowEngine
             if (!def.Spec.Steps.TryGetValue(inst.CurrentStep, out var step) || step.OnTimeout is null)
                 continue;
 
-            if (inst.StepRepeatCount + 1 >= step.MaxRepeats && step.OnTimeout == inst.CurrentStep)
+            // StepRepeatCount = how many times this step has executed (the
+            // initial run + each timeout re-run). It reaches MaxRepeats after
+            // exactly MaxRepeats executions, so the guard is a plain >= with
+            // no +1 — the previous "+1 >=" stopped one send early. Only
+            // applies to a self-loop (OnTimeout == current step); a timeout
+            // pointing at a DIFFERENT step is a one-way transition and the
+            // target step enforces its own MaxRepeats.
+            if (inst.StepRepeatCount >= step.MaxRepeats && step.OnTimeout == inst.CurrentStep)
             {
                 // Reminders exhausted — let expiry handle final state.
                 inst.NextCheckAt = null;
@@ -224,6 +231,10 @@ public sealed class WorkflowEngine : IWorkflowEngine
             case "wait":
                 instance.State = WorkflowState.AwaitingAction;
                 instance.NextCheckAt = step.Wait is { } waitDur ? _clock.GetUtcNow().Add(waitDur) : null;
+                // Count this execution too — without it a self-looping wait
+                // step (OnTimeout = itself) never advances StepRepeatCount and
+                // the MaxRepeats guard in TickAsync can never terminate it.
+                instance.StepRepeatCount++;
                 await _db.SaveChangesAsync(ct);
                 break;
 

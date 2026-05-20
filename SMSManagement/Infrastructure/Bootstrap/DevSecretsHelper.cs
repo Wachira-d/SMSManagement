@@ -184,9 +184,31 @@ public static class StartupSecretsCheck
             .Where(s => string.IsNullOrWhiteSpace(config[s.Key]))
             .ToList();
 
-        if (missing.Count == 0)
+        // Format check — a present-but-malformed secret is worse than a
+        // missing one: the JWT signing key, for instance, is only length-
+        // validated lazily at first token issuance, so a too-short key would
+        // otherwise blow up mid-request instead of at startup. Validate every
+        // Base64Bytes32 secret decodes to >= 32 bytes here, fail-loud.
+        var malformed = new List<string>();
+        foreach (var s in DevSecretsHelper.RequiredSecrets
+                     .Where(s => s.Kind == DevSecretsHelper.SecretKind.Base64Bytes32))
         {
-            log.LogInformation("Secrets: all {Count} required secrets configured.",
+            var raw = config[s.Key];
+            if (string.IsNullOrWhiteSpace(raw)) continue; // already in `missing`
+            try
+            {
+                if (Convert.FromBase64String(raw).Length < 32)
+                    malformed.Add($"{s.Key}  ({s.Description}) — decodes to fewer than 32 bytes");
+            }
+            catch (FormatException)
+            {
+                malformed.Add($"{s.Key}  ({s.Description}) — not valid Base64");
+            }
+        }
+
+        if (missing.Count == 0 && malformed.Count == 0)
+        {
+            log.LogInformation("Secrets: all {Count} required secrets configured and well-formed.",
                 DevSecretsHelper.RequiredSecrets.Count);
             return;
         }
@@ -198,8 +220,11 @@ public static class StartupSecretsCheck
             : "Inject from Key Vault / AWS Secrets Manager via environment variables " +
               "(e.g. UserCacheAuth__PasswordSalt=…). NEVER commit secrets to appsettings.json.";
 
-        var list = string.Join("\n  - ", missing.Select(s => $"{s.Key}  ({s.Description})"));
-        var msg = $"Required secrets are not configured:\n  - {list}\n\nHINT: {hint}";
+        var problems = missing.Select(s => $"{s.Key}  ({s.Description}) — not set")
+            .Concat(malformed)
+            .ToList();
+        var list = string.Join("\n  - ", problems);
+        var msg = $"Required secrets are not usable:\n  - {list}\n\nHINT: {hint}";
 
         log.LogCritical(msg);
         throw new InvalidOperationException(msg);

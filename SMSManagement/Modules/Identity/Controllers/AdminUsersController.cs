@@ -350,12 +350,18 @@ public sealed class AdminUsersController : ControllerBase
                 case "enable":
                     u.Status = "Active";
                     if (cache is not null) cache.IsEnabled = true;
-                    results.Add(new { id = u.Id, ok = true, action = act });
+                    // partial=true when there's no cache row: the Users.Status
+                    // flipped but the login-state flag (cache.IsEnabled) didn't,
+                    // because the user has never logged in. The caller should
+                    // not be told the action fully succeeded.
+                    results.Add(new { id = u.Id, ok = true, action = act,
+                                      partial = cache is null });
                     break;
                 case "disable":
                     u.Status = "Suspended";
                     if (cache is not null) cache.IsEnabled = false;
-                    results.Add(new { id = u.Id, ok = true, action = act });
+                    results.Add(new { id = u.Id, ok = true, action = act,
+                                      partial = cache is null });
                     break;
                 case "unlock":
                     if (cache is null)
