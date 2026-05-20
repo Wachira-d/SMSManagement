@@ -102,6 +102,7 @@ document.querySelectorAll('[data-bs-toggle="tab"]').forEach(el => {
             case '#tab-sources':    if (!loaded.sources)    { loaded.sources    = true; loadSources(); loadBatches(); } break;
             case '#tab-workflows':  if (!loaded.workflows)  { loaded.workflows  = true; loadWorkflows(); loadWfInstances(); } break;
             case '#tab-shortlinks': if (!loaded.shortlinks) { loaded.shortlinks = true; loadShortlinks(); } break;
+            case '#tab-coupons':    if (!loaded.coupons)    { loaded.coupons    = true; loadCouponBrands(); loadCouponBatches(); } break;
             case '#tab-sms':        if (!loaded.sms)        { loaded.sms        = true; loadSmsList(); loadProviderConfig('etracker'); loadProviderConfig('infobip'); } break;
         }
     });
@@ -2253,4 +2254,142 @@ document.getElementById('btnIbClear').addEventListener('click', async () => {
         toast('Override removed.');
         await loadProviderConfig('infobip');
     } catch (e) { toast(e.message, 'danger'); }
+});
+
+// ==================== COUPONS ====================
+async function loadCouponBrands() {
+    try {
+        const rows = await api.get(`${api_proj}/coupons/brands`);
+        const body = document.getElementById('cpnBrandBody');
+        const sel  = document.getElementById('cpnImpBrand');
+        sel.innerHTML = '<option value="">— pick a brand —</option>';
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="3" class="text-muted text-center py-3">'
+                + 'No brands yet. Click + New to add Lotus / Central / etc.</td></tr>';
+        } else {
+            body.innerHTML = rows.map(b => `
+                <tr>
+                    <td><span class="badge" style="background:${esc(b.themeColor)}">${esc(b.displayName)}</span>
+                        ${b.enabled ? '' : '<span class="text-muted small ms-1">(off)</span>'}</td>
+                    <td class="small">${esc(b.barcodeFormat)}</td>
+                    <td class="text-end">
+                        <button class="btn btn-link btn-sm p-0" onclick='editCpnBrand(${JSON.stringify(b).replace(/'/g,"&apos;")})'>Edit</button>
+                        <button class="btn btn-link btn-sm p-0 text-danger ms-1" onclick="deleteCpnBrand('${esc(b.id)}')">Del</button>
+                    </td>
+                </tr>`).join('');
+        }
+        rows.filter(b => b.enabled).forEach(b =>
+            sel.insertAdjacentHTML('beforeend', `<option value="${esc(b.id)}">${esc(b.displayName)}</option>`));
+    } catch (e) { toast(e.message, 'danger'); }
+}
+
+document.getElementById('btnCpnBrandNew').addEventListener('click', () => {
+    document.getElementById('cpnBrandEditor').style.display = '';
+    document.getElementById('formCpnBrand').reset();
+    document.getElementById('cpnBrandId').value = '';
+    document.getElementById('cpnBrandColor').value = '#0066cc';
+    document.getElementById('cpnBrandEnabled').checked = true;
+});
+document.getElementById('btnCpnBrandCancel').addEventListener('click', () =>
+    document.getElementById('cpnBrandEditor').style.display = 'none');
+
+window.editCpnBrand = function (b) {
+    document.getElementById('cpnBrandEditor').style.display = '';
+    document.getElementById('cpnBrandId').value      = b.id;
+    document.getElementById('cpnBrandName').value    = b.name;
+    document.getElementById('cpnBrandDisplay').value = b.displayName;
+    document.getElementById('cpnBrandLogo').value    = b.logoUrl || '';
+    document.getElementById('cpnBrandColor').value   = b.themeColor || '#0066cc';
+    document.getElementById('cpnBrandBarcode').value = b.barcodeFormat || 'code128';
+    document.getElementById('cpnBrandInstr').value   = b.redemptionInstructions || '';
+    document.getElementById('cpnBrandEnabled').checked = !!b.enabled;
+};
+
+window.deleteCpnBrand = async function (id) {
+    if (!confirm('Delete this brand?')) return;
+    try {
+        await api.delete(`${api_proj}/coupons/brands/${id}`);
+        toast('Brand deleted.');
+        loadCouponBrands();
+    } catch (e) { toast(e.message, 'danger'); }
+};
+
+document.getElementById('formCpnBrand').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const idVal = document.getElementById('cpnBrandId').value;
+    try {
+        await api.put(`${api_proj}/coupons/brands`, {
+            id:                     idVal || null,
+            name:                   document.getElementById('cpnBrandName').value.trim(),
+            displayName:            document.getElementById('cpnBrandDisplay').value.trim(),
+            logoUrl:                document.getElementById('cpnBrandLogo').value.trim() || null,
+            themeColor:             document.getElementById('cpnBrandColor').value,
+            redemptionInstructions: document.getElementById('cpnBrandInstr').value.trim() || null,
+            barcodeFormat:          document.getElementById('cpnBrandBarcode').value,
+            enabled:                document.getElementById('cpnBrandEnabled').checked
+        });
+        toast('Brand saved.');
+        document.getElementById('cpnBrandEditor').style.display = 'none';
+        loadCouponBrands();
+    } catch (e) { toast(e.message, 'danger'); }
+});
+
+async function loadCouponBatches() {
+    try {
+        const rows = await api.get(`${api_proj}/coupons/batches`);
+        const body = document.getElementById('cpnBatchBody');
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-3">'
+                + 'No batches imported yet.</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(b => `
+            <tr>
+                <td>${esc(b.name)}</td>
+                <td class="small">${esc(b.brandName)}</td>
+                <td class="text-end">${b.totalCount}</td>
+                <td class="text-end">${b.allocatedCount}</td>
+                <td class="text-end text-success">${b.redeemedCount}</td>
+            </tr>`).join('');
+    } catch (e) { toast(e.message, 'danger'); }
+}
+
+document.getElementById('formCpnImport').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData();
+    fd.append('brandId',   document.getElementById('cpnImpBrand').value);
+    fd.append('batchName', document.getElementById('cpnImpName').value.trim());
+    fd.append('value',     document.getElementById('cpnImpValue').value);
+    const exp = document.getElementById('cpnImpExpiry').value;
+    if (exp) fd.append('expiresAt', new Date(exp).toISOString());
+    fd.append('tokenLength',   document.getElementById('cpnImpTokenLen').value || '10');
+    fd.append('tokenAlphabet', document.getElementById('cpnImpAlpha').value.trim());
+    const col = document.getElementById('cpnImpCol').value.trim();
+    if (col) fd.append('codeColumn', col);
+    const file = document.getElementById('cpnImpFile').files[0];
+    if (!file) { toast('Pick a file.', 'warning'); return; }
+    fd.append('file', file);
+
+    const out = document.getElementById('cpnImportResult');
+    out.innerHTML = '<div class="text-muted small">Importing…</div>';
+    try {
+        const resp = await fetch(`${api_proj}/coupons/import`, {
+            method: 'POST', body: fd, credentials: 'include'
+        });
+        const d = await resp.json();
+        if (!resp.ok) { out.innerHTML = `<div class="text-danger small">${esc(d.message || 'Import failed')}</div>`; return; }
+        let html = `<div class="alert alert-${d.rejected ? 'warning' : 'success'} small mb-1">
+            Imported <strong>${d.accepted}</strong> · rejected <strong>${d.rejected}</strong></div>`;
+        if (d.rejections && d.rejections.length) {
+            html += `<details><summary class="small text-danger">View ${d.rejections.length} rejection(s)</summary>
+                <table class="table table-sm small mt-1"><thead><tr><th>Row</th><th>Code</th><th>Reason</th></tr></thead>
+                <tbody>${d.rejections.map(r => `<tr><td>${r.rowIndex}</td>
+                    <td><code>${esc(r.code)}</code></td><td>${esc(r.reason)}</td></tr>`).join('')}</tbody></table></details>`;
+        }
+        out.innerHTML = html;
+        document.getElementById('formCpnImport').reset();
+        document.getElementById('cpnImpTokenLen').value = '10';
+        document.getElementById('cpnImpAlpha').value = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        loadCouponBatches();
+    } catch (e) { out.innerHTML = `<div class="text-danger small">${esc(e.message)}</div>`; }
 });

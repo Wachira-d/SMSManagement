@@ -23,6 +23,7 @@
     <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-workflows">@Loc.Get("tab.workflows")</a></li>
     <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-sms">@Loc.Get("tab.sms")</a></li>
     <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-shortlinks">@Loc.Get("tab.shortlinks")</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-coupons">Coupons</a></li>
     <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-reports">@Loc.Get("tab.reports")</a></li>
     <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-audit">@Loc.Get("tab.audit")</a></li>
 </ul>
@@ -1132,6 +1133,109 @@ Other SFTP keys: <code>host, port, username, privateKeyPem, remoteDirectory</cod
                             <button type="submit" class="btn btn-primary btn-sm">Create</button>
                         </form>
                         <div id="slCreated" class="mt-3"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ COUPONS ============ -->
+    <div class="tab-pane fade" id="tab-coupons">
+        <div class="alert alert-info small">
+            <i class="bi bi-ticket-perforated"></i>
+            Import real brand coupon codes; the system mints a unique public token per
+            coupon for the redeem link. A workflow's <code>issue_coupon</code> step hands one
+            coupon per recipient and exposes <code>{{coupon_url}}</code> / <code>{{coupon_code}}</code>
+            to the SMS template.
+        </div>
+        <div class="row g-3">
+            <!-- Brands -->
+            <div class="col-md-5">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Brands</span>
+                        <button id="btnCpnBrandNew" class="btn btn-link btn-sm p-0">+ New</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead><tr><th>Brand</th><th>Barcode</th><th></th></tr></thead>
+                            <tbody id="cpnBrandBody"><tr><td colspan="3" class="text-muted">Loading…</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="cpnBrandEditor" class="card mt-2" style="display:none">
+                    <div class="card-header">Brand</div>
+                    <div class="card-body">
+                        <form id="formCpnBrand" class="row g-2">
+                            <input id="cpnBrandId" type="hidden" />
+                            <div class="col-6"><label class="form-label small">Key (lowercase)</label>
+                                <input id="cpnBrandName" class="form-control form-control-sm" placeholder="lotus" required /></div>
+                            <div class="col-6"><label class="form-label small">Display name</label>
+                                <input id="cpnBrandDisplay" class="form-control form-control-sm" placeholder="Lotus's" required /></div>
+                            <div class="col-12"><label class="form-label small">Logo URL</label>
+                                <input id="cpnBrandLogo" class="form-control form-control-sm" /></div>
+                            <div class="col-4"><label class="form-label small">Theme colour</label>
+                                <input id="cpnBrandColor" type="color" class="form-control form-control-sm form-control-color" value="#0066cc" /></div>
+                            <div class="col-8"><label class="form-label small">Barcode format</label>
+                                <select id="cpnBrandBarcode" class="form-select form-select-sm">
+                                    <option value="code128">Code 128 (POS)</option>
+                                    <option value="qr">QR code</option>
+                                </select></div>
+                            <div class="col-12"><label class="form-label small">Redemption instructions</label>
+                                <textarea id="cpnBrandInstr" class="form-control form-control-sm" rows="2"></textarea></div>
+                            <div class="col-12 form-check ms-2">
+                                <input id="cpnBrandEnabled" type="checkbox" class="form-check-input" checked />
+                                <label class="form-check-label small" for="cpnBrandEnabled">Enabled</label>
+                            </div>
+                            <div class="col-12">
+                                <button type="submit" class="btn btn-primary btn-sm">Save brand</button>
+                                <button type="button" id="btnCpnBrandCancel" class="btn btn-link btn-sm">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Import -->
+            <div class="col-md-7">
+                <div class="card">
+                    <div class="card-header">Import coupon batch</div>
+                    <div class="card-body">
+                        <form id="formCpnImport" class="row g-2">
+                            <div class="col-md-6"><label class="form-label small">Brand</label>
+                                <select id="cpnImpBrand" class="form-select form-select-sm" required></select></div>
+                            <div class="col-md-6"><label class="form-label small">Batch name</label>
+                                <input id="cpnImpName" class="form-control form-control-sm" required /></div>
+                            <div class="col-md-3"><label class="form-label small">Value (฿)</label>
+                                <input id="cpnImpValue" type="number" min="0" step="0.01" class="form-control form-control-sm" required /></div>
+                            <div class="col-md-5"><label class="form-label small">Expires at</label>
+                                <input id="cpnImpExpiry" type="datetime-local" class="form-control form-control-sm" /></div>
+                            <div class="col-md-2"><label class="form-label small">Token len</label>
+                                <input id="cpnImpTokenLen" type="number" min="4" max="32" value="10" class="form-control form-control-sm" /></div>
+                            <div class="col-md-2"><label class="form-label small">Code column</label>
+                                <input id="cpnImpCol" class="form-control form-control-sm" placeholder="(first)" /></div>
+                            <div class="col-12"><label class="form-label small">Token alphabet</label>
+                                <input id="cpnImpAlpha" class="form-control form-control-sm"
+                                       value="ABCDEFGHJKLMNPQRSTUVWXYZ23456789" /></div>
+                            <div class="col-12"><label class="form-label small">File (CSV / XLSX — real brand codes)</label>
+                                <input id="cpnImpFile" type="file" accept=".csv,.xlsx,.xls" class="form-control form-control-sm" required /></div>
+                            <div class="col-12">
+                                <button type="submit" class="btn btn-primary btn-sm">
+                                    <i class="bi bi-upload"></i> Import
+                                </button>
+                            </div>
+                        </form>
+                        <div id="cpnImportResult" class="mt-2"></div>
+                    </div>
+                </div>
+                <div class="card mt-2">
+                    <div class="card-header">Batches</div>
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead><tr><th>Name</th><th>Brand</th><th class="text-end">Total</th>
+                                <th class="text-end">Allocated</th><th class="text-end">Redeemed</th></tr></thead>
+                            <tbody id="cpnBatchBody"><tr><td colspan="5" class="text-muted">Loading…</td></tr></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
