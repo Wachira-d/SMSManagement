@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SMSManagement.Modules.Core.Logging;
 using SMSManagement.Modules.Core.Settings;
+using SMSManagement.Modules.Coupon.Domain;
 using SMSManagement.Modules.Identity.Domain;
 using SMSManagement.Modules.Identity.Services;
 using SMSManagement.Modules.Ingestion.Domain;
@@ -43,6 +44,11 @@ public sealed class AppDbContext : DbContext
 
     public DbSet<SmsMessage> SmsMessages => Set<SmsMessage>();
     public DbSet<ProjectSmsProviderConfig> ProjectSmsProviderConfigs => Set<ProjectSmsProviderConfig>();
+
+    public DbSet<CouponBrand> CouponBrands => Set<CouponBrand>();
+    public DbSet<CouponBatch> CouponBatches => Set<CouponBatch>();
+    public DbSet<Coupon> Coupons => Set<Coupon>();
+    public DbSet<CouponRedemption> CouponRedemptions => Set<CouponRedemption>();
 
     public DbSet<SMSManagement.Modules.Shortlink.Domain.Shortlink> Shortlinks =>
         Set<SMSManagement.Modules.Shortlink.Domain.Shortlink>();
@@ -181,6 +187,69 @@ public sealed class AppDbContext : DbContext
             e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
                 .OnDelete(DeleteBehavior.Restrict);
             e.HasQueryFilter(x => Projects.Any(p => p.Id == x.ProjectId));
+        });
+
+        // ---------- Coupon ----------
+        b.Entity<CouponBrand>(e =>
+        {
+            e.HasIndex(x => new { x.ProjectId, x.Name }).IsUnique();
+            e.Property(x => x.Name).HasMaxLength(64);
+            e.Property(x => x.DisplayName).HasMaxLength(128);
+            e.Property(x => x.LogoUrl).HasMaxLength(500);
+            e.Property(x => x.ThemeColor).HasMaxLength(16);
+            e.Property(x => x.BarcodeFormat).HasMaxLength(16);
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasQueryFilter(x => Projects.Any(p => p.Id == x.ProjectId));
+        });
+
+        b.Entity<CouponBatch>(e =>
+        {
+            e.HasIndex(x => new { x.ProjectId, x.Name }).IsUnique();
+            e.Property(x => x.Name).HasMaxLength(128);
+            e.Property(x => x.Value).HasColumnType("decimal(12,2)");
+            e.Property(x => x.TokenAlphabet).HasMaxLength(80);
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<CouponBrand>().WithMany().HasForeignKey(x => x.BrandId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasQueryFilter(x => Projects.Any(p => p.Id == x.ProjectId));
+        });
+
+        b.Entity<Coupon>(e =>
+        {
+            // Token unique PER PROJECT (it's our generated public URL value).
+            e.HasIndex(x => new { x.ProjectId, x.Token }).IsUnique();
+            // RealCodeHash unique SYSTEM-WIDE — a brand never reissues a code;
+            // the import duplicate-check relies on this constraint.
+            e.HasIndex(x => x.RealCodeHash).IsUnique();
+            e.HasIndex(x => x.BatchId);
+            e.HasIndex(x => x.WorkflowInstanceId);
+            e.HasIndex(x => new { x.Status, x.ExpiresAt });
+            e.Property(x => x.Token).HasMaxLength(64);
+            e.Property(x => x.RealCodeHash).HasMaxLength(64);
+            e.Property(x => x.Value).HasColumnType("decimal(12,2)");
+            e.Property(x => x.Status).HasConversion<int>();
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<CouponBatch>().WithMany().HasForeignKey(x => x.BatchId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<CouponBrand>().WithMany().HasForeignKey(x => x.BrandId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<WorkflowInstance>().WithMany().HasForeignKey(x => x.WorkflowInstanceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasQueryFilter(x => Projects.Any(p => p.Id == x.ProjectId));
+        });
+
+        b.Entity<CouponRedemption>(e =>
+        {
+            e.HasIndex(x => x.CouponId);
+            e.HasIndex(x => x.RedeemedAt);
+            e.Property(x => x.IpHash).HasMaxLength(64);
+            e.Property(x => x.UserAgent).HasMaxLength(500);
+            e.HasOne<Coupon>().WithMany().HasForeignKey(x => x.CouponId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasQueryFilter(x => Coupons.Any(c => c.Id == x.CouponId));
         });
 
         // ---------- Shortlink ----------
