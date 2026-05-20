@@ -214,6 +214,69 @@ public sealed class CouponsController : ControllerBase
         return Ok(rows);
     }
 
+    // ---------------- Redemption report ----------------
+
+    /// <summary>Project-wide redemption summary: status breakdown per batch plus
+    /// project totals and redemption rate. Counts come straight from the coupon
+    /// rows so they stay correct even if the batch counters ever drift.</summary>
+    [HttpGet("report")]
+    public async Task<IActionResult> RedemptionReport(Guid projectId, CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
+
+        var perStatus = await _db.Coupons.AsNoTracking()
+            .Where(c => c.ProjectId == projectId)
+            .GroupBy(c => new { c.BatchId, c.Status })
+            .Select(g => new { g.Key.BatchId, g.Key.Status, Count = g.Count() })
+            .ToListAsync(ct);
+
+        var batches = await (
+            from b in _db.CouponBatches.AsNoTracking().Where(x => x.ProjectId == projectId)
+            join br in _db.CouponBrands.AsNoTracking() on b.BrandId equals br.Id
+            orderby b.CreatedAt descending
+            select new { b.Id, b.Name, b.Value, b.ExpiresAt, b.CreatedAt, BrandName = br.DisplayName })
+            .ToListAsync(ct);
+
+        int Count(Guid batchId, CouponStatus s) =>
+            perStatus.FirstOrDefault(x => x.BatchId == batchId && x.Status == s)?.Count ?? 0;
+
+        var batchReports = batches.Select(b =>
+        {
+            int total = perStatus.Where(x => x.BatchId == b.Id).Sum(x => x.Count);
+            int redeemed = Count(b.Id, CouponStatus.Redeemed);
+            return new
+            {
+                b.Id, b.Name, b.BrandName, b.Value, b.ExpiresAt, b.CreatedAt,
+                Total = total,
+                Available = Count(b.Id, CouponStatus.Available),
+                Allocated = Count(b.Id, CouponStatus.Allocated),
+                Redeemed = redeemed,
+                Expired = Count(b.Id, CouponStatus.Expired),
+                Void = Count(b.Id, CouponStatus.Void),
+                RedemptionRate = total == 0 ? 0d : Math.Round((double)redeemed / total, 4)
+            };
+        }).ToList();
+
+        var grandTotal = batchReports.Sum(x => x.Total);
+        var grandRedeemed = batchReports.Sum(x => x.Redeemed);
+
+        return Ok(new
+        {
+            ProjectId = projectId,
+            Totals = new
+            {
+                Total = grandTotal,
+                Available = batchReports.Sum(x => x.Available),
+                Allocated = batchReports.Sum(x => x.Allocated),
+                Redeemed = grandRedeemed,
+                Expired = batchReports.Sum(x => x.Expired),
+                Void = batchReports.Sum(x => x.Void),
+                RedemptionRate = grandTotal == 0 ? 0d : Math.Round((double)grandRedeemed / grandTotal, 4)
+            },
+            Batches = batchReports
+        });
+    }
+
     /// <summary>Void an unredeemed coupon — terminal, can't be allocated/redeemed.</summary>
     [HttpPost("{couponId:guid}/void")]
     public async Task<IActionResult> Void(Guid projectId, Guid couponId, CancellationToken ct)
