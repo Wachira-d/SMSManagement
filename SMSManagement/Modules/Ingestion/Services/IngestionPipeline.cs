@@ -98,8 +98,29 @@ public sealed class IngestionPipeline : IIngestionPipeline
         _db.IngestionBatches.Add(batch);
         await _db.SaveChangesAsync(ct);
 
-        // 3) Read + map + dispatch
-        var (accepted, rejected, rejectionsJson) = await ProcessRowsAsync(projectId, batch.Id, filePath, ct);
+        // 3) Read + map + dispatch. If ProcessRowsAsync throws (bad workflow
+        //    JSON, decrypt failure, …) the batch must not be left stuck on
+        //    "Processing" — flip it to "Failed", persist, rethrow. Without this
+        //    a crashed run orphans a "Processing" row + its unique FileHash,
+        //    blocking a clean retry of the same file.
+        int accepted, rejected;
+        string? rejectionsJson;
+        try
+        {
+            (accepted, rejected, rejectionsJson) =
+                await ProcessRowsAsync(projectId, batch.Id, filePath, ct);
+        }
+        catch (Exception ex)
+        {
+            batch.Status = "Failed";
+            batch.RejectionsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                truncated = false, shown = 0, total = 0, fatal = ex.Message
+            });
+            await _db.SaveChangesAsync(CancellationToken.None);
+            await TryMoveAsync(filePath, settings.RejectedDirectory, ".rejected", CancellationToken.None);
+            throw;
+        }
 
         batch.TotalRows = accepted + rejected;
         batch.AcceptedRows = accepted;

@@ -44,8 +44,13 @@ public sealed class SmsDispatcher : ISmsDispatcher
     {
         var dedup = ComputeDedupKey(request);
 
+        // IgnoreQueryFilters: this is an internal idempotency check — it must
+        // see every row regardless of the caller's project scope (the engine
+        // can enqueue from an anonymous click-driven signal). DedupKey is
+        // globally unique so a hit is unambiguous.
         var existing = await _db.SmsMessages
             .AsNoTracking()
+            .IgnoreQueryFilters()
             .FirstOrDefaultAsync(m => m.DedupKey == dedup, ct)
             .ConfigureAwait(false);
 

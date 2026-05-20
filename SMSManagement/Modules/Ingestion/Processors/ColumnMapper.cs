@@ -54,8 +54,19 @@ public sealed partial class ColumnMapper
             {
                 if (!rawRow.TryGetValue(mapping.SourceColumn, out var value)) continue;
 
-                var chain = JsonSerializer.Deserialize<string[]>(mapping.TransformChainJson)
+                // Malformed TransformChainJson is a config error — treat as an
+                // empty chain rather than throwing, which would abort the whole
+                // batch on every row instead of just skipping the transforms.
+                string[] chain;
+                try
+                {
+                    chain = JsonSerializer.Deserialize<string[]>(mapping.TransformChainJson)
                             ?? Array.Empty<string>();
+                }
+                catch (JsonException)
+                {
+                    chain = Array.Empty<string>();
+                }
                 foreach (var transform in chain)
                     value = ApplyTransform(transform, value);
 

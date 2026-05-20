@@ -106,7 +106,13 @@ public sealed class DlrController : ControllerBase
         string provider, string providerMessageId, SmsStatus newStatus,
         string? errorCode, CancellationToken ct)
     {
+        // IgnoreQueryFilters: the DLR webhook is an anonymous (HMAC-verified)
+        // provider callback — it has no user context, so the project-scope
+        // filter on SmsMessage would hide every message and silently drop
+        // delivery receipts. Lookup is by provider + provider message id,
+        // which the provider only knows for messages we actually sent.
         var msg = await _db.SmsMessages
+            .IgnoreQueryFilters()
             .FirstOrDefaultAsync(m => m.Provider == provider
                                    && m.ProviderMessageId == providerMessageId, ct);
         if (msg is null)

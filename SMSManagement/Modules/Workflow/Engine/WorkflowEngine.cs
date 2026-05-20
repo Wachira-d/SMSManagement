@@ -248,8 +248,13 @@ public sealed class WorkflowEngine : IWorkflowEngine
         // Project-level toggle: when ShortlinkEnabled = false, leave URLs as
         // their original form (operator opted out — e.g. they're tracking
         // clicks via a third-party redirector and don't want a double-hop).
+        // IgnoreQueryFilters: the engine runs on behalf of the system, and
+        // ExecuteStepAsync can be driven by an anonymous shortlink click
+        // (SignalAsync) which has no project membership — the project-scope
+        // filter would otherwise hide the project and wrongly skip shortening.
         var projectId = await ProjectIdForAsync(instance.DefinitionId, ct);
         var shortlinkOn = await _db.Projects
+            .IgnoreQueryFilters()
             .Where(p => p.Id == projectId)
             .Select(p => p.ShortlinkEnabled)
             .FirstOrDefaultAsync(ct);

@@ -154,7 +154,12 @@ public sealed class ShortlinkService : IShortlinkService
         //     COLLATE Latin1_General_BIN2 (see AppDbContext comment).
         // Defence-in-depth: re-verify case after fetch so even on a
         // default-collation SQL Server the wrong-case slug is rejected.
+        // IgnoreQueryFilters: the public /s/{slug} redirect is hit by anyone —
+        // anonymous clickers have no project membership, so the project-scope
+        // filter on Shortlink would 404 every legitimate click. Resolution is
+        // intentionally cross-project; the slug itself is the capability.
         var candidate = await _db.Shortlinks
+            .IgnoreQueryFilters()
             .FirstOrDefaultAsync(s => s.Slug == slug, ct)
             .ConfigureAwait(false);
         if (candidate is null) return null;

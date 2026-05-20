@@ -75,7 +75,17 @@ public sealed class AppDbContext : DbContext
         });
 
         b.Entity<ColumnMapping>(e =>
-            e.HasIndex(x => new { x.ProjectId, x.SourceColumn }).IsUnique());
+        {
+            e.HasIndex(x => new { x.ProjectId, x.SourceColumn }).IsUnique();
+            // FK → Project. Restrict (never Cascade): the platform soft-deletes
+            // projects via ArchivedAt, so a project row is never hard-deleted;
+            // Restrict is the correct guard against an accidental hard delete.
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // Row-level scope filter — a child is visible iff its project is
+            // (Projects already carries the membership filter, so this composes).
+            e.HasQueryFilter(x => Projects.Any(p => p.Id == x.ProjectId));
+        });
 
         b.Entity<CanonicalFieldRule>(e =>
         {
@@ -87,12 +97,21 @@ public sealed class AppDbContext : DbContext
             e.Property(x => x.EndsWithAny).HasMaxLength(256);
             e.Property(x => x.Pattern).HasMaxLength(512);
             e.Property(x => x.AllowedValues).HasMaxLength(1024);
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasQueryFilter(x => Projects.Any(p => p.Id == x.ProjectId));
         });
 
         b.Entity<IngestionBatch>(e =>
         {
-            e.HasIndex(x => x.FileHash).IsUnique();
+            // Composite unique — the SAME file content is allowed in two
+            // different projects, and DuplicatePolicy.Reprocess can re-ingest
+            // it within one project (app-level dedup still applies per policy).
+            e.HasIndex(x => new { x.ProjectId, x.FileHash }).IsUnique();
             e.HasIndex(x => new { x.ProjectId, x.IngestedAt });
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasQueryFilter(x => Projects.Any(p => p.Id == x.ProjectId));
         });
 
         b.Entity<IngestionSourceSettings>(e =>
@@ -100,21 +119,42 @@ public sealed class AppDbContext : DbContext
             e.HasIndex(x => new { x.ProjectId, x.SourceType });
             e.Property(x => x.Action).HasConversion<int>();
             e.Property(x => x.DuplicatePolicy).HasConversion<int>();
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasQueryFilter(x => Projects.Any(p => p.Id == x.ProjectId));
         });
 
         // ---------- Workflow ----------
         b.Entity<WorkflowDefinition>(e =>
-            e.HasIndex(x => new { x.ProjectId, x.Name, x.Version }).IsUnique());
+        {
+            e.HasIndex(x => new { x.ProjectId, x.Name, x.Version }).IsUnique();
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasQueryFilter(x => Projects.Any(p => p.Id == x.ProjectId));
+        });
 
         b.Entity<WorkflowInstance>(e =>
         {
             e.HasIndex(x => new { x.State, x.NextCheckAt });
             e.HasIndex(x => x.ExpiresAt);
+            e.HasIndex(x => x.DefinitionId);
             e.Property(x => x.State).HasConversion<int>();
+            e.HasOne<WorkflowDefinition>().WithMany().HasForeignKey(x => x.DefinitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // Optional FK — instances created outside ingestion have no batch.
+            e.HasOne<IngestionBatch>().WithMany().HasForeignKey(x => x.IngestionBatchId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // Visible iff the owning definition (hence project) is visible.
+            e.HasQueryFilter(x => WorkflowDefinitions.Any(d => d.Id == x.DefinitionId));
         });
 
         b.Entity<WorkflowTransition>(e =>
-            e.HasIndex(x => new { x.InstanceId, x.At }));
+        {
+            e.HasIndex(x => new { x.InstanceId, x.At });
+            e.HasOne<WorkflowInstance>().WithMany().HasForeignKey(x => x.InstanceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasQueryFilter(x => WorkflowInstances.Any(i => i.Id == x.InstanceId));
+        });
 
         // ---------- SMS ----------
         b.Entity<SmsMessage>(e =>
@@ -122,8 +162,14 @@ public sealed class AppDbContext : DbContext
             e.HasIndex(x => x.DedupKey).IsUnique();
             e.HasIndex(x => new { x.Status, x.ScheduledFor });
             e.HasIndex(x => x.WorkflowInstanceId);
+            e.HasIndex(x => x.ProjectId);
             e.Property(x => x.Status).HasConversion<int>();
             e.Property(x => x.Priority).HasConversion<int>();
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<WorkflowInstance>().WithMany().HasForeignKey(x => x.WorkflowInstanceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasQueryFilter(x => Projects.Any(p => p.Id == x.ProjectId));
         });
 
         b.Entity<ProjectSmsProviderConfig>(e =>
@@ -132,6 +178,9 @@ public sealed class AppDbContext : DbContext
             // to match ISmsProvider.Name.
             e.HasIndex(x => new { x.ProjectId, x.Provider }).IsUnique();
             e.Property(x => x.Provider).HasMaxLength(32);
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasQueryFilter(x => Projects.Any(p => p.Id == x.ProjectId));
         });
 
         // ---------- Shortlink ----------
@@ -158,10 +207,22 @@ public sealed class AppDbContext : DbContext
             //   propagates into SQLite query generation, which then errors
             //   with "no such collation sequence" at runtime.
             e.Property(x => x.Slug).HasMaxLength(64);
+            e.HasIndex(x => x.ProjectId);
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<WorkflowInstance>().WithMany().HasForeignKey(x => x.WorkflowInstanceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasQueryFilter(x => Projects.Any(p => p.Id == x.ProjectId));
         });
 
         b.Entity<ShortlinkClick>(e =>
-            e.HasIndex(x => new { x.ShortlinkId, x.ClickedAt }));
+        {
+            e.HasIndex(x => new { x.ShortlinkId, x.ClickedAt });
+            e.HasOne<SMSManagement.Modules.Shortlink.Domain.Shortlink>()
+                .WithMany().HasForeignKey(x => x.ShortlinkId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasQueryFilter(x => Shortlinks.Any(s => s.Id == x.ShortlinkId));
+        });
 
         b.Entity<BlockedIp>(e =>
         {
@@ -206,6 +267,13 @@ public sealed class AppDbContext : DbContext
             e.HasIndex(x => new { x.ProjectId, x.UserId }).IsUnique();
             e.HasIndex(x => x.UserId);
             e.Property(x => x.AccessLevel).HasConversion<int>();
+            // ProjectMembership is intentionally NOT query-filtered — the
+            // Project filter itself reads ProjectMemberships to decide
+            // visibility, so filtering it would be circular.
+            e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         b.Entity<UserCache>(e =>
@@ -254,6 +322,8 @@ public sealed class AppDbContext : DbContext
             e.HasIndex(x => x.UserCacheId);
             e.Property(x => x.TokenHash).HasMaxLength(64);
             e.Property(x => x.RequestIp).HasMaxLength(64);
+            e.HasOne<UserCache>().WithMany().HasForeignKey(x => x.UserCacheId)
+                .OnDelete(DeleteBehavior.Cascade); // tokens are worthless once the cache row is gone
         });
 
         b.Entity<SystemSetting>(e =>
