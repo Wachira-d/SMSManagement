@@ -12,13 +12,18 @@ namespace SMSManagement.Modules.Coupon.Services;
 /// </summary>
 public interface ICouponRedeemer
 {
-    /// <summary>Look up a coupon for display (no state change). Null = not found.</summary>
-    Task<CouponView?> ResolveAsync(string token, CancellationToken ct = default);
+    /// <summary>
+    /// Look up a coupon for display (no state change). The redemption URL
+    /// carries BOTH the project code and the token because Token is only
+    /// unique per project — two projects can mint the same token, so the
+    /// project code disambiguates on a shared domain. Null = not found.
+    /// </summary>
+    Task<CouponView?> ResolveAsync(string projectCode, string token, CancellationToken ct = default);
 
     /// <summary>Atomically redeem. The outcome enum tells the caller exactly
     /// what happened so the page can show the right message.</summary>
-    Task<RedeemOutcome> RedeemAsync(string token, string? clientIp, string? userAgent,
-        CancellationToken ct = default);
+    Task<RedeemOutcome> RedeemAsync(string projectCode, string token,
+        string? clientIp, string? userAgent, CancellationToken ct = default);
 }
 
 /// <summary>Display projection — carries the real code ONLY once redeemed.</summary>
@@ -69,30 +74,39 @@ public sealed class CouponRedeemer : ICouponRedeemer
         _log = log;
     }
 
-    public async Task<CouponView?> ResolveAsync(string token, CancellationToken ct = default)
+    public async Task<CouponView?> ResolveAsync(
+        string projectCode, string token, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(token) || token.Length > 64) return null;
+        if (string.IsNullOrWhiteSpace(projectCode) || projectCode.Length > 64) return null;
 
         // IgnoreQueryFilters — the redemption page is public/anonymous, the
         // token itself is the capability (high-entropy random, not guessable).
+        // Scoped by Project.Code: Token is unique only WITHIN a project, so
+        // the URL must pin the project or two projects' coupons collide.
         var row = await (
             from c in _db.Coupons.IgnoreQueryFilters().AsNoTracking()
             join br in _db.CouponBrands.IgnoreQueryFilters().AsNoTracking()
                 on c.BrandId equals br.Id
-            where c.Token == token
-            select new { c, br }).FirstOrDefaultAsync(ct);
+            join p in _db.Projects.IgnoreQueryFilters().AsNoTracking()
+                on c.ProjectId equals p.Id
+            where p.Code == projectCode && c.Token == token
+            select new { c, br, p.Code }).FirstOrDefaultAsync(ct);
         if (row is null) return null;
-        // Case-sensitive guard (Token column may be on a CI collation).
-        if (!string.Equals(row.c.Token, token, StringComparison.Ordinal)) return null;
+        // Case-sensitive guard (Token / Code columns may be on a CI collation).
+        if (!string.Equals(row.c.Token, token, StringComparison.Ordinal)
+            || !string.Equals(row.Code, projectCode, StringComparison.Ordinal))
+            return null;
 
         return ToView(row.c, row.br,
             includeRealCode: row.c.Status == CouponStatus.Redeemed);
     }
 
     public async Task<RedeemOutcome> RedeemAsync(
-        string token, string? clientIp, string? userAgent, CancellationToken ct = default)
+        string projectCode, string token, string? clientIp, string? userAgent,
+        CancellationToken ct = default)
     {
-        var view = await ResolveAsync(token, ct);
+        var view = await ResolveAsync(projectCode, token, ct);
         if (view is null)
         {
             // Record the miss for the abuse tracker — a flood of bad tokens
@@ -130,7 +144,7 @@ public sealed class CouponRedeemer : ICouponRedeemer
         if (rows == 0)
         {
             // Lost the race (or it expired between resolve and update).
-            var fresh = await ResolveAsync(token, ct);
+            var fresh = await ResolveAsync(projectCode, token, ct);
             return new RedeemOutcome(
                 fresh?.Status == CouponStatus.Expired ? RedeemResult.Expired
                                                       : RedeemResult.AlreadyRedeemed,
@@ -153,7 +167,7 @@ public sealed class CouponRedeemer : ICouponRedeemer
         _log.LogInformation("Coupon redeemed token={Token} coupon={CouponId}", token, view.CouponId);
 
         // Re-resolve so the success view carries the now-decryptable real code.
-        var redeemed = await ResolveAsync(token, ct);
+        var redeemed = await ResolveAsync(projectCode, token, ct);
         return new RedeemOutcome(RedeemResult.Redeemed, redeemed);
     }
 

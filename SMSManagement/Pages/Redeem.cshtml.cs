@@ -35,10 +35,10 @@ public sealed class RedeemModel : PageModel
     public string? BarcodeSvg { get; private set; }
     public bool Blocked { get; private set; }
 
-    public async Task OnGetAsync(string token, CancellationToken ct)
+    public async Task OnGetAsync(string projectCode, string token, CancellationToken ct)
     {
         if (await IsBlockedAsync(ct)) { Blocked = true; return; }
-        Coupon = await _redeemer.ResolveAsync(token, ct);
+        Coupon = await _redeemer.ResolveAsync(projectCode, token, ct);
         if (Coupon is { Status: CouponStatus.Redeemed })
         {
             Outcome = RedeemResult.AlreadyRedeemed;
@@ -46,13 +46,13 @@ public sealed class RedeemModel : PageModel
         }
     }
 
-    public async Task<IActionResult> OnPostAsync(string token, CancellationToken ct)
+    public async Task<IActionResult> OnPostAsync(string projectCode, string token, CancellationToken ct)
     {
         if (await IsBlockedAsync(ct)) { Blocked = true; return Page(); }
 
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
         var ua = Request.Headers.UserAgent.ToString();
-        var result = await _redeemer.RedeemAsync(token, ip, ua, ct);
+        var result = await _redeemer.RedeemAsync(projectCode, token, ip, ua, ct);
         Outcome = result.Result;
         Coupon = result.Coupon;
 
