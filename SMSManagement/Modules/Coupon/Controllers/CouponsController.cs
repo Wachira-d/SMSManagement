@@ -63,8 +63,8 @@ public sealed class CouponsController : ControllerBase
             return BadRequest(new { Message = "Name and DisplayName are required." });
 
         var format = (req.BarcodeFormat ?? "code128").Trim().ToLowerInvariant();
-        if (format is not ("code128" or "qr" or "code39"))
-            return BadRequest(new { Message = "BarcodeFormat must be code128 / qr / code39." });
+        if (format is not ("code128" or "qr"))
+            return BadRequest(new { Message = "BarcodeFormat must be code128 or qr." });
 
         var name = req.Name.Trim().ToLowerInvariant();
         CouponBrand row;

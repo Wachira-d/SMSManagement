@@ -135,6 +135,10 @@ public static class ModuleRegistration
         // ---------- Coupon ----------
         services.AddScoped<Modules.Coupon.Services.ICouponImportService,
             Modules.Coupon.Services.CouponImportService>();
+        services.AddScoped<Modules.Coupon.Services.ICouponRedeemer,
+            Modules.Coupon.Services.CouponRedeemer>();
+        services.AddSingleton<Modules.Coupon.Services.IBarcodeService,
+            Modules.Coupon.Services.BarcodeService>();
 
         // ---------- Reporting ----------
         services.AddScoped<IReportingService, ReportingService>();
