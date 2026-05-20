@@ -1229,12 +1229,33 @@ Other SFTP keys: <code>host, port, username, privateKeyPem, remoteDirectory</cod
                     </div>
                 </div>
                 <div class="card mt-2">
-                    <div class="card-header">Batches</div>
+                    <div class="card-header">Batches <small class="text-muted">— click a row to view coupons</small></div>
                     <div class="table-responsive">
                         <table class="table table-sm mb-0">
                             <thead><tr><th>Name</th><th>Brand</th><th class="text-end">Total</th>
-                                <th class="text-end">Allocated</th><th class="text-end">Redeemed</th></tr></thead>
-                            <tbody id="cpnBatchBody"><tr><td colspan="5" class="text-muted">Loading…</td></tr></tbody>
+                                <th class="text-end">Allocated</th><th class="text-end">Redeemed</th>
+                                <th class="text-end">Redeem %</th></tr></thead>
+                            <tbody id="cpnBatchBody"><tr><td colspan="6" class="text-muted">Loading…</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="cpnInventoryCard" class="card mt-2" style="display:none">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Coupons — <span id="cpnInvBatchName"></span></span>
+                        <select id="cpnInvStatus" class="form-select form-select-sm" style="width:auto">
+                            <option value="">All statuses</option>
+                            <option value="0">Available</option>
+                            <option value="1">Allocated</option>
+                            <option value="2">Redeemed</option>
+                            <option value="3">Expired</option>
+                            <option value="4">Void</option>
+                        </select>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead><tr><th>Token</th><th>Status</th><th class="text-end">Value</th>
+                                <th>Allocated</th><th>Redeemed</th><th></th></tr></thead>
+                            <tbody id="cpnInvBody"></tbody>
                         </table>
                     </div>
                 </div>

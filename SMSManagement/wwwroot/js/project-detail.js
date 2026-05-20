@@ -100,7 +100,7 @@ document.querySelectorAll('[data-bs-toggle="tab"]').forEach(el => {
             case '#tab-members':    if (!loaded.members)    { loaded.members    = true; loadMembers();    } break;
             case '#tab-mappings':   if (!loaded.mappings)   { loaded.mappings   = true; loadMappings(); loadRules(); } break;
             case '#tab-sources':    if (!loaded.sources)    { loaded.sources    = true; loadSources(); loadBatches(); } break;
-            case '#tab-workflows':  if (!loaded.workflows)  { loaded.workflows  = true; loadWorkflows(); loadWfInstances(); } break;
+            case '#tab-workflows':  if (!loaded.workflows)  { loaded.workflows  = true; loadWorkflows(); loadWfInstances(); loadWfCouponBatches(); } break;
             case '#tab-shortlinks': if (!loaded.shortlinks) { loaded.shortlinks = true; loadShortlinks(); } break;
             case '#tab-coupons':    if (!loaded.coupons)    { loaded.coupons    = true; loadCouponBrands(); loadCouponBatches(); } break;
             case '#tab-sms':        if (!loaded.sms)        { loaded.sms        = true; loadSmsList(); loadProviderConfig('etracker'); loadProviderConfig('infobip'); } break;
@@ -1259,6 +1259,14 @@ window.abortWfInstance = async function (instanceId, definitionId, stateIdx, def
     } catch (e) { toast(e.message, 'danger'); }
 };
 
+// Coupon batches cached for the issue_coupon step's batch picker.
+async function loadWfCouponBatches() {
+    try {
+        const rows = await api.get(`${api_proj}/coupons/batches`);
+        window._wfCouponBatches = rows.map(b => ({ id: b.id, name: b.name, brandName: b.brandName }));
+    } catch { window._wfCouponBatches = []; }
+}
+
 async function loadWorkflows() {
     try {
         const rows = await api.get(`${api_proj}/workflows`);
@@ -1370,7 +1378,7 @@ function stepCardHtml(name, step, allSteps) {
         </tr>`).join('');
 
     return `
-    <div class="card mb-2" data-step="${esc(name)}">
+    <div class="card mb-2" data-step="${esc(name)}" data-coupon-batch="${esc(step.couponBatchId||'')}">
       <div class="card-body p-2">
         <div class="row g-2">
           <div class="col-md-4">
@@ -1380,16 +1388,17 @@ function stepCardHtml(name, step, allSteps) {
           <div class="col-md-3">
             <label class="form-label small">Type</label>
             <select class="form-select form-select-sm step-type">
-              <option value="send_sms" ${step.type==='send_sms'?'selected':''}>send_sms</option>
-              <option value="wait"     ${step.type==='wait'    ?'selected':''}>wait</option>
-              <option value="complete" ${step.type==='complete'?'selected':''}>complete</option>
+              <option value="send_sms"     ${step.type==='send_sms'    ?'selected':''}>send_sms</option>
+              <option value="issue_coupon" ${step.type==='issue_coupon'?'selected':''}>issue_coupon</option>
+              <option value="wait"         ${step.type==='wait'        ?'selected':''}>wait</option>
+              <option value="complete"     ${step.type==='complete'    ?'selected':''}>complete</option>
             </select>
           </div>
-          <div class="col-md-3 step-wait-col" style="${step.type==='complete'?'display:none':''}">
+          <div class="col-md-3 step-wait-col" style="${step.type==='complete'||step.type==='issue_coupon'?'display:none':''}">
             <label class="form-label small">Wait (d.HH:MM:SS)</label>
             <input class="form-control form-control-sm step-wait" value="${esc(step.wait||'')}" placeholder="2.00:00:00" />
           </div>
-          <div class="col-md-2 step-maxrep-col" style="${step.type==='complete'?'display:none':''}">
+          <div class="col-md-2 step-maxrep-col" style="${step.type==='complete'||step.type==='issue_coupon'?'display:none':''}">
             <label class="form-label small">Max repeats</label>
             <input type="number" min="1" max="20" class="form-control form-control-sm step-maxrep"
                    value="${step.maxRepeats||1}" />
@@ -1397,6 +1406,16 @@ function stepCardHtml(name, step, allSteps) {
           <div class="col-12 step-template-col" style="${step.type==='send_sms'?'':'display:none'}">
             <label class="form-label small">SMS body template (use {{column}} placeholders)</label>
             <textarea class="form-control form-control-sm step-template" rows="2">${esc(step.template||'')}</textarea>
+          </div>
+          <div class="col-12 step-coupon-col" style="${step.type==='issue_coupon'?'':'display:none'}">
+            <label class="form-label small">Coupon batch to allocate from</label>
+            <select class="form-select form-select-sm step-coupon-batch">
+              <option value="">— pick a batch —</option>
+            </select>
+            <div class="form-text">
+              Allocates one coupon per recipient and exposes
+              <code>{{coupon_code}}</code> / <code>{{coupon_url}}</code> to later send_sms steps.
+            </div>
           </div>
           <div class="col-12 step-transitions-col" style="${step.type==='complete'?'display:none':''}">
             <label class="form-label small">Transitions</label>
@@ -1423,14 +1442,30 @@ function stepCardHtml(name, step, allSteps) {
 }
 
 function bindStepCard(card) {
+    // Populate the coupon-batch picker (cached list loaded once per editor).
+    const couponSel = card.querySelector('.step-coupon-batch');
+    if (couponSel) {
+        const selected = card.dataset.couponBatch || '';
+        for (const b of (window._wfCouponBatches || [])) {
+            const opt = document.createElement('option');
+            opt.value = b.id;
+            opt.textContent = `${b.name} (${b.brandName})`;
+            if (b.id === selected) opt.selected = true;
+            couponSel.appendChild(opt);
+        }
+    }
+
     // Type change toggles which fields show
     const typeEl = card.querySelector('.step-type');
     typeEl.addEventListener('change', () => {
         const isComplete = typeEl.value === 'complete';
         const isSms      = typeEl.value === 'send_sms';
-        card.querySelector('.step-wait-col').style.display        = isComplete ? 'none' : '';
-        card.querySelector('.step-maxrep-col').style.display      = isComplete ? 'none' : '';
+        const isCoupon   = typeEl.value === 'issue_coupon';
+        // issue_coupon is a pass-through: no wait, no repeats.
+        card.querySelector('.step-wait-col').style.display        = (isComplete||isCoupon) ? 'none' : '';
+        card.querySelector('.step-maxrep-col').style.display      = (isComplete||isCoupon) ? 'none' : '';
         card.querySelector('.step-template-col').style.display    = isSms ? '' : 'none';
+        card.querySelector('.step-coupon-col').style.display      = isCoupon ? '' : 'none';
         card.querySelector('.step-transitions-col').style.display = isComplete ? 'none' : '';
     });
 
@@ -1498,6 +1533,10 @@ function captureFormToModel() {
         }
         if (type === 'send_sms') {
             step.template = card.querySelector('.step-template').value;
+        }
+        if (type === 'issue_coupon') {
+            const bid = card.querySelector('.step-coupon-batch')?.value;
+            if (bid) step.couponBatchId = bid;
         }
         newSteps[newName] = step;
     });
@@ -2339,20 +2378,77 @@ async function loadCouponBatches() {
         const rows = await api.get(`${api_proj}/coupons/batches`);
         const body = document.getElementById('cpnBatchBody');
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-3">'
+            body.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-3">'
                 + 'No batches imported yet.</td></tr>';
             return;
         }
-        body.innerHTML = rows.map(b => `
-            <tr>
+        body.innerHTML = rows.map(b => {
+            const rate = b.totalCount > 0
+                ? ((b.redeemedCount / b.totalCount) * 100).toFixed(1) + '%' : '—';
+            return `<tr style="cursor:pointer"
+                        onclick="showCouponInventory('${esc(b.id)}','${esc(b.name)}')">
                 <td>${esc(b.name)}</td>
                 <td class="small">${esc(b.brandName)}</td>
                 <td class="text-end">${b.totalCount}</td>
                 <td class="text-end">${b.allocatedCount}</td>
                 <td class="text-end text-success">${b.redeemedCount}</td>
-            </tr>`).join('');
+                <td class="text-end">${rate}</td>
+            </tr>`;
+        }).join('');
     } catch (e) { toast(e.message, 'danger'); }
 }
+
+const CPN_STATUS = ['Available','Allocated','Redeemed','Expired','Void'];
+const CPN_STATUS_BG = ['secondary','info','success','warning','dark'];
+let _cpnInvBatchId = null;
+
+window.showCouponInventory = function (batchId, batchName) {
+    _cpnInvBatchId = batchId;
+    document.getElementById('cpnInventoryCard').style.display = '';
+    document.getElementById('cpnInvBatchName').textContent = batchName;
+    document.getElementById('cpnInvStatus').value = '';
+    loadCouponInventory();
+};
+
+async function loadCouponInventory() {
+    if (!_cpnInvBatchId) return;
+    const status = document.getElementById('cpnInvStatus').value;
+    const qs = `?batchId=${encodeURIComponent(_cpnInvBatchId)}&take=300`
+        + (status !== '' ? `&status=${status}` : '');
+    try {
+        const rows = await api.get(`${api_proj}/coupons${qs}`);
+        const body = document.getElementById('cpnInvBody');
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-3">No coupons.</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(c => {
+            const si = typeof c.status === 'number' ? c.status : CPN_STATUS.indexOf(c.status);
+            const voidable = si === 0 || si === 1; // Available / Allocated
+            return `<tr>
+                <td><code class="small">${esc(c.token)}</code></td>
+                <td><span class="badge bg-${CPN_STATUS_BG[si]||'secondary'}">${esc(CPN_STATUS[si]||c.status)}</span></td>
+                <td class="text-end">${Number(c.value).toLocaleString()}</td>
+                <td class="small">${c.allocatedAt ? fmtDate(c.allocatedAt) : '—'}</td>
+                <td class="small">${c.redeemedAt ? fmtDate(c.redeemedAt) : '—'}</td>
+                <td class="text-end">${voidable
+                    ? `<button class="btn btn-link btn-sm p-0 text-danger" onclick="voidCoupon('${esc(c.id)}')">Void</button>`
+                    : ''}</td>
+            </tr>`;
+        }).join('');
+    } catch (e) { toast(e.message, 'danger'); }
+}
+document.getElementById('cpnInvStatus')?.addEventListener('change', loadCouponInventory);
+
+window.voidCoupon = async function (id) {
+    if (!confirm('Void this coupon? It can no longer be allocated or redeemed.')) return;
+    try {
+        await api.post(`${api_proj}/coupons/${id}/void`, {});
+        toast('Coupon voided.');
+        loadCouponInventory();
+        loadCouponBatches();
+    } catch (e) { toast(e.message, 'danger'); }
+};
 
 document.getElementById('formCpnImport').addEventListener('submit', async (ev) => {
     ev.preventDefault();
