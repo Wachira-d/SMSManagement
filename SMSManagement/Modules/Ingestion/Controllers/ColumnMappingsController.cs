@@ -30,7 +30,7 @@ public sealed class ColumnMappingsController : ControllerBase
         { "phone", "message", "url", "name", "email", "custom" };
 
     private static readonly HashSet<string> AllowedTransforms = new(StringComparer.OrdinalIgnoreCase)
-        { "trim", "upper", "lower", "digits", "prefix_66", "hex" };
+        { "trim", "upper", "lower", "digits", "prefix_66", "th_mobile", "hex" };
 
     private readonly AppDbContext _db;
     private readonly IProjectAccessService _access;

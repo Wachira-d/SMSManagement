@@ -124,4 +124,43 @@ public sealed class ColumnMapperTests
         var result = mapper.Map(new Dictionary<string, string> { ["v"] = input });
         result.Row["custom"].Should().Be(expected);
     }
+
+    [Theory]
+    [InlineData("818965811",      "0818965811")]   // 9 digits, no trunk 0 → prepend
+    [InlineData("0818965811",     "0818965811")]   // already national form → unchanged
+    [InlineData("66818965811",    "0818965811")]   // country code → national
+    [InlineData("+66 81-896-5811", "0818965811")]  // +66 with separators
+    [InlineData("081-896-5811",   "0818965811")]   // separators stripped
+    [InlineData("290868313",      "0290868313")]   // bad prefix kept as-is for validation
+    public void Th_mobile_transform_normalises_to_national_form(string input, string expected)
+    {
+        var mapper = new ColumnMapper(new[] { Mapping("v", "custom", "th_mobile") });
+        mapper.Map(new Dictionary<string, string> { ["v"] = input })
+            .Row["custom"].Should().Be(expected);
+    }
+
+    [Fact]
+    public void Th_mobile_plus_rule_accepts_valid_and_rejects_bad_prefix()
+    {
+        // The intended production setup: th_mobile normalises, then the
+        // canonical phone rule enforces a 10-digit 06/08/09 number.
+        var mappings = new[] { Mapping("Tel", "phone", "trim", "th_mobile") };
+        var rules = new Dictionary<string, CanonicalFieldRule>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["phone"] = new()
+            {
+                CanonicalField = "phone",
+                Required = true, MinLength = 10, MaxLength = 10,
+                Pattern = @"^0[689]\d{8}$"
+            }
+        };
+        var mapper = new ColumnMapper(mappings, rules);
+
+        mapper.Map(new Dictionary<string, string> { ["Tel"] = "818965811" })
+            .IsValid.Should().BeTrue();
+
+        var bad = mapper.Map(new Dictionary<string, string> { ["Tel"] = "290868313" });
+        bad.IsValid.Should().BeFalse();
+        bad.Errors.Should().Contain(e => e.StartsWith("phone:"));
+    }
 }

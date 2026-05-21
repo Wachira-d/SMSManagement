@@ -109,9 +109,31 @@ public sealed partial class ColumnMapper
         "lower"     => input.ToLowerInvariant(),
         "digits"    => new string(input.Where(char.IsDigit).ToArray()),
         "prefix_66" => input.StartsWith('0') ? "66" + input[1..] : input,
+        "th_mobile" => NormaliseThaiMobile(input),
         "hex"       => Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(input)),
         _           => input
     };
+
+    /// <summary>
+    /// Normalises a Thai mobile number to the national 0-prefixed form
+    /// (0XXXXXXXXX, 10 digits). Handles the common inbound shapes:
+    ///   - 9 digits, no trunk 0  (818965811)      → 0818965811
+    ///   - 10 digits with the 0  (0818965811)     → unchanged
+    ///   - country code 66 / +66 (66818965811)    → 0818965811
+    /// Anything else is returned as bare digits so the phone validation rule
+    /// rejects it rather than this transform silently "fixing" a bad number.
+    /// Prefix correctness (06/08/09) is intentionally left to validation.
+    /// </summary>
+    private static string NormaliseThaiMobile(string input)
+    {
+        var digits = new string(input.Where(char.IsDigit).ToArray());
+
+        if (digits.Length == 11 && digits.StartsWith("66"))
+            return "0" + digits[2..];
+        if (digits.Length == 9)
+            return "0" + digits;
+        return digits;
+    }
 }
 
 public sealed record MapResult(IReadOnlyDictionary<string, string> Row, IReadOnlyList<string> Errors)
