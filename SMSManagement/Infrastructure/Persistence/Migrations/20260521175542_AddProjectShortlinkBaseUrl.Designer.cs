@@ -12,7 +12,7 @@ using SMSManagement.Infrastructure.Persistence;
 namespace SMSManagement.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260521172416_AddProjectShortlinkBaseUrl")]
+    [Migration("20260521175542_AddProjectShortlinkBaseUrl")]
     partial class AddProjectShortlinkBaseUrl
     {
         /// <inheritdoc />
@@ -934,6 +934,9 @@ namespace SMSManagement.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.Property<string>("ShortlinkAlphabet")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ShortlinkBaseUrl")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<bool>("ShortlinkEnabled")

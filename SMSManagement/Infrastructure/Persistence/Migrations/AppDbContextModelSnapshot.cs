@@ -933,6 +933,9 @@ namespace SMSManagement.Infrastructure.Persistence.Migrations
                     b.Property<string>("ShortlinkAlphabet")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("ShortlinkBaseUrl")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<bool>("ShortlinkEnabled")
                         .HasColumnType("bit");
 
