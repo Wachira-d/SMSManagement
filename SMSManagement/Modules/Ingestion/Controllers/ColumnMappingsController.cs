@@ -99,6 +99,9 @@ public sealed class ColumnMappingsController : ControllerBase
         // Empty string is a legitimate "no separator" (e.g. concatenate area+number);
         // null means "use the default single space".
         existing.JoinSeparator = req.JoinSeparator;
+        // An advanced manual edit no longer corresponds to a friendly preset —
+        // drop it so the easy-setup screen doesn't show stale toggles.
+        existing.PresetJson = null;
 
         await _db.SaveChangesAsync(ct);
         return Ok(new { existing.Id, existing.SourceColumn, existing.CanonicalField,

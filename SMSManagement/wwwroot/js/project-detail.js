@@ -13,6 +13,12 @@ const SMS_STATUS_COLOR = {
     Delivered: 'success', Failed: 'danger', Rejected: 'danger',
     Expired: 'dark'
 };
+// SmsStatus enum order — the API serialises enums as numbers, so normalise
+// a numeric status back to its name before the UI compares against names.
+const SMS_STATUS_NAME = ['Queued', 'Sending', 'Sent', 'Delivered', 'Failed', 'Rejected', 'Expired'];
+function smsStatusName(s) {
+    return typeof s === 'number' ? (SMS_STATUS_NAME[s] ?? String(s)) : s;
+}
 
 // ---------- bootstrap on load ----------
 (async function init() {
@@ -2149,10 +2155,9 @@ document.getElementById('formSms').addEventListener('submit', async (ev) => {
             senderId:  document.getElementById('smsFrom').value.trim() || null,
             scheduledFor: sched ? new Date(sched).toISOString() : null
         });
-        // Status comes back as an enum — handle both the string and numeric forms.
-        const st = String(r.status);
-        const accepted = ['Sent', 'Delivered', '2', '3'].includes(st);
-        const scheduled = !!sched && ['Queued', '0'].includes(st);
+        const st = smsStatusName(r.status);
+        const accepted = st === 'Sent' || st === 'Delivered';
+        const scheduled = !!sched && st === 'Queued';
 
         out.classList.remove('d-none');
         out.className = 'mt-3 small alert py-2 '
@@ -2197,10 +2202,11 @@ async function loadSmsList() {
             return;
         }
         body.innerHTML = rows.map(s => {
-            const c = SMS_STATUS_COLOR[s.status] || 'secondary';
+            const status = smsStatusName(s.status);
+            const c = SMS_STATUS_COLOR[status] || 'secondary';
             // Only failed-class states are retryable. Sent/Delivered intentionally
             // can't be retried — that would be a duplicate send.
-            const retryable = ['Failed','Rejected','Expired'].includes(s.status);
+            const retryable = ['Failed','Rejected','Expired'].includes(status);
             const retryBtn = retryable
                 ? `<button class="btn btn-sm btn-link p-0 text-warning"
                        title="Retry this message" aria-label="Retry message"
@@ -2215,8 +2221,8 @@ async function loadSmsList() {
             // "Sent" only means the provider gateway accepted the message —
             // handset delivery is confirmed separately by a DN. Make that
             // explicit so operators don't read Sent as "delivered".
-            const sentUnconfirmed = s.status === 'Sent' && !s.deliveredAt;
-            const statusTitle = s.status === 'Sent'
+            const sentUnconfirmed = status === 'Sent' && !s.deliveredAt;
+            const statusTitle = status === 'Sent'
                 ? ' title="Accepted by the provider gateway. Delivery to the handset is confirmed separately by a delivery notification (DN)."'
                 : '';
             return `<tr style="cursor:pointer" onclick="showSmsDetail('${esc(s.id)}')">
@@ -2224,7 +2230,7 @@ async function loadSmsList() {
                 <td class="small">${fmtDate(s.createdAt)}</td>
                 <td><code class="small">${esc(s.maskedTo)}</code></td>
                 <td class="small">${esc(s.provider)}</td>
-                <td><span class="badge bg-${c}"${statusTitle}>${esc(s.status)}</span>
+                <td><span class="badge bg-${c}"${statusTitle}>${esc(status)}</span>
                     ${sentUnconfirmed ? '<small class="text-muted ms-1">delivery unconfirmed</small>' : ''}
                     ${s.errorCode ? `<small class="text-danger ms-1">${esc(s.errorCode)}</small>` : ''}
                 </td>
@@ -2239,8 +2245,9 @@ window.retrySms = async function (id) {
     if (!confirm('Re-send this message? Attempt counter resets to zero.')) return;
     try {
         const r = await api.post(`${api_proj}/sms/${id}/retry`, {});
-        toast(`Retry ${r.status === 'Sent' || r.status === 'Delivered' ? 'succeeded' : 'attempted'}: ${r.status}`,
-              r.status === 'Failed' || r.status === 'Rejected' ? 'warning' : 'success');
+        const st = smsStatusName(r.status);
+        toast(`Retry ${st === 'Sent' || st === 'Delivered' ? 'succeeded' : 'attempted'}: ${st}`,
+              st === 'Failed' || st === 'Rejected' ? 'warning' : 'success');
         loadSmsList();
     } catch (e) { toast(e.message, 'danger'); }
 };
