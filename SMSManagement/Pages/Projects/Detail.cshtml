@@ -1076,10 +1076,20 @@ Other SFTP keys: <code>host, port, username, remoteDirectory</code>.<br><br>
                                         <input id="etUser" class="form-control form-control-sm" autocomplete="off" /></div>
                                     <div class="col-md-6"><label class="form-label small">Password <span id="etPwdMark" class="badge text-bg-secondary d-none">stored</span></label>
                                         <input id="etPwd" type="password" class="form-control form-control-sm" autocomplete="new-password" placeholder="leave blank to keep current" /></div>
-                                    <div class="col-md-4"><label class="form-label small">Default Sender ID</label>
+                                    <div class="col-md-5"><label class="form-label small">Default Sender ID</label>
                                         <input id="etSender" class="form-control form-control-sm" /></div>
-                                    <div class="col-md-2"><label class="form-label small">Default Type</label>
-                                        <input id="etType" class="form-control form-control-sm" placeholder="0" /></div>
+                                    <div class="col-md-5"><label class="form-label small">ServID
+                                        <i class="bi bi-info-circle text-muted" tabindex="0"
+                                           data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                           title="ServID"
+                                           data-bs-content="The service id issued with your etracker account (e.g. MES01). Required — a wrong or missing ServID is rejected with gateway code 401."></i></label>
+                                        <input id="etServid" class="form-control form-control-sm" placeholder="e.g. MES01" /></div>
+                                    <div class="col-md-2"><label class="form-label small">Type
+                                        <i class="bi bi-info-circle text-muted" tabindex="0"
+                                           data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                           title="Message type"
+                                           data-bs-content="Leave blank — the gateway auto-detects ASCII/Unicode (handles Thai). Set 0 (ASCII) or 5 (Unicode) only to force."></i></label>
+                                        <input id="etType" class="form-control form-control-sm" placeholder="auto" /></div>
                                     <div class="col-12 d-flex gap-2">
                                         <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> Save</button>
                                         <button type="button" id="btnEtClear" class="btn btn-outline-danger btn-sm">Remove override</button>

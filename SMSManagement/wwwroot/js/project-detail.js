@@ -2283,6 +2283,7 @@ async function loadProviderConfig(provider) {
             document.getElementById('etBaseUrl').value = r.baseUrl ?? '';
             document.getElementById('etUser').value    = r.username ?? '';
             document.getElementById('etSender').value  = r.defaultSenderId ?? '';
+            document.getElementById('etServid').value  = r.serviceId ?? '';
             document.getElementById('etType').value    = r.defaultType ?? '';
             document.getElementById('etPwdMark').classList.toggle('d-none', !r.passwordSet);
             document.getElementById('etStatus').textContent = r.hasOverride
@@ -2306,6 +2307,7 @@ document.getElementById('formProvEtracker').addEventListener('submit', async (ev
         username:        document.getElementById('etUser').value    || null,
         password:        document.getElementById('etPwd').value     || null,
         defaultSenderId: document.getElementById('etSender').value  || null,
+        serviceId:       document.getElementById('etServid').value  || null,
         defaultType:     document.getElementById('etType').value    || null
     };
     try {
