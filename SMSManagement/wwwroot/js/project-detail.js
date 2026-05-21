@@ -743,7 +743,9 @@ function showSrcEditor(reset) {
         document.getElementById('srcEnabled').checked = true;
         document.getElementById('srcConfig').value = JSON.stringify({
             host: 'sftp.example.com', port: 22, username: 'campaign',
+            // Supply ONE of: privateKeyPem (+ optional passphrase) OR password.
             privateKeyPem: '-----BEGIN OPENSSH PRIVATE KEY-----\n…\n-----END OPENSSH PRIVATE KEY-----',
+            password: '',
             remoteDirectory: '/incoming', filePattern: '*.csv'
         }, null, 2);
         document.getElementById('srcConfig').placeholder = '';

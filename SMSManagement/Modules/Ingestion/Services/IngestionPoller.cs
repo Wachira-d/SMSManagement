@@ -109,10 +109,19 @@ public sealed class IngestionPoller : IIngestionPoller
             return;
         }
 
-        using var keyStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(cfg.PrivateKeyPem));
-        var keyFile = new PrivateKeyFile(keyStream);
-        using var client = new SftpClient(cfg.Host, cfg.Port, cfg.Username, keyFile);
+        SftpClient client;
+        try
+        {
+            client = BuildSftpClient(cfg);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "SFTP auth setup failed for source {SourceId}.", s.Id);
+            return;
+        }
 
+        using (client)
+        {
         client.Connect();
         try
         {
@@ -155,6 +164,32 @@ public sealed class IngestionPoller : IIngestionPoller
         {
             client.Disconnect();
         }
+        }
+    }
+
+    /// <summary>
+    /// Builds an <see cref="SftpClient"/> from the binding's config. Private-key
+    /// auth takes precedence when <c>privateKeyPem</c> is supplied (optionally
+    /// passphrase-protected); otherwise <c>password</c> is used. One of the two
+    /// must be present.
+    /// </summary>
+    private static SftpClient BuildSftpClient(SftpConfig cfg)
+    {
+        if (!string.IsNullOrWhiteSpace(cfg.PrivateKeyPem))
+        {
+            using var keyStream = new MemoryStream(
+                System.Text.Encoding.UTF8.GetBytes(cfg.PrivateKeyPem));
+            var keyFile = string.IsNullOrEmpty(cfg.Passphrase)
+                ? new PrivateKeyFile(keyStream)
+                : new PrivateKeyFile(keyStream, cfg.Passphrase);
+            return new SftpClient(cfg.Host, cfg.Port, cfg.Username, keyFile);
+        }
+
+        if (!string.IsNullOrWhiteSpace(cfg.Password))
+            return new SftpClient(cfg.Host, cfg.Port, cfg.Username, cfg.Password);
+
+        throw new InvalidOperationException(
+            "SFTP config must supply either privateKeyPem or password.");
     }
 
     private static void TryCreateRemoteDir(SftpClient client, string path)
@@ -170,6 +205,10 @@ public sealed class IngestionPoller : IIngestionPoller
         public int Port { get; set; } = 22;
         public string Username { get; set; } = string.Empty;
         public string PrivateKeyPem { get; set; } = string.Empty;
+        /// <summary>Optional passphrase for an encrypted private key.</summary>
+        public string Passphrase { get; set; } = string.Empty;
+        /// <summary>Used when no private key is supplied (password auth).</summary>
+        public string Password { get; set; } = string.Empty;
         public string RemoteDirectory { get; set; } = "/incoming";
         public string FilePattern { get; set; } = "*.csv";
     }
