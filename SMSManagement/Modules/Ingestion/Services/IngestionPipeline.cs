@@ -288,6 +288,21 @@ public sealed class IngestionPipeline : IIngestionPipeline
     private async Task ApplyPostProcessAsync(
         string filePath, IngestionSourceSettings settings, CancellationToken ct)
     {
+        // SFTP files are a throwaway local temp copy. The poller archives the
+        // *remote* file on the SFTP server (RemoteDirectory/archive) and
+        // deletes the temp itself — so the local Archive/Delete action here is
+        // meaningless. Worse, an operator who types an SFTP-style path into
+        // ArchiveDirectory (e.g. "C:\sftp\archive") hits a denied local path,
+        // which would wrongly fail an otherwise-successful ingestion and send
+        // the remote file to /error instead of /archive.
+        if (string.Equals(settings.SourceType, "SFTP", StringComparison.OrdinalIgnoreCase))
+        {
+            _log.LogDebug(
+                "SFTP source {SourceId}: skipping local post-process — the poller "
+                + "archives the remote file on the SFTP server.", settings.Id);
+            return;
+        }
+
         switch (settings.Action)
         {
             case PostProcessAction.Archive:
@@ -315,17 +330,27 @@ public sealed class IngestionPipeline : IIngestionPipeline
         }
     }
 
-    private static Task TryMoveAsync(string filePath, string? destDir, string suffix, CancellationToken ct)
+    private Task TryMoveAsync(string filePath, string? destDir, string suffix, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(destDir) || !File.Exists(filePath))
             return Task.CompletedTask;
 
-        Directory.CreateDirectory(destDir);
-        var name = Path.GetFileName(filePath);
-        // Suffix + timestamp guarantees no clobber if the same filename arrives twice.
-        var ts = DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss");
-        var dest = Path.Combine(destDir, $"{Path.GetFileNameWithoutExtension(name)}.{ts}{suffix}{Path.GetExtension(name)}");
-        File.Move(filePath, dest, overwrite: false);
+        try
+        {
+            Directory.CreateDirectory(destDir);
+            var name = Path.GetFileName(filePath);
+            // Suffix + timestamp guarantees no clobber if the same filename arrives twice.
+            var ts = DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss");
+            var dest = Path.Combine(destDir, $"{Path.GetFileNameWithoutExtension(name)}.{ts}{suffix}{Path.GetExtension(name)}");
+            File.Move(filePath, dest, overwrite: false);
+        }
+        catch (Exception ex)
+        {
+            // Relocating the local file is best-effort — the rows are already
+            // ingested. A denied/missing path must never fail the run.
+            _log.LogWarning(ex,
+                "Could not move processed file to '{Dest}' — leaving it in place.", destDir);
+        }
         return Task.CompletedTask;
     }
 
