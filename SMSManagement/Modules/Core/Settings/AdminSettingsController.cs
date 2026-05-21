@@ -1,4 +1,6 @@
+using System.Net;
 using System.Net.Http.Json;
+using System.Net.Mail;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -253,16 +255,52 @@ public sealed class AdminSettingsController : ControllerBase
         if (string.IsNullOrWhiteSpace(body.To) || !body.To.Contains('@'))
             return BadRequest(new { Message = "Provide a valid 'To' address." });
 
+        var opts = _smtp.Value;
+
+        // Real diagnostic: do the SMTP send HERE so failures surface. The shared
+        // IEmailSender deliberately swallows every error (alerting must never
+        // abort a business transaction), so calling it would ALWAYS report
+        // success — even when SMTP is unconfigured or the server rejects.
+        if (string.IsNullOrWhiteSpace(opts.Host) && string.IsNullOrWhiteSpace(opts.PickupDirectory))
+            return Ok(new { Ok = false, Error =
+                "Smtp:Host is not configured. Fill in the SMTP section above, click Save, then test again." });
+
         try
         {
-            var html = $"<p>This is a connectivity test from <code>{Request.Host}</code> " +
-                       $"at <strong>{DateTimeOffset.UtcNow:u}</strong>.</p>";
-            await _emailSender.SendAsync(new EmailMessage(
-                To: new[] { body.To },
-                Subject: "SMS Management — SMTP test",
-                HtmlBody: html,
-                PlainTextBody: $"Connectivity test from {Request.Host} at {DateTimeOffset.UtcNow:u}."), ct);
-            return Ok(new { Ok = true, SentTo = body.To });
+            using var mail = new MailMessage
+            {
+                From = new MailAddress(
+                    string.IsNullOrWhiteSpace(opts.FromAddress)
+                        ? "no-reply@example.com" : opts.FromAddress,
+                    opts.FromDisplayName),
+                Subject = "SMS Management — SMTP test",
+                Body = $"Connectivity test from {Request.Host} at {DateTimeOffset.UtcNow:u}.",
+                IsBodyHtml = false,
+            };
+            mail.To.Add(body.To);
+
+            using var client = new SmtpClient();
+            if (!string.IsNullOrWhiteSpace(opts.PickupDirectory))
+            {
+                Directory.CreateDirectory(opts.PickupDirectory);
+                client.DeliveryMethod = SmtpDeliveryMethod.SpecifiedPickupDirectory;
+                client.PickupDirectoryLocation = opts.PickupDirectory;
+            }
+            else
+            {
+                client.Host = opts.Host;
+                client.Port = opts.Port;
+                client.EnableSsl = opts.EnableSsl;
+                if (!string.IsNullOrEmpty(opts.Username))
+                    client.Credentials = new NetworkCredential(opts.Username, opts.Password);
+            }
+
+            await client.SendMailAsync(mail, ct);
+
+            var via = string.IsNullOrWhiteSpace(opts.PickupDirectory)
+                ? $"{opts.Host}:{opts.Port} (SSL={opts.EnableSsl})"
+                : $"pickup directory {opts.PickupDirectory}";
+            return Ok(new { Ok = true, SentTo = body.To, Via = via });
         }
         catch (Exception ex)
         {
