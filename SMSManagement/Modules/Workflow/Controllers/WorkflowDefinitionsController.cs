@@ -98,6 +98,32 @@ public sealed class WorkflowDefinitionsController : ControllerBase
             new { def.Id, def.Name, def.Version, def.Active });
     }
 
+    /// <summary>
+    /// Edit a workflow definition in place — overwrites this version's spec
+    /// instead of creating a new one. Use for iterating on a draft; "Save as
+    /// new version" (POST) is still there when an audited revision is wanted.
+    /// </summary>
+    [HttpPut("{definitionId:guid}")]
+    public async Task<IActionResult> Update(
+        Guid projectId, Guid definitionId, [FromBody] SaveRequest req, CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Admin, ct);
+        await _features.EnsureAsync(projectId, ProjectFeature.Workflow, ct);
+
+        if (string.IsNullOrWhiteSpace(req.Name)) return BadRequest("Name is required.");
+        if (!IsValidSpec(req.Spec, out var error)) return BadRequest(error);
+
+        var def = await _db.WorkflowDefinitions
+            .FirstOrDefaultAsync(d => d.Id == definitionId && d.ProjectId == projectId, ct);
+        if (def is null) return NotFound();
+
+        def.Name = req.Name.Trim();
+        def.DefinitionJson = req.Spec.GetRawText();
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new { def.Id, def.Name, def.Version, def.Active });
+    }
+
     public sealed record PreviewRequest(string Template, Dictionary<string, string>? Sample);
     public sealed record PreviewResponse(string Rendered, int CharCount, int SmsParts, string[] MissingPlaceholders);
 

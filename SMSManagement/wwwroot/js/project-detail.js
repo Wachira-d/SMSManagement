@@ -77,7 +77,9 @@ async function renderOnboardingChecklist() {
     const missingHard = items.filter(i => !i.ok && !i.soft);
     const missingSoft = items.filter(i => !i.ok && i.soft);
     if (missingHard.length === 0 && missingSoft.length === 0) {
-        // Everything green — keep card hidden.
+        // Everything green — hide the card (it may have been shown earlier
+        // and this is a re-render after the operator finished setup).
+        document.getElementById('onboardingChecklist').style.display = 'none';
         return;
     }
 
@@ -1723,7 +1725,16 @@ async function loadWorkflows() {
                         : `<button class="btn btn-link btn-sm p-0" onclick="toggleWf('${esc(w.id)}',true)">Activate</button>`}</td>
                 </tr>`).join('');
         }
+        renderOnboardingChecklist().catch(() => {});   // re-evaluate after activate/save
     } catch (e) { toast(e.message, 'danger'); }
+}
+
+// Id of the definition currently loaded in the editor — drives whether
+// "Update this version" (PUT, in-place) is offered alongside "Save as new".
+let wfEditingId = null;
+function wfRefreshButtons() {
+    const u = document.getElementById('btnWfUpdate');
+    if (u) u.style.display = wfEditingId ? '' : 'none';
 }
 
 window.loadWfDef = async function (id) {
@@ -1735,7 +1746,9 @@ window.loadWfDef = async function (id) {
             initialStep: d.spec.initialStep,
             steps: d.spec.steps || {}
         };
+        wfEditingId = d.id;
         document.getElementById('wfEditTitle').textContent = `Editor — ${d.name} v${d.version}`;
+        wfRefreshButtons();
         renderWf();
     } catch (e) { toast(e.message, 'danger'); }
 };
@@ -1750,7 +1763,9 @@ window.toggleWf = async function (id, activate) {
 
 document.getElementById('btnWfNew').addEventListener('click', () => {
     wfModel = newWorkflowModel();
+    wfEditingId = null;
     document.getElementById('wfEditTitle').textContent = 'Editor — new';
+    wfRefreshButtons();
     renderWf();
 });
 
@@ -2315,23 +2330,44 @@ function safeId(name) {
 }
 
 // --- Save handler ---
+// Captures the editor into a {name, spec} payload, or null if invalid
+// (a toast explains why).
+function wfBuildPayload() {
+    if (wfActiveView === 'form') captureFormToModel();
+    else if (wfActiveView === 'json') captureJsonToModel();
+    const spec = {
+        initialStep: wfModel.initialStep,
+        expiration:  wfModel.expiration,
+        steps:       wfModel.steps
+    };
+    if (!wfModel.name) { toast('Workflow name is required.', 'warning'); return null; }
+    if (!spec.initialStep || !(spec.initialStep in spec.steps)) {
+        toast('Initial step must reference an existing step.', 'warning'); return null;
+    }
+    return { name: wfModel.name, spec };
+}
+
 document.getElementById('btnWfSave').addEventListener('click', async () => {
     try {
-        if (wfActiveView === 'form') captureFormToModel();
-        else if (wfActiveView === 'json') captureJsonToModel();
-        const spec = {
-            initialStep: wfModel.initialStep,
-            expiration:  wfModel.expiration,
-            steps:       wfModel.steps
-        };
-        if (!wfModel.name) { toast('Workflow name is required.', 'warning'); return; }
-        if (!spec.initialStep || !(spec.initialStep in spec.steps)) {
-            toast('Initial step must reference an existing step.', 'warning'); return;
-        }
-        const r = await api.post(`${api_proj}/workflows`, { name: wfModel.name, spec });
+        const payload = wfBuildPayload();
+        if (!payload) return;
+        const r = await api.post(`${api_proj}/workflows`, payload);
+        wfEditingId = r.id;   // keep editing — further saves can Update this version
+        wfRefreshButtons();
         toast(`Saved v${r.version}. Activate it from the list.`);
         loadWorkflows();
     } catch (e) { toast('Save failed: ' + e.message, 'danger'); }
+});
+
+document.getElementById('btnWfUpdate').addEventListener('click', async () => {
+    if (!wfEditingId) return;
+    try {
+        const payload = wfBuildPayload();
+        if (!payload) return;
+        const r = await api.put(`${api_proj}/workflows/${wfEditingId}`, payload);
+        toast(`Updated "${r.name}" v${r.version} in place.`);
+        loadWorkflows();
+    } catch (e) { toast('Update failed: ' + e.message, 'danger'); }
 });
 
 // Render an empty model on first paint of the workflows tab
