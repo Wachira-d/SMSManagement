@@ -177,6 +177,7 @@ public sealed class IngestionPoller : IIngestionPoller
                 // any failure → /error. The operator finds failed files in
                 // /error instead of seeing them re-polled endlessly.
                 var ingestOk = false;
+                string? failureReason = null;
                 try
                 {
                     var outcome = await _pipeline.IngestFileAsync(
@@ -188,10 +189,11 @@ public sealed class IngestionPoller : IIngestionPoller
                 }
                 catch (Exception ex)
                 {
+                    failureReason = $"{ex.GetType().Name}: {ex.Message}";
                     _log.LogError(ex,
                         "SFTP poll {Source}: ingestion of {File} failed — "
-                        + "moving remote file to /error so it is not re-polled.",
-                        s.Id, file.Name);
+                        + "moving remote file to /error so it is not re-polled. Reason: {Reason}",
+                        s.Id, file.Name, failureReason);
                 }
                 finally
                 {
@@ -213,6 +215,29 @@ public sealed class IngestionPoller : IIngestionPoller
                     client.RenameFile(file.FullName, dest);
                     _log.LogInformation("SFTP poll {Source}: moved {File} → {Dest}",
                         s.Id, file.Name, dest);
+
+                    // Drop a sibling .error.txt next to a failed file so the
+                    // operator sees WHY it failed right there in /error,
+                    // without digging through application logs.
+                    if (!ingestOk)
+                    {
+                        try
+                        {
+                            var note =
+                                $"File: {file.Name}\r\n" +
+                                $"Failed at (UTC): {_clock.GetUtcNow():u}\r\n" +
+                                $"Reason: {failureReason ?? "(unknown)"}\r\n";
+                            var noteBytes = System.Text.Encoding.UTF8.GetBytes(note);
+                            using var noteStream = new MemoryStream(noteBytes);
+                            client.UploadFile(noteStream, $"{destDir}/{stem}.{stamp}.error.txt");
+                        }
+                        catch (Exception noteEx)
+                        {
+                            _log.LogWarning(noteEx,
+                                "SFTP poll {Source}: could not write .error.txt for {File}.",
+                                s.Id, file.Name);
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
