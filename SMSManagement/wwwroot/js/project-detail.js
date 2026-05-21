@@ -1783,25 +1783,124 @@ window.showWfInstances = async function (definitionId, definitionName, stateIdx)
             body.innerHTML = '<div class="text-muted small">No instances in this state.</div>';
             return;
         }
-        body.innerHTML = `<table class="table table-sm align-middle">
+        const bulkBar = isTerminal ? '' :
+            `<div class="d-flex justify-content-between align-items-center mb-2">
+               <span class="small text-muted">${rows.length} รายการที่ยังค้าง — แต่ละรายการคือ 1 ผู้รับ</span>
+               <button class="btn btn-sm btn-outline-danger"
+                  onclick="abortAllWfInstances('${esc(definitionId)}',${stateIdx},'${esc(definitionName)}')">
+                  หยุด/เคลียร์ทั้งหมด (${rows.length})</button>
+             </div>`;
+        body.innerHTML = bulkBar + `<table class="table table-sm align-middle">
             <thead><tr>
                 <th>Created</th><th>Recipient</th><th>Current step</th>
                 <th>Repeats</th><th>Expires</th><th></th>
             </tr></thead>
-            <tbody>${rows.map(i => `<tr>
+            <tbody>${rows.map((i, n) => `<tr>
                 <td class="small">${fmtDate(i.createdAt)}</td>
                 <td><code class="small">${esc(i.maskedPhone || '')}</code></td>
                 <td class="small">${esc(i.currentStep)}</td>
                 <td>${i.stepRepeatCount}</td>
                 <td class="small">${fmtDate(i.expiresAt)}</td>
-                <td>${isTerminal ? '' :
+                <td class="text-nowrap">
+                    <button class="btn btn-link btn-sm p-0 me-2"
+                       onclick="toggleWfInstanceDetail('${esc(i.id)}',${n})">รายละเอียด</button>
+                    ${isTerminal ? '' :
                     `<button class="btn btn-link btn-sm p-0 text-danger"
                        onclick="abortWfInstance('${esc(i.id)}', '${esc(definitionId)}', ${stateIdx}, '${esc(definitionName)}')"
                        title="Force this instance to Expired">Abort</button>`}</td>
-            </tr>`).join('')}</tbody></table>`;
+            </tr>
+            <tr id="wfInstDetail${n}" style="display:none"><td colspan="6" class="bg-light"></td></tr>`).join('')}</tbody></table>`;
     } catch (e) {
         body.innerHTML = `<div class="text-danger">${esc(e.message)}</div>`;
     }
+};
+
+// Toggle the per-instance detail row — lazy-loads the transition timeline +
+// SMS the first time it's opened.
+window.toggleWfInstanceDetail = async function (instanceId, n) {
+    const row  = document.getElementById('wfInstDetail' + n);
+    if (!row) return;
+    if (row.style.display !== 'none') { row.style.display = 'none'; return; }
+    row.style.display = '';
+    const cell = row.firstElementChild;
+    if (cell.dataset.loaded === '1') return;
+    cell.innerHTML = '<div class="text-muted small p-2">กำลังโหลด…</div>';
+    try {
+        const d = await api.get(`${api_proj}/workflow-instances/${instanceId}/detail`);
+        cell.innerHTML = wfInstanceDetailHtml(d);
+        cell.dataset.loaded = '1';
+    } catch (e) {
+        cell.innerHTML = `<div class="text-danger small p-2">${esc(e.message)}</div>`;
+    }
+};
+
+// Renders one instance's timeline + SMS — shared by the instance drill-down.
+function wfInstanceDetailHtml(d) {
+    let html = '<div class="p-2">';
+    html += '<div class="small fw-semibold mb-1">ไทม์ไลน์ workflow</div>';
+    const tx = d.transitions || [];
+    if (tx.length) {
+        html += '<table class="table table-sm small mb-3"><tbody>';
+        tx.forEach(t => {
+            html += `<tr>
+              <td class="text-nowrap text-muted" style="width:140px">${fmtDate(t.at)}</td>
+              <td>${wfStateBadge(t.from)} → ${wfStateBadge(t.to)}</td>
+              <td><code class="small">${esc(t.trigger || '')}</code></td>
+              <td class="text-muted small">${t.dataJson ? esc(t.dataJson) : ''}</td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+    } else {
+        html += '<div class="text-muted small mb-3">ไม่มีการเปลี่ยนสถานะที่บันทึกไว้</div>';
+    }
+    html += '<div class="small fw-semibold mb-1">SMS ของรายการนี้</div>';
+    const sms = d.sms || [];
+    if (sms.length) {
+        sms.forEach(s => {
+            html += `<div class="border rounded p-2 mb-2 small bg-white">
+              <div class="d-flex justify-content-between">
+                <div>${smsStatusBadge(s.status)}
+                  <span class="ms-1">${esc(s.maskedTo)}</span>
+                  <span class="text-muted ms-1">· ${esc(s.provider || '')}</span></div>
+                <div class="text-muted">${fmtDate(s.createdAt)}</div>
+              </div>
+              <div class="mt-1"><span class="text-muted">ข้อความ:</span> ${esc(s.body || '')}</div>`;
+            const meta = [];
+            if (s.sentAt)      meta.push(`ส่ง ${fmtDate(s.sentAt)}`);
+            if (s.deliveredAt) meta.push(`ถึง ${fmtDate(s.deliveredAt)}`);
+            if (s.attempts)    meta.push(`พยายาม ${s.attempts} ครั้ง`);
+            if (meta.length) html += `<div class="text-muted mt-1">${meta.join(' · ')}</div>`;
+            if (s.errorCode)
+                html += `<div class="text-danger mt-1">ข้อผิดพลาด: ${esc(s.errorCode)}</div>`;
+            if (s.rawProviderResponse)
+                html += `<div class="mt-1"><span class="text-muted">คำตอบจากผู้ให้บริการ:</span>
+                  <pre class="small bg-light p-1 mb-0 mt-1"
+                       style="white-space:pre-wrap">${esc(s.rawProviderResponse)}</pre></div>`;
+            html += '</div>';
+        });
+    } else {
+        html += '<div class="text-muted small">ยังไม่มี SMS</div>';
+    }
+    return html + '</div>';
+}
+
+window.abortAllWfInstances = async function (definitionId, stateIdx, definitionName) {
+    const stateName = WF_STATE_LABEL[stateIdx];
+    const ok = await window.confirmAction({
+        title: 'เคลียร์งานที่ค้าง', mode: 'simple',
+        message: `บังคับให้ทุก instance สถานะ <strong>${esc(stateName)}</strong> `
+            + `ของ <strong>${esc(definitionName)}</strong> กลายเป็น <strong>Expired</strong>? `
+            + 'ทั้งหมดจะหยุดส่ง SMS ทันทีและกู้คืนไม่ได้',
+        okLabel: 'เคลียร์ทั้งหมด'
+    });
+    if (!ok) return;
+    try {
+        const r = await api.post(`${api_proj}/workflow-instances/abort-all`,
+            { definitionId, state: stateIdx });
+        toast(`เคลียร์แล้ว ${r.aborted} รายการ`);
+        showWfInstances(definitionId, definitionName, stateIdx);
+        loadWfInstances();
+    } catch (e) { toast(e.message, 'danger'); }
 };
 
 function buildWfInstModal() {
