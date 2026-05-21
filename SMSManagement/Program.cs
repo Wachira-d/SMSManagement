@@ -17,6 +17,7 @@ using OpenTelemetry.Trace;
 using SMSManagement.Modules.Core.Logging;
 using SMSManagement.Modules.Core.Observability;
 using SMSManagement.Modules.Ingestion.Services;
+using SMSManagement.Modules.Notifications;
 using SMSManagement.Modules.Sms.Services;
 using SMSManagement.Modules.Workflow.Engine;
 
@@ -361,6 +362,13 @@ if (!testingEnabled)
         "sms-scheduled-dispatch",
         worker => worker.DispatchDueAsync(CancellationToken.None),
         "* * * * *");
+
+    // Email a per-round SMS summary (with a CSV log attached) once every
+    // SMS produced by an ingestion batch has finished sending.
+    RecurringJob.AddOrUpdate<ISmsRoundSummaryNotifier>(
+        "sms-round-summary",
+        n => n.SweepAsync(CancellationToken.None),
+        "*/5 * * * *");
 
     // Daily purge of old ErrorLogs entries (default retention 30 days).
     RecurringJob.AddOrUpdate<IErrorLogPurger>(

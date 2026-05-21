@@ -59,6 +59,12 @@ public sealed class SmtpEmailSender : IEmailSender
         foreach (var addr in message.To)
             mail.To.Add(addr);
 
+        if (message.Attachments is { Count: > 0 })
+            foreach (var a in message.Attachments)
+                // The Attachment owns the stream; MailMessage disposal frees it.
+                mail.Attachments.Add(new Attachment(
+                    new MemoryStream(a.Content), a.FileName, a.ContentType));
+
         using var client = new SmtpClient();
         if (!string.IsNullOrWhiteSpace(_opts.PickupDirectory))
         {

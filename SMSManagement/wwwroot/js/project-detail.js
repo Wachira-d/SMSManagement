@@ -133,6 +133,7 @@ function fillSettings(p) {
     document.getElementById('notifSuccess').checked = p.notifications.triggers.onIngestSuccess;
     document.getElementById('notifPartial').checked = p.notifications.triggers.onIngestPartial;
     document.getElementById('notifFailure').checked = p.notifications.triggers.onIngestFailure;
+    document.getElementById('notifSmsRound').checked = p.notifications.triggers.onSmsRoundComplete;
 }
 
 async function saveAndReload(body, successMsg) {
@@ -177,7 +178,8 @@ document.getElementById('formNotif').addEventListener('submit', (ev) => {
         notificationSubjectPrefix:document.getElementById('notifPrefix').value,
         notifyOnIngestSuccess:    document.getElementById('notifSuccess').checked,
         notifyOnIngestPartial:    document.getElementById('notifPartial').checked,
-        notifyOnIngestFailure:    document.getElementById('notifFailure').checked
+        notifyOnIngestFailure:    document.getElementById('notifFailure').checked,
+        notifyOnSmsRoundComplete: document.getElementById('notifSmsRound').checked
     }, 'Notifications saved.');
 });
 // ============ ARCHIVE PROJECT ============

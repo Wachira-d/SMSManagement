@@ -42,6 +42,11 @@ public sealed class Project
     /// <summary>Send an email when an ingestion batch fails outright (status=Failed or 0 accepted).</summary>
     public bool NotifyOnIngestFailure { get; set; } = true;
 
+    /// <summary>Send an email when every SMS produced by an ingestion batch has
+    /// finished sending — a per-round summary (sent/failed counts) with a CSV log
+    /// of the round attached.</summary>
+    public bool NotifyOnSmsRoundComplete { get; set; } = true;
+
     /// <summary>
     /// Per-project shortlink slug length override. Null = use global
     /// <c>Shortlink:SlugLength</c> from configuration.
@@ -144,4 +149,9 @@ public sealed class IngestionBatch
     /// trawling logs. Null when no rejections (or for legacy batches).
     /// </summary>
     public string? RejectionsJson { get; set; }
+
+    /// <summary>When the per-round SMS summary email was sent for this batch.
+    /// Null until every SMS produced by the batch has settled and the summary
+    /// has gone out — the sweep uses this to send each round's summary once.</summary>
+    public DateTimeOffset? SmsSummarySentAt { get; set; }
 }

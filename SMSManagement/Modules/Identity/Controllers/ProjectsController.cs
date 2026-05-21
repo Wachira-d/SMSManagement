@@ -43,6 +43,7 @@ public sealed class ProjectsController : ControllerBase
         bool? NotifyOnIngestSuccess = null,
         bool? NotifyOnIngestPartial = null,
         bool? NotifyOnIngestFailure = null,
+        bool? NotifyOnSmsRoundComplete = null,
         bool? SmsEnabled = null,
         bool? ShortlinkEnabled = null,
         bool? WorkflowEnabled = null,
@@ -170,7 +171,8 @@ public sealed class ProjectsController : ControllerBase
                 {
                     OnIngestSuccess = p.NotifyOnIngestSuccess,
                     OnIngestPartial = p.NotifyOnIngestPartial,
-                    OnIngestFailure = p.NotifyOnIngestFailure
+                    OnIngestFailure = p.NotifyOnIngestFailure,
+                    OnSmsRoundComplete = p.NotifyOnSmsRoundComplete
                 }
             },
             Members = members
@@ -313,6 +315,7 @@ public sealed class ProjectsController : ControllerBase
         if (req.NotifyOnIngestSuccess is { } nis) project.NotifyOnIngestSuccess = nis;
         if (req.NotifyOnIngestPartial is { } nip) project.NotifyOnIngestPartial = nip;
         if (req.NotifyOnIngestFailure is { } nif) project.NotifyOnIngestFailure = nif;
+        if (req.NotifyOnSmsRoundComplete is { } nsr) project.NotifyOnSmsRoundComplete = nsr;
 
         // Feature kill switches — explicit nulls leave them untouched.
         if (req.SmsEnabled        is { } s)  project.SmsEnabled        = s;

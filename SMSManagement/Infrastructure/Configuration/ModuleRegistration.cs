@@ -131,6 +131,7 @@ public static class ModuleRegistration
         services.Configure<SmtpOptions>(cfg.GetSection("Smtp"));
         services.AddSingleton<IEmailSender, SmtpEmailSender>();
         services.AddScoped<IIngestionBatchNotifier, IngestionBatchNotifier>();
+        services.AddScoped<ISmsRoundSummaryNotifier, SmsRoundSummaryNotifier>();
 
         // ---------- Coupon ----------
         services.Configure<Modules.Coupon.Services.CouponOptions>(cfg.GetSection("Coupon"));
