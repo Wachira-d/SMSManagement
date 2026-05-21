@@ -19,6 +19,10 @@ public sealed class SftpConfig
     public string Password { get; set; } = string.Empty;
     public string RemoteDirectory { get; set; } = "/incoming";
     public string FilePattern { get; set; } = "*.csv";
+
+    /// <summary>How many times to attempt the connection before giving up for
+    /// this poll — covers a transient first-attempt failure. Default 3.</summary>
+    public int RetryAttempts { get; set; } = 3;
 }
 
 /// <summary>

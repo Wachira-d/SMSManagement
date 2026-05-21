@@ -1050,7 +1050,8 @@ function showSrcEditor(reset) {
             // Supply ONE of: privateKeyPem (+ optional passphrase) OR password.
             privateKeyPem: '-----BEGIN OPENSSH PRIVATE KEY-----\n…\n-----END OPENSSH PRIVATE KEY-----',
             password: '',
-            remoteDirectory: '/incoming', filePattern: '*.csv'
+            remoteDirectory: '/incoming', filePattern: '*.csv',
+            retryAttempts: 3
         }, null, 2);
         document.getElementById('srcConfig').placeholder = '';
     }

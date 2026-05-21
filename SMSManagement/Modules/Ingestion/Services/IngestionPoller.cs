@@ -127,7 +127,35 @@ public sealed class IngestionPoller : IIngestionPoller
 
         using (client)
         {
-        client.Connect();
+        // Retry the connection — the first attempt may hit a transient
+        // network/server hiccup. Config errors are not retried (the client
+        // was already built above).
+        var attempts = Math.Clamp(cfg.RetryAttempts, 1, 10);
+        var connected = false;
+        for (var attempt = 1; attempt <= attempts && !connected; attempt++)
+        {
+            try
+            {
+                client.Connect();
+                connected = true;
+            }
+            catch (Exception ex)
+            {
+                if (attempt >= attempts)
+                {
+                    _log.LogError(ex,
+                        "SFTP connect failed for source {SourceId} after {Attempts} attempt(s).",
+                        s.Id, attempts);
+                    return;
+                }
+                var delaySec = 3 * attempt;
+                _log.LogWarning(
+                    "SFTP connect attempt {Attempt}/{Attempts} failed for source {SourceId}: "
+                    + "{Error} — retrying in {Delay}s.",
+                    attempt, attempts, s.Id, ex.Message, delaySec);
+                await Task.Delay(TimeSpan.FromSeconds(delaySec), ct);
+            }
+        }
         try
         {
             var files = client.ListDirectory(cfg.RemoteDirectory)

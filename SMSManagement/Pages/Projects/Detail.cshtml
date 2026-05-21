@@ -785,7 +785,7 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
 <code>customers_*.csv</code> &mdash; only files starting with <code>customers_</code><br>
 <code>orders_2026??.xlsx</code> &mdash; <code>orders_202601.xlsx</code>, <code>orders_202602.xlsx</code>, …<br>
 <code>HND_DLR_*.csv</code> &mdash; only Honda dealer drops<br><br>
-Other SFTP keys: <code>host, port, username, remoteDirectory</code>.<br><br>
+Other SFTP keys: <code>host, port, username, remoteDirectory</code>, <code>retryAttempts</code> (connection retries, default 3).<br><br>
 <strong>Auth</strong> — supply ONE of:<br>
 <code>privateKeyPem</code> &mdash; full PEM private key (<code>-----BEGIN ... PRIVATE KEY-----</code>); newlines as <code>\n</code>. Optional <code>passphrase</code> for an encrypted key.<br>
 <code>password</code> &mdash; for password-auth servers.">
