@@ -906,9 +906,12 @@ async function loadSources() {
 }
 
 function showSrcEditor(reset) {
-    document.getElementById('srcEditor').style.display = '';
-    document.getElementById('srcTestResult').textContent = '';
-    document.getElementById('srcEditTitle').textContent = reset ? 'New source binding' : 'Edit source binding';
+    const editor = document.getElementById('srcEditor');
+    if (editor) editor.style.display = '';
+    const testResult = document.getElementById('srcTestResult');
+    if (testResult) testResult.textContent = '';
+    const title = document.getElementById('srcEditTitle');
+    if (title) title.textContent = reset ? 'New source binding' : 'Edit source binding';
     if (reset) {
         document.getElementById('srcId').value = '';
         document.getElementById('srcType').value = 'SFTP';
@@ -1094,18 +1097,31 @@ document.getElementById('btnSrcTest').addEventListener('click', async () => {
     showMode('minutes'); refreshPreview();
 })();
 
+// Resilient setter — a missing element (e.g. a stale cached page) is logged
+// instead of throwing, so opening the editor never dies half-way.
+function srcSet(id, value) {
+    const el = document.getElementById(id);
+    if (!el) {
+        console.warn(`Source editor: #${id} not found — try a hard refresh (Ctrl+Shift+R).`);
+        return;
+    }
+    if (el.type === 'checkbox') el.checked = !!value;
+    else el.value = value;
+}
+
 window.editSrc = function (s) {
     showSrcEditor(false);
-    document.getElementById('srcId').value = s.id;
-    document.getElementById('srcType').value = s.sourceType;
-    window.scheduleFromCron(s.pollingSchedule || '*/5 * * * *');
-    document.getElementById('srcArchive').value = s.archiveDirectory || '';
-    document.getElementById('srcRejected').value = s.rejectedDirectory || '';
-    document.getElementById('srcAction').value = String(s.action);
-    document.getElementById('srcDup').value = String(s.duplicatePolicy);
-    document.getElementById('srcEnabled').checked = !!s.enabled;
-    document.getElementById('srcConfig').value = '';
-    document.getElementById('srcConfig').placeholder =
+    srcSet('srcId', s.id);
+    srcSet('srcType', s.sourceType);
+    if (window.scheduleFromCron) window.scheduleFromCron(s.pollingSchedule || '*/5 * * * *');
+    srcSet('srcArchive', s.archiveDirectory || '');
+    srcSet('srcRejected', s.rejectedDirectory || '');
+    srcSet('srcAction', String(s.action));
+    srcSet('srcDup', String(s.duplicatePolicy));
+    srcSet('srcEnabled', !!s.enabled);
+    srcSet('srcConfig', '');
+    const cfg = document.getElementById('srcConfig');
+    if (cfg) cfg.placeholder =
         '(Existing config is encrypted on the server. Paste JSON to overwrite it.)';
 };
 
@@ -1229,12 +1245,16 @@ window.showRejections = async function (batchId) {
             : `<div class="small text-muted mb-2">${d.shown} rejected row(s).</div>`;
         body.innerHTML = header + `
             <table class="table table-sm">
-                <thead><tr><th>Row #</th><th>Errors</th></tr></thead>
-                <tbody>${d.items.map(r => `
-                    <tr><td>${r.rowIndex}</td>
+                <thead><tr><th style="width:70px">แถวที่</th><th>เหตุผล</th>
+                    <th class="text-muted" style="width:200px">รหัส (สำหรับ IT)</th></tr></thead>
+                <tbody>${d.items.map(r => {
+                    const reasons = (r.reasons && r.reasons.length) ? r.reasons : (r.errors || []);
+                    return `<tr><td>${r.rowIndex}</td>
+                        <td class="text-danger">${reasons.map(x => esc(x)).join(', ')}</td>
                         <td>${(r.errors || []).map(e =>
-                            `<code class="small me-1">${esc(e)}</code>`).join('')}</td>
-                    </tr>`).join('')}
+                            `<code class="small text-muted me-1">${esc(e)}</code>`).join('')}</td>
+                    </tr>`;
+                }).join('')}
                 </tbody>
             </table>`;
     } catch (e) {

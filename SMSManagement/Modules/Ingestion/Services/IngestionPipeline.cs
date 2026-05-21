@@ -236,7 +236,12 @@ public sealed class IngestionPipeline : IIngestionPipeline
                     rejectionSamples.Add(new
                     {
                         rowIndex,
-                        errors = mapped.Errors
+                        errors = mapped.Errors,
+                        // Plain-language reasons for non-technical operators.
+                        reasons = mapped.Errors
+                            .Select(RejectionHumanizer.Describe)
+                            .Distinct()
+                            .ToArray()
                     });
                 continue;
             }
