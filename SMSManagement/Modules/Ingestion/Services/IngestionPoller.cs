@@ -171,46 +171,59 @@ public sealed class IngestionPoller : IIngestionPoller
                 await using (var fs = File.Create(temp))
                     client.DownloadFile(file.FullName, fs);
 
+                // A poll MUST relocate the remote file out of the polling
+                // directory, whatever happens — otherwise the next poll picks
+                // it up again and the source loops forever. Success → /archive,
+                // any failure → /error. The operator finds failed files in
+                // /error instead of seeing them re-polled endlessly.
+                var ingestOk = false;
                 try
                 {
                     var outcome = await _pipeline.IngestFileAsync(
                         s.ProjectId, s.Id, temp, forceReingest: false, ct);
+                    ingestOk = true;
                     _log.LogInformation(
                         "SFTP poll {Source} processed {File} batch={Batch} result={Result}",
                         s.Id, file.Name, outcome.BatchId, outcome.Result);
-
-                    // Pipeline already archived/deleted the temp; only the remote
-                    // file may still be present. Rename it into the remote /archive
-                    // so we don't re-pick it up. The archived name carries a
-                    // timestamp: daily exports reuse the same filename, so a
-                    // plain rename would collide with a prior run's archived
-                    // copy, throw, and leave the file to be polled forever.
-                    var archiveDir = $"{cfg.RemoteDirectory.TrimEnd('/')}/archive";
-                    TryCreateRemoteDir(client, archiveDir);
-                    var stamp = _clock.GetUtcNow().ToString("yyyyMMddHHmmss");
-                    var stem  = Path.GetFileNameWithoutExtension(file.Name);
-                    var ext   = Path.GetExtension(file.Name);
-                    var archived = $"{archiveDir}/{stem}.{stamp}{ext}";
-                    try
-                    {
-                        client.RenameFile(file.FullName, archived);
-                    }
-                    catch (Exception ex)
-                    {
-                        // The data was ingested fine; only the move failed
-                        // (permissions / archive dir). Log loudly — the file
-                        // stays put and will be skipped as a duplicate on the
-                        // next poll, but the operator needs to know it isn't
-                        // being archived.
-                        _log.LogError(ex,
-                            "SFTP poll {Source}: ingested {File} but could NOT archive it "
-                            + "to {Archived} — file left in place and will re-poll.",
-                            s.Id, file.Name, archived);
-                    }
+                }
+                catch (Exception ex)
+                {
+                    _log.LogError(ex,
+                        "SFTP poll {Source}: ingestion of {File} failed — "
+                        + "moving remote file to /error so it is not re-polled.",
+                        s.Id, file.Name);
                 }
                 finally
                 {
                     if (File.Exists(temp)) File.Delete(temp);
+                }
+
+                // Move the remote file. The archived/errored name carries a
+                // timestamp: daily exports reuse the same filename, so a plain
+                // rename would collide with a prior run's copy, throw, and
+                // leave the file to be polled forever.
+                var destDir = $"{cfg.RemoteDirectory.TrimEnd('/')}/{(ingestOk ? "archive" : "error")}";
+                TryCreateRemoteDir(client, destDir);
+                var stamp = _clock.GetUtcNow().ToString("yyyyMMddHHmmss");
+                var stem  = Path.GetFileNameWithoutExtension(file.Name);
+                var ext   = Path.GetExtension(file.Name);
+                var dest  = $"{destDir}/{stem}.{stamp}{ext}";
+                try
+                {
+                    client.RenameFile(file.FullName, dest);
+                    _log.LogInformation("SFTP poll {Source}: moved {File} → {Dest}",
+                        s.Id, file.Name, dest);
+                }
+                catch (Exception ex)
+                {
+                    // Rename failed (permissions / archive dir unwritable).
+                    // The file stays put — ingestion dedup (FileHash) stops a
+                    // re-poll from re-processing it, but the operator must fix
+                    // the SFTP permissions so files stop accumulating.
+                    _log.LogError(ex,
+                        "SFTP poll {Source}: could NOT move {File} to {Dest} — "
+                        + "check SFTP write/rename permissions.",
+                        s.Id, file.Name, dest);
                 }
             }
         }
