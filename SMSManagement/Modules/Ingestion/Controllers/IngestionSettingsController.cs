@@ -92,7 +92,17 @@ public sealed class IngestionSettingsController : ControllerBase
         }
 
         row.SourceType = req.SourceType.ToUpperInvariant();
-        row.EncryptedConfig = _crypto.Encrypt(req.Config.GetRawText());
+
+        // Config holds secrets and is never returned by GET, so the editor
+        // leaves it blank when only other fields change. An absent/null
+        // Config means "keep the stored config"; a new source must supply one.
+        var hasConfig = req.Config.ValueKind
+            is not (JsonValueKind.Undefined or JsonValueKind.Null);
+        if (hasConfig)
+            row.EncryptedConfig = _crypto.Encrypt(req.Config.GetRawText());
+        else if (req.Id is null)
+            return BadRequest("Config is required for a new source.");
+
         row.ArchiveDirectory = req.ArchiveDirectory;
         row.RejectedDirectory = req.RejectedDirectory;
         row.Action = req.Action;

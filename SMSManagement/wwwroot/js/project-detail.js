@@ -1321,16 +1321,20 @@ window.editSrc = function (s) {
 document.getElementById('formSrc').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     try {
+        const srcId = document.getElementById('srcId').value;
         const raw = document.getElementById('srcConfig').value.trim();
-        if (!raw) { toast('Paste the JSON config (or {} to clear).', 'warning'); return; }
+        // When editing, a blank config means "keep the stored one" — only a
+        // brand-new source must supply config.
+        if (!raw && !srcId) { toast('Paste the JSON config (or {} to clear).', 'warning'); return; }
         let config;
-        try { config = JSON.parse(raw); }
-        catch { toast('Config must be valid JSON', 'danger'); return; }
+        if (raw) {
+            try { config = JSON.parse(raw); }
+            catch { toast('Config must be valid JSON', 'danger'); return; }
+        }
 
         const body = {
-            id: document.getElementById('srcId').value || null,
+            id: srcId || null,
             sourceType: document.getElementById('srcType').value,
-            config,
             archiveDirectory:  document.getElementById('srcArchive').value || null,
             rejectedDirectory: document.getElementById('srcRejected').value || null,
             action:            parseInt(document.getElementById('srcAction').value, 10),
@@ -1339,6 +1343,7 @@ document.getElementById('formSrc').addEventListener('submit', async (ev) => {
             pollingSchedule:   window.scheduleToCron(),
             workflowName:      document.getElementById('srcWorkflow').value || null
         };
+        if (config !== undefined) body.config = config;   // omit → keep stored config
         await api.post(`${api_proj}/ingestion-sources`, body);
         toast('Saved.');
         document.getElementById('srcEditor').style.display = 'none';
