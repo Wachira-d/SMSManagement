@@ -99,45 +99,6 @@ public sealed class WorkflowEngine : IWorkflowEngine
 
     public async Task SignalAsync(Guid instanceId, string signal, CancellationToken ct = default)
     {
-        await ProcessSignalAsync(instanceId, signal, ct);
-
-        // A shortlink click means the recipient engaged. The SAME phone is
-        // often enrolled by several ingestion rounds — each enrollment is its
-        // own instance with its own shortlink. Clicking ONE link would
-        // otherwise stop only that one instance while the others keep
-        // reminding. Cascade the click to every other live instance of the
-        // same workflow for the same recipient so all reminders stop.
-        if (signal != "shortlink.clicked") return;
-
-        var origin = await _db.WorkflowInstances
-            .AsNoTracking()
-            .Where(i => i.Id == instanceId)
-            .Select(i => new { i.DefinitionId, i.MaskedPhone })
-            .FirstOrDefaultAsync(ct);
-        if (origin is null || string.IsNullOrEmpty(origin.MaskedPhone)) return;
-
-        var siblings = await _db.WorkflowInstances
-            .AsNoTracking()
-            .Where(i => i.Id != instanceId
-                     && i.DefinitionId == origin.DefinitionId
-                     && i.MaskedPhone == origin.MaskedPhone
-                     && i.State != WorkflowState.Completed
-                     && i.State != WorkflowState.Failed
-                     && i.State != WorkflowState.Expired)
-            .Select(i => i.Id)
-            .ToListAsync(ct);
-
-        foreach (var sib in siblings)
-            await ProcessSignalAsync(sib, signal, ct);
-
-        if (siblings.Count > 0)
-            _log.LogInformation(
-                "shortlink.clicked on instance {Id} cascaded to {Count} sibling enrollment(s) "
-                + "of the same recipient.", instanceId, siblings.Count);
-    }
-
-    private async Task ProcessSignalAsync(Guid instanceId, string signal, CancellationToken ct)
-    {
         var instance = await _db.WorkflowInstances.FindAsync([instanceId], ct);
         if (instance is null)
         {
