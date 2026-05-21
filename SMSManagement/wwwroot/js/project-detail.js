@@ -103,6 +103,7 @@ document.querySelectorAll('[data-bs-toggle="tab"]').forEach(el => {
     el.addEventListener('shown.bs.tab', (ev) => {
         const target = ev.target.getAttribute('href');
         switch (target) {
+            case '#tab-pipeline':   loadPipeline(); break;
             case '#tab-members':    if (!loaded.members)    { loaded.members    = true; loadMembers();    } break;
             case '#tab-mappings':   if (!loaded.mappings)   { loaded.mappings   = true; loadMappings(); loadRules(); } break;
             case '#tab-sources':    if (!loaded.sources)    { loaded.sources    = true; loadSources(); loadBatches(); } break;
@@ -492,6 +493,75 @@ document.querySelectorAll('#formRule [data-preset]').forEach(btn => {
         // 'clear' leaves everything blank (set() above already wiped them).
     });
 });
+
+// ==================== CAMPAIGN PIPELINE OVERVIEW ====================
+function pipelineStageHtml(s, n, isLast) {
+    const badge = {
+        ok:   '<span class="badge bg-success">พร้อม</span>',
+        warn: '<span class="badge bg-warning text-dark">ยังไม่ตั้งค่า</span>',
+        info: '<span class="badge bg-secondary">—</span>',
+    }[s.state] || '';
+    const card = `<div class="card" style="min-width:150px;flex:1 1 150px">
+        <div class="card-body text-center p-2">
+            <div style="font-size:1.7rem">${s.icon}</div>
+            <div class="fw-semibold small">${n}. ${esc(s.name)}</div>
+            <div class="small text-muted mb-1">${esc(s.desc)}</div>
+            ${badge}
+            <div class="mt-1"><a href="${s.tab}" data-bs-toggle="tab" class="small text-decoration-none">ตั้งค่า ›</a></div>
+        </div>
+    </div>`;
+    const arrow = isLast ? ''
+        : '<div class="d-flex align-items-center text-muted" style="font-size:1.3rem">→</div>';
+    return card + arrow;
+}
+
+async function loadPipeline() {
+    const el = document.getElementById('pipelineStages');
+    el.innerHTML = '<span class="text-muted small">กำลังโหลด…</span>';
+    try {
+        const [sources, mappings, rules, workflows] = await Promise.all([
+            api.get(`${api_proj}/ingestion-sources`).catch(() => []),
+            api.get(`${api_proj}/column-mappings`).catch(() => []),
+            api.get(`${api_proj}/canonical-rules`).catch(() => []),
+            api.get(`${api_proj}/workflows`).catch(() => []),
+        ]);
+        const feat  = (project && project.features) || {};
+        const notif = (project && project.notifications) || { recipients: [], triggers: {} };
+        const activeWf = (workflows || []).find(w => w.active);
+
+        const stages = [
+            { icon: '📁', name: 'แหล่งไฟล์', tab: '#tab-sources',
+              ...(sources.length
+                  ? { state: 'ok',   desc: `${sources.length} แหล่ง (SFTP/อัตโนมัติ)` }
+                  : { state: 'info', desc: 'อัปโหลดเอง (manual)' }) },
+            { icon: '🧹', name: 'ทำความสะอาด', tab: '#tab-mappings',
+              ...(mappings.length
+                  ? { state: 'ok',   desc: `${mappings.length} คอลัมน์` }
+                  : { state: 'warn', desc: 'ยังไม่ได้แมปคอลัมน์' }) },
+            { icon: '✅', name: 'ตรวจสอบ', tab: '#tab-mappings',
+              ...(rules.length
+                  ? { state: 'ok',   desc: `${rules.length} กฎ` }
+                  : { state: 'info', desc: 'ใช้กฎพื้นฐาน (เบอร์โทร)' }) },
+            { icon: '🔗', name: 'ย่อลิงก์', tab: '#tab-settings',
+              ...(feat.shortlink
+                  ? { state: 'ok',   desc: 'เปิดใช้งาน' }
+                  : { state: 'info', desc: 'ปิด' }) },
+            { icon: '📤', name: 'ส่ง SMS', tab: '#tab-workflows',
+              ...(activeWf
+                  ? { state: 'ok',   desc: `workflow: ${activeWf.name}` }
+                  : { state: 'warn', desc: 'ยังไม่มี workflow ใช้งาน' }) },
+            { icon: '📧', name: 'แจ้งผลทางอีเมล', tab: '#tab-settings',
+              ...(((notif.recipients || []).length && notif.triggers && notif.triggers.onSmsRoundComplete)
+                  ? { state: 'ok',   desc: `ส่งสรุปไป ${notif.recipients.length} อีเมล` }
+                  : { state: 'info', desc: 'ปิด / ยังไม่ตั้งอีเมล' }) },
+        ];
+        el.innerHTML = stages.map((s, i) =>
+            pipelineStageHtml(s, i + 1, i === stages.length - 1)).join('');
+    } catch (e) {
+        el.innerHTML = `<span class="text-danger small">${esc(e.message)}</span>`;
+    }
+}
+document.getElementById('btnPipelineRefresh')?.addEventListener('click', loadPipeline);
 
 // ==================== EASY SETUP (friendly file config) ====================
 const EASY_TYPES = [

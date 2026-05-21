@@ -17,6 +17,7 @@
 
 <ul class="nav nav-tabs mb-3" role="tablist">
     <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tab-settings">@Loc.Get("tab.settings")</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-pipeline">Pipeline</a></li>
     <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-members">@Loc.Get("tab.members")</a></li>
     <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-mappings">@Loc.Get("tab.mappings")</a></li>
     <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-sources">@Loc.Get("tab.sources")</a></li>
@@ -200,6 +201,26 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
                         <i class="bi bi-archive"></i> Archive
                     </button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ PIPELINE ============ -->
+    <!-- End-to-end campaign overview: every stage from file source to the
+         result email, each with a status light and a jump to its editor. -->
+    <div class="tab-pane fade" id="tab-pipeline">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Campaign pipeline — ภาพรวมการทำงานทั้งหมด</span>
+                <button id="btnPipelineRefresh" class="btn btn-sm btn-link p-0">รีเฟรช</button>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">
+                    ขั้นตอนการทำงานของแคมเปญ เรียงตามลำดับจริง — เขียว = ตั้งค่าครบ,
+                    เหลือง = ยังต้องตั้งค่า, เทา = ปิด/ไม่บังคับ. คลิก "ตั้งค่า" เพื่อไปแก้แต่ละขั้น
+                </p>
+                <div id="pipelineStages"
+                     style="display:flex;flex-wrap:wrap;align-items:stretch;gap:.25rem"></div>
             </div>
         </div>
     </div>
