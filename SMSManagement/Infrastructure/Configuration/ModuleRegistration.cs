@@ -128,6 +128,9 @@ public static class ModuleRegistration
         services.Configure<ErrorLogRetentionOptions>(cfg.GetSection("ErrorLogRetention"));
         services.AddScoped<IErrorLogPurger, ErrorLogPurger>();
 
+        // Public privacy-notice details (PDPA data-processor), editable in /Admin.
+        services.Configure<Modules.Core.Settings.PrivacyOptions>(cfg.GetSection("Privacy"));
+
         // ---------- Notifications ----------
         services.Configure<SmtpOptions>(cfg.GetSection("Smtp"));
         services.AddSingleton<IEmailSender, SmtpEmailSender>();

@@ -17,6 +17,7 @@
     <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-set-shortlink">Shortlink</a></li>
     <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-set-security">Security</a></li>
     <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-set-authen">AuthenAPI</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-set-privacy">Privacy / PDPA</a></li>
 </ul>
 
 <div class="tab-content">
@@ -193,6 +194,30 @@
             </div>
         </div>
     </div>
+
+    <!-- ============ PRIVACY / PDPA ============ -->
+    <div class="tab-pane fade" id="tab-set-privacy">
+        <div class="card">
+            <div class="card-body">
+                <p class="small text-muted">
+                    แสดงในประกาศความเป็นส่วนตัว (PDPA) บนหน้าสาธารณะ
+                    <code>/</code> — ระบุ "ผู้ประมวลผลข้อมูล / ผู้ให้บริการระบบ"
+                    ซึ่งคือองค์กรที่ดำเนินแพลตฟอร์มนี้ (ค่าคงที่ค่าเดียว ไม่ใช่รายลูกค้า).
+                </p>
+                <form id="formSetPrivacy" class="row g-2">
+                    <div class="col-md-6"><label class="form-label small">
+                        ชื่อผู้ให้บริการระบบ (Data Processor)</label>
+                        <input id="pvProcessor" class="form-control form-control-sm"
+                               placeholder="เช่น บริษัท ... จำกัด" /></div>
+                    <div class="col-md-6"><label class="form-label small">
+                        ช่องทางติดต่อ DPO (อีเมล/เบอร์)</label>
+                        <input id="pvDpo" class="form-control form-control-sm"
+                               placeholder="เช่น dpo@example.com" /></div>
+                    <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
+                </form>
+            </div>
+        </div>
+    </div>
 </div>
 
 @section Scripts {
@@ -203,6 +228,7 @@
             const s = await api.get('/api/admin/settings');
             fillSms(s.sms); fillSmtp(s.smtp); fillShortlink(s.shortlink);
             fillSecurity(s.security); fillAuthen(s.authenApi);
+            fillPrivacy(s.privacy);
         } catch (e) { toast(e.message, 'danger'); }
     }
     function isStored(v) { return v === '•••• (set)'; }
@@ -250,6 +276,10 @@
         document.getElementById('apTimeout').value = s.TimeoutSeconds ?? 30;
         document.getElementById('apRetry').value   = s.RetryAttempts ?? 1;
         document.getElementById('apKeyMark').classList.toggle('d-none', !isStored(s.ApiKey));
+    }
+    function fillPrivacy(s) {
+        document.getElementById('pvProcessor').value = (s && s.ProcessorName) || '';
+        document.getElementById('pvDpo').value       = (s && s.DpoContact) || '';
     }
 
     // Save helpers: each form gathers field→value pairs and PUTs as a batch.
@@ -365,6 +395,15 @@
             items.push({ key: 'AuthenApi:ApiKey', category: 'AuthenAPI', value: document.getElementById('apKey').value });
         await save(items);
         document.getElementById('apKey').value = '';
+        load();
+    });
+
+    document.getElementById('formSetPrivacy').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        await save([
+            { key: 'Privacy:ProcessorName', category: 'Privacy', value: document.getElementById('pvProcessor').value },
+            { key: 'Privacy:DpoContact',    category: 'Privacy', value: document.getElementById('pvDpo').value }
+        ]);
         load();
     });
 

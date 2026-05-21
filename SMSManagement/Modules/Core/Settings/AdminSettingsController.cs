@@ -46,6 +46,7 @@ public sealed class AdminSettingsController : ControllerBase
     private readonly IOptionsSnapshot<ShortlinkAbuseOptions> _abuse;
     private readonly IOptionsSnapshot<EtrackerOptions> _etracker;
     private readonly IOptionsSnapshot<InfobipOptions> _infobip;
+    private readonly IOptionsSnapshot<PrivacyOptions> _privacy;
 
     private readonly IHttpClientFactory _httpFactory;
     private readonly IEmailSender _emailSender;
@@ -62,6 +63,7 @@ public sealed class AdminSettingsController : ControllerBase
         IOptionsSnapshot<ShortlinkAbuseOptions> abuse,
         IOptionsSnapshot<EtrackerOptions> etracker,
         IOptionsSnapshot<InfobipOptions> infobip,
+        IOptionsSnapshot<PrivacyOptions> privacy,
         IHttpClientFactory httpFactory,
         IEmailSender emailSender,
         ILogger<AdminSettingsController> log)
@@ -69,7 +71,7 @@ public sealed class AdminSettingsController : ControllerBase
         _db = db; _me = me; _audit = audit; _config = config;
         _admin = admin; _session = session; _authenApi = authenApi;
         _smtp = smtp; _shortlink = shortlink; _abuse = abuse;
-        _etracker = etracker; _infobip = infobip;
+        _etracker = etracker; _infobip = infobip; _privacy = privacy;
         _httpFactory = httpFactory; _emailSender = emailSender; _log = log;
     }
 
@@ -144,6 +146,11 @@ public sealed class AdminSettingsController : ControllerBase
                 _authenApi.Value.RetryAttempts,
                 _authenApi.Value.AttemptTimeoutSeconds
             }),
+            Privacy = new
+            {
+                _privacy.Value.ProcessorName,
+                _privacy.Value.DpoContact
+            },
             Overrides = overrides
         });
     }
