@@ -485,6 +485,182 @@ document.querySelectorAll('#formRule [data-preset]').forEach(btn => {
     });
 });
 
+// ==================== EASY SETUP (friendly file config) ====================
+const EASY_TYPES = [
+    { v: 'phone',   t: '📱 เบอร์โทร' },
+    { v: 'message', t: '💬 ข้อความ' },
+    { v: 'name',    t: '👤 ชื่อ' },
+    { v: 'email',   t: '✉️ อีเมล' },
+    { v: 'url',     t: '🔗 ลิงก์' },
+    { v: 'other',   t: '📋 ข้อมูลอื่น' },
+    { v: 'ignore',  t: '🚫 ไม่ใช้คอลัมน์นี้' },
+];
+
+function easyCanonToType(c) {
+    if (!c) return 'ignore';
+    return c === 'custom' ? 'other' : c;
+}
+
+function easyToggles(type, st) {
+    st = st || {};
+    const cb = (key, label, def) =>
+        `<label class="me-3 small text-nowrap"><input type="checkbox" class="easy-opt" data-opt="${key}"`
+        + ` ${(st[key] ?? def) ? 'checked' : ''}> ${label}</label>`;
+    if (type === 'phone')
+        return cb('autoClean', 'จัดรูปแบบเบอร์อัตโนมัติ', true)
+             + cb('validFormat', 'ต้องเป็นมือถือไทยที่ถูกต้อง', true)
+             + cb('required', 'ห้ามว่าง', false);
+    if (type === 'email')
+        return cb('autoClean', 'ตัดช่องว่าง + ตัวพิมพ์เล็ก', true)
+             + cb('validFormat', 'ต้องเป็นอีเมลที่ถูกต้อง', true)
+             + cb('required', 'ห้ามว่าง', false);
+    if (type === 'message')
+        return cb('required', 'ห้ามว่าง', false)
+             + `<label class="small text-nowrap">ความยาวสูงสุด`
+             + ` <input type="number" min="1" class="easy-maxlen form-control form-control-sm d-inline-block"`
+             + ` style="width:90px" value="${st.maxLength ?? ''}" placeholder="ไม่จำกัด"> ตัว</label>`;
+    if (type === 'name' || type === 'url' || type === 'other')
+        return cb('required', 'ห้ามว่าง', false);
+    return '<span class="text-muted small">— คอลัมน์นี้จะไม่ถูกใช้ —</span>';
+}
+
+function easyRowHtml(col) {
+    const opts = EASY_TYPES.map(o =>
+        `<option value="${o.v}" ${o.v === col.type ? 'selected' : ''}>${o.t}</option>`).join('');
+    return `<tr data-header="${esc(col.header)}">
+        <td class="small fw-semibold">${esc(col.header)}</td>
+        <td class="small text-muted text-truncate" style="max-width:140px">${esc(col.sample || '')}</td>
+        <td><select class="form-select form-select-sm easy-type">${opts}</select></td>
+        <td class="easy-toggle-cell">${easyToggles(col.type, col.state)}</td>
+    </tr>`;
+}
+
+function renderEasyCols(data) {
+    const sample0 = (data.sample && data.sample[0]) || {};
+    const sugg = {};
+    (data.suggestions || []).forEach(s => { sugg[s.header] = s; });
+    const cols = (data.headers || []).map(h => {
+        const s = sugg[h] || {};
+        let type = 'ignore', state = {};
+        if (s.savedPreset) {
+            try {
+                const p = JSON.parse(s.savedPreset);
+                type = p.fieldType || 'ignore';
+                state = { autoClean: p.autoClean, required: p.required,
+                          validFormat: p.validFormat, maxLength: p.maxLength };
+            } catch { /* fall back to heuristic */ }
+        } else {
+            type = easyCanonToType(s.alreadyMapped || s.suggested);
+        }
+        return { header: h, sample: sample0[h] || '', type, state };
+    });
+    document.getElementById('easyColsBody').innerHTML = cols.map(easyRowHtml).join('');
+    document.getElementById('easyCols').classList.remove('d-none');
+    document.getElementById('easyPreview').innerHTML = '';
+    document.getElementById('easyStatus').textContent = '';
+}
+
+function easyGather() {
+    return Array.from(document.querySelectorAll('#easyColsBody tr')).map(tr => {
+        const item = {
+            sourceColumn: tr.dataset.header,
+            fieldType: tr.querySelector('.easy-type').value
+        };
+        tr.querySelectorAll('.easy-opt').forEach(cb => { item[cb.dataset.opt] = cb.checked; });
+        const ml = tr.querySelector('.easy-maxlen');
+        if (ml && ml.value) item.maxLength = parseInt(ml.value, 10);
+        return item;
+    });
+}
+
+function renderEasyPreview(data) {
+    const out = document.getElementById('easyPreview');
+    const rows = data.rows || [];
+    if (!rows.length) { out.innerHTML = '<span class="text-muted small">ไม่มีข้อมูลตัวอย่าง</span>'; return; }
+    const beforeKeys = [...new Set(rows.flatMap(r => Object.keys(r.before || {})))];
+    const afterKeys  = [...new Set(rows.flatMap(r => Object.keys(r.after  || {})))];
+
+    let html = `<div class="alert alert-info py-2 small mb-2">ตัวอย่าง ${rows.length} แถว — `
+        + `<span class="text-success fw-semibold">ผ่าน ${data.accepted}</span>, `
+        + `<span class="text-danger fw-semibold">ไม่ผ่าน ${data.rejected}</span></div>`;
+    html += '<div class="table-responsive"><table class="table table-sm table-bordered small mb-0"><thead><tr>'
+        + '<th>ผล</th>'
+        + beforeKeys.map(k => `<th class="text-muted">${esc(k)} (เดิม)</th>`).join('')
+        + afterKeys.map(k => `<th class="text-primary">${esc(k)} (หลังจัดรูปแบบ)</th>`).join('')
+        + '<th>เหตุผลที่ไม่ผ่าน</th></tr></thead><tbody>';
+    rows.forEach(r => {
+        html += `<tr class="${r.ok ? 'table-success' : 'table-danger'}">`
+            + `<td>${r.ok ? '✅' : '❌'}</td>`
+            + beforeKeys.map(k => `<td class="text-muted">${esc((r.before || {})[k] || '')}</td>`).join('')
+            + afterKeys.map(k => `<td><code>${esc((r.after || {})[k] || '')}</code></td>`).join('')
+            + `<td class="text-danger">${esc((r.reasons || []).join(', '))}</td></tr>`;
+    });
+    html += '</tbody></table></div>';
+    out.innerHTML = html;
+}
+
+(function initEasySetup() {
+    const fileInput = document.getElementById('easyFile');
+    if (!fileInput) return;
+
+    fileInput.addEventListener('change', async (ev) => {
+        const f = ev.target.files[0];
+        if (!f) return;
+        const fd = new FormData();
+        fd.append('file', f);
+        try {
+            const resp = await fetch(`${api_proj}/column-mappings/preview-headers`,
+                { method: 'POST', body: fd, credentials: 'include' });
+            const data = await resp.json();
+            if (!resp.ok) { toast(data.message || 'อ่านไฟล์ไม่สำเร็จ', 'danger'); return; }
+            renderEasyCols(data);
+        } catch (e) { toast(e.message, 'danger'); }
+    });
+
+    document.getElementById('easyColsBody').addEventListener('change', (ev) => {
+        if (!ev.target.classList.contains('easy-type')) return;
+        const tr = ev.target.closest('tr');
+        tr.querySelector('.easy-toggle-cell').innerHTML = easyToggles(ev.target.value, {});
+    });
+
+    document.getElementById('btnEasyPreview').addEventListener('click', async () => {
+        const f = fileInput.files[0];
+        if (!f) { toast('เลือกไฟล์ก่อน', 'warning'); return; }
+        const out = document.getElementById('easyPreview');
+        out.innerHTML = '<span class="text-muted small">กำลังประมวลผล…</span>';
+        const fd = new FormData();
+        fd.append('file', f);
+        fd.append('columns', JSON.stringify(easyGather()));
+        try {
+            const resp = await fetch(`${api_proj}/column-mappings/preview-cleansing`,
+                { method: 'POST', body: fd, credentials: 'include' });
+            const data = await resp.json();
+            if (!resp.ok) {
+                out.innerHTML = `<span class="text-danger small">${esc(data.message || 'ดูตัวอย่างไม่สำเร็จ')}</span>`;
+                return;
+            }
+            renderEasyPreview(data);
+        } catch (e) {
+            out.innerHTML = `<span class="text-danger small">${esc(e.message)}</span>`;
+        }
+    });
+
+    document.getElementById('btnEasySave').addEventListener('click', async () => {
+        const status = document.getElementById('easyStatus');
+        status.textContent = 'กำลังบันทึก…';
+        status.className = 'small ms-2 text-muted';
+        try {
+            await api.put(`${api_proj}/column-mappings/setup`, { columns: easyGather() });
+            status.textContent = '✓ บันทึกการตั้งค่าแล้ว';
+            status.className = 'small ms-2 text-success';
+            if (loaded.mappings) loadMappings();
+        } catch (e) {
+            status.textContent = e.message;
+            status.className = 'small ms-2 text-danger';
+        }
+    });
+})();
+
 // ==================== MAPPINGS ====================
 async function loadMappings() {
     try {

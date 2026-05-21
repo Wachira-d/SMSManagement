@@ -233,18 +233,23 @@ public sealed class ColumnMappingsController : ControllerBase
 
             var existing = await _db.ColumnMappings
                 .Where(m => m.ProjectId == projectId)
-                .Select(m => new { m.SourceColumn, m.CanonicalField })
+                .Select(m => new { m.SourceColumn, m.CanonicalField, m.PresetJson })
                 .ToListAsync(ct);
             var existingMap = existing.ToDictionary(
                 e => e.SourceColumn, e => e.CanonicalField, StringComparer.OrdinalIgnoreCase);
+            var existingPreset = existing
+                .Where(e => e.PresetJson is not null)
+                .ToDictionary(e => e.SourceColumn, e => e.PresetJson, StringComparer.OrdinalIgnoreCase);
 
             // Heuristic auto-suggest by header name. Operator can change anything;
-            // this just saves clicks for the obvious cases.
+            // this just saves clicks for the obvious cases. SavedPreset (when
+            // present) lets the friendly UI restore the exact toggles.
             var suggestions = headers.Select(h => new
             {
                 Header = h,
                 AlreadyMapped = existingMap.TryGetValue(h, out var canon) ? canon : null,
-                Suggested = existingMap.ContainsKey(h) ? null : Suggest(h)
+                Suggested = existingMap.ContainsKey(h) ? null : Suggest(h),
+                SavedPreset = existingPreset.GetValueOrDefault(h)
             });
 
             return Ok(new
