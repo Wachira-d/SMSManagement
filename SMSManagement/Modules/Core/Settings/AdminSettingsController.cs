@@ -32,15 +32,18 @@ public sealed class AdminSettingsController : ControllerBase
     private readonly AppDbContext _db;
     private readonly ICurrentUser _me;
     private readonly IAuditLogger _audit;
+    private readonly IConfiguration _config;
 
-    private readonly IOptions<AdminOptions> _admin;
-    private readonly IOptions<UserCacheAuthOptions> _session;
-    private readonly IOptions<AuthenApiOptions> _authenApi;
-    private readonly IOptions<SmtpOptions> _smtp;
-    private readonly IOptions<ShortlinkOptions> _shortlink;
-    private readonly IOptions<ShortlinkAbuseOptions> _abuse;
-    private readonly IOptions<EtrackerOptions> _etracker;
-    private readonly IOptions<InfobipOptions> _infobip;
+    // IOptionsSnapshot — recomputed per request, so a save + config reload is
+    // reflected immediately by the next GET (no stale singleton snapshot).
+    private readonly IOptionsSnapshot<AdminOptions> _admin;
+    private readonly IOptionsSnapshot<UserCacheAuthOptions> _session;
+    private readonly IOptionsSnapshot<AuthenApiOptions> _authenApi;
+    private readonly IOptionsSnapshot<SmtpOptions> _smtp;
+    private readonly IOptionsSnapshot<ShortlinkOptions> _shortlink;
+    private readonly IOptionsSnapshot<ShortlinkAbuseOptions> _abuse;
+    private readonly IOptionsSnapshot<EtrackerOptions> _etracker;
+    private readonly IOptionsSnapshot<InfobipOptions> _infobip;
 
     private readonly IHttpClientFactory _httpFactory;
     private readonly IEmailSender _emailSender;
@@ -48,19 +51,20 @@ public sealed class AdminSettingsController : ControllerBase
 
     public AdminSettingsController(
         AppDbContext db, ICurrentUser me, IAuditLogger audit,
-        IOptions<AdminOptions> admin,
-        IOptions<UserCacheAuthOptions> session,
-        IOptions<AuthenApiOptions> authenApi,
-        IOptions<SmtpOptions> smtp,
-        IOptions<ShortlinkOptions> shortlink,
-        IOptions<ShortlinkAbuseOptions> abuse,
-        IOptions<EtrackerOptions> etracker,
-        IOptions<InfobipOptions> infobip,
+        IConfiguration config,
+        IOptionsSnapshot<AdminOptions> admin,
+        IOptionsSnapshot<UserCacheAuthOptions> session,
+        IOptionsSnapshot<AuthenApiOptions> authenApi,
+        IOptionsSnapshot<SmtpOptions> smtp,
+        IOptionsSnapshot<ShortlinkOptions> shortlink,
+        IOptionsSnapshot<ShortlinkAbuseOptions> abuse,
+        IOptionsSnapshot<EtrackerOptions> etracker,
+        IOptionsSnapshot<InfobipOptions> infobip,
         IHttpClientFactory httpFactory,
         IEmailSender emailSender,
         ILogger<AdminSettingsController> log)
     {
-        _db = db; _me = me; _audit = audit;
+        _db = db; _me = me; _audit = audit; _config = config;
         _admin = admin; _session = session; _authenApi = authenApi;
         _smtp = smtp; _shortlink = shortlink; _abuse = abuse;
         _etracker = etracker; _infobip = infobip;
@@ -175,6 +179,16 @@ public sealed class AdminSettingsController : ControllerBase
         }
         await _db.SaveChangesAsync(ct);
 
+        // Re-read the SystemSettings table into configuration so the new
+        // values take effect immediately — IOptionsSnapshot / IOptionsMonitor
+        // consumers pick them up on their next resolve, no restart needed.
+        var reloaded = false;
+        if (_config is IConfigurationRoot root)
+        {
+            root.Reload();
+            reloaded = true;
+        }
+
         // Audit a single rollup line — content is sensitive (could include
         // SMTP passwords, ApiKeys), so we record the *keys* only.
         await _audit.WriteAsync(new AuditEntry(
@@ -184,7 +198,7 @@ public sealed class AdminSettingsController : ControllerBase
             Request.Headers.UserAgent.ToString(),
             HttpContext.TraceIdentifier), ct);
 
-        return Ok(new { Saved = req.Items.Count, RestartRequired = true });
+        return Ok(new { Saved = req.Items.Count, RestartRequired = !reloaded });
     }
 
     /// <summary>

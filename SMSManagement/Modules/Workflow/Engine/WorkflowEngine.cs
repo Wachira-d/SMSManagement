@@ -50,7 +50,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
         FieldEncryptor crypto,
         ISmsDispatcher sms,
         IShortlinkService shortlinks,
-        IOptions<ShortlinkOptions> shortlinkOpts,
+        IOptionsSnapshot<ShortlinkOptions> shortlinkOpts,
         CampaignMetrics metrics,
         TimeProvider clock,
         ILogger<WorkflowEngine> log,

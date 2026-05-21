@@ -44,6 +44,15 @@ if (!testingEnabled)
         builder.Environment, builder.Configuration, builder.Configuration, bootstrapLog);
 }
 
+// ---------- DB-backed settings: SystemSettings table overrides appsettings ----------
+// Layered last so values saved in /Admin/Settings win over the file defaults
+// for the whole process. Reloaded live when settings are saved (see
+// AdminSettingsController). Safe before migrations — the provider returns
+// empty if the table is missing.
+if (!testingEnabled)
+    builder.Configuration.AddSystemSettings(
+        builder.Configuration.GetConnectionString("Default"));
+
 // ---------- DataProtection: persist keys across restarts / instances ----------
 var keyDir = builder.Configuration["DataProtection:KeyDirectory"];
 if (!string.IsNullOrWhiteSpace(keyDir))

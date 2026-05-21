@@ -18,18 +18,21 @@ namespace SMSManagement.Modules.Notifications;
 /// </summary>
 public sealed class SmtpEmailSender : IEmailSender
 {
-    private readonly SmtpOptions _opts;
+    private readonly IOptionsMonitor<SmtpOptions> _optsMonitor;
     private readonly ILogger<SmtpEmailSender> _log;
 
-    public SmtpEmailSender(IOptions<SmtpOptions> opts, ILogger<SmtpEmailSender> log)
+    public SmtpEmailSender(IOptionsMonitor<SmtpOptions> opts, ILogger<SmtpEmailSender> log)
     {
-        _opts = opts.Value;
+        _optsMonitor = opts;
         _log = log;
     }
 
     public async Task SendAsync(EmailMessage message, CancellationToken ct = default)
     {
         if (message.To.Count == 0) return;
+
+        // Re-read on every send so a settings change applies without restart.
+        var _opts = _optsMonitor.CurrentValue;
 
         if (string.IsNullOrWhiteSpace(_opts.Host) && string.IsNullOrWhiteSpace(_opts.PickupDirectory))
         {

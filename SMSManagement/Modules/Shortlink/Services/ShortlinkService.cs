@@ -47,7 +47,7 @@ public sealed class ShortlinkService : IShortlinkService
     public ShortlinkService(
         AppDbContext db,
         FieldEncryptor crypto,
-        IOptions<ShortlinkOptions> opts,
+        IOptionsSnapshot<ShortlinkOptions> opts,
         TimeProvider clock,
         CampaignMetrics metrics,
         ILogger<ShortlinkService> log)
