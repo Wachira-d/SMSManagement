@@ -31,11 +31,13 @@ public static class StartupDatabaseGuard
 
         // Announce the auto-create policy explicitly so the operator can see
         // why auto-create did or didn't fire when a 4060 surfaces later.
-        var autoCreateEnabled = config.GetValue<bool>("Database:AutoCreateDatabaseInDev");
-        var autoCreateActive = env.IsDevelopment() && autoCreateEnabled;
+        // Honoured in every environment (Production included) — gated only by
+        // the flag, since the app login still needs CREATE DATABASE rights for
+        // it to actually succeed.
+        var autoCreateEnabled = config.GetValue<bool>("Database:AutoCreateDatabase");
         log.LogInformation(
-            "Database auto-create policy: {Status} (env={Environment}, flag Database:AutoCreateDatabaseInDev={Flag})",
-            autoCreateActive ? "ENABLED — will CREATE DATABASE on SQL #4060" : "DISABLED",
+            "Database auto-create policy: {Status} (env={Environment}, flag Database:AutoCreateDatabase={Flag})",
+            autoCreateEnabled ? "ENABLED — will CREATE DATABASE on SQL #4060" : "DISABLED",
             env.EnvironmentName, autoCreateEnabled);
 
         log.LogInformation("Probing database connectivity at startup…");
@@ -46,14 +48,15 @@ public static class StartupDatabaseGuard
             log.LogInformation("Database probe OK.");
             return;
         }
-        catch (SqlException ex) when (ex.Number == 4060 && autoCreateActive)
+        catch (SqlException ex) when (ex.Number == 4060 && autoCreateEnabled)
         {
-            // Dev-only convenience: connect to master, CREATE DATABASE,
-            // then retry the probe. Production must pre-create the DB so
-            // the app login doesn't need CREATE DATABASE on master.
+            // Connect to master, CREATE DATABASE, then retry the probe. This
+            // runs in any environment — but the app login must hold CREATE
+            // DATABASE on master (the dbcreator server role). Least-privilege
+            // setups that withhold it should pre-create the database instead.
             log.LogWarning(
-                "SQL #4060 caught and Database:AutoCreateDatabaseInDev = true. " +
-                "Attempting auto-create via master connection (Development only).");
+                "SQL #4060 caught and Database:AutoCreateDatabase = true. " +
+                "Attempting auto-create via master connection.");
 
             if (await TryAutoCreateDatabaseAsync(log, connStr!, ct))
             {
@@ -68,19 +71,19 @@ public static class StartupDatabaseGuard
                     // Auto-create succeeded but retry still fails — probably
                     // the user doesn't exist in the new DB. Surface with the
                     // standard hint flow.
-                    var d = BuildDiagnostic(retryEx, connStr, autoCreateEnabled, env.IsDevelopment());
+                    var d = BuildDiagnostic(retryEx, connStr, autoCreateEnabled);
                     LogFriendly(log, d, retryEx);
                     throw new ApplicationException(d.OneLineMessage, retryEx);
                 }
             }
             // Auto-create failed → fall through to the standard error path.
-            var diag = BuildDiagnostic(ex, connStr, autoCreateEnabled, env.IsDevelopment());
+            var diag = BuildDiagnostic(ex, connStr, autoCreateEnabled);
             LogFriendly(log, diag, ex);
             throw new ApplicationException(diag.OneLineMessage, ex);
         }
         catch (SqlException ex)
         {
-            var diag = BuildDiagnostic(ex, connStr, autoCreateEnabled, env.IsDevelopment());
+            var diag = BuildDiagnostic(ex, connStr, autoCreateEnabled);
             LogFriendly(log, diag, ex);
             // Carry the full diagnostic in the exception message — anyone
             // who only sees the exception (debugger, crash dump, unhandled-
@@ -144,10 +147,9 @@ public static class StartupDatabaseGuard
             await cmd.ExecuteNonQueryAsync(ct);
 
             log.LogWarning(
-                "Auto-created database {Database} via master. This is a " +
-                "Development convenience — production must pre-create the DB " +
-                "(CREATE DATABASE {Database};).",
-                bracketed, bracketed);
+                "Auto-created database {Database} via master connection. " +
+                "EF Core migrations run next and will build the schema.",
+                bracketed);
             return true;
         }
         catch (Exception ex)
@@ -164,7 +166,6 @@ public static class StartupDatabaseGuard
     public static async Task MigrateAsync(IServiceProvider services, CancellationToken ct = default)
     {
         var log = services.GetRequiredService<ILogger<Program>>();
-        var env = services.GetRequiredService<IHostEnvironment>();
         var config = services.GetRequiredService<IConfiguration>();
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -176,8 +177,7 @@ public static class StartupDatabaseGuard
         catch (SqlException ex)
         {
             var diag = BuildDiagnostic(ex, db.Database.GetConnectionString(),
-                config.GetValue<bool>("Database:AutoCreateDatabaseInDev"),
-                env.IsDevelopment());
+                config.GetValue<bool>("Database:AutoCreateDatabase"));
             LogFriendly(log, diag, ex);
             throw new ApplicationException(diag.OneLineMessage, ex);
         }
@@ -200,11 +200,10 @@ public static class StartupDatabaseGuard
     }
 
     private static Diagnostic BuildDiagnostic(
-        SqlException ex, string? connectionString,
-        bool autoCreateFlag = false, bool isDevelopment = false)
+        SqlException ex, string? connectionString, bool autoCreateFlag = false)
     {
         var (server, user, db) = ExtractEndpoint(connectionString);
-        var hint = HintFor(ex.Number, user, autoCreateFlag, isDevelopment);
+        var hint = HintFor(ex.Number, user, autoCreateFlag);
         return new Diagnostic(ex.Number, server, user, db, hint,
             ex.Message.TrimEnd('.'));
     }
@@ -241,13 +240,11 @@ public static class StartupDatabaseGuard
 
     /// <summary>Map well-known SqlException Number → actionable advice.
     /// Numbers from https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors
-    /// The <paramref name="autoCreateFlag"/> + <paramref name="isDevelopment"/>
-    /// pair lets the 4060 hint tell the operator the live config state — so
-    /// if they thought auto-create was on but it didn't fire, the hint
-    /// shows them which precondition failed.</summary>
+    /// <paramref name="autoCreateFlag"/> lets the 4060 hint reflect the live
+    /// config state — so if the operator expected auto-create to fire, the
+    /// hint shows them which precondition failed.</summary>
     private static string HintFor(
-        int sqlErrorNumber, string? user,
-        bool autoCreateFlag = false, bool isDevelopment = false)
+        int sqlErrorNumber, string? user, bool autoCreateFlag = false)
         => sqlErrorNumber switch
     {
         18486 => $"Account [{user}] is LOCKED. Unlock with:\n" +
@@ -265,7 +262,7 @@ public static class StartupDatabaseGuard
                  $"  USE [<db>]; CREATE USER [{user}] FOR LOGIN [{user}]; " +
                  $"ALTER ROLE db_owner ADD MEMBER [{user}];",
 
-        4060 => BuildHint4060(autoCreateFlag, isDevelopment),
+        4060 => BuildHint4060(autoCreateFlag),
 
         40615 => "Azure SQL firewall is blocking this IP. Add the IP to the server firewall in the Azure portal.",
 
@@ -286,7 +283,7 @@ public static class StartupDatabaseGuard
              " in the Microsoft docs. The text of the original exception is above."
     };
 
-    private static string BuildHint4060(bool autoCreateFlag, bool isDevelopment)
+    private static string BuildHint4060(bool autoCreateFlag)
     {
         var baseHint =
             "Database does not exist OR the login has no access to it.\n" +
@@ -294,25 +291,17 @@ public static class StartupDatabaseGuard
             "                USE [<db>]; CREATE USER [<login>] FOR LOGIN [<login>];\n" +
             "                ALTER ROLE db_owner ADD MEMBER [<login>];";
 
-        // Tell the operator the LIVE state of the dev auto-create flag.
-        // If it shows "ENABLED" but the create didn't happen, the build
-        // they're running is older than the auto-create feature — rebuild.
-        var policy = (isDevelopment, autoCreateFlag) switch
-        {
-            (true, true) =>
-                "\n  Auto-create policy: ENABLED in this build but did not fire. " +
-                "This means either (a) the binary running predates the auto-create " +
-                "feature — rebuild + restart; (b) the app login lacks CREATE " +
-                "DATABASE on master — check the previous log line for the master " +
-                "connection error.",
-            (true, false) =>
-                "\n  Auto-create policy: DISABLED (Database:AutoCreateDatabaseInDev=false). " +
-                "Set it to true in appsettings.Development.json to have the app " +
-                "auto-create on next start.",
-            (false, _) =>
-                "\n  Auto-create policy: DISABLED — only honoured when " +
-                "ASPNETCORE_ENVIRONMENT=Development. Production must pre-create."
-        };
+        // Reflect the live state of the auto-create flag so the operator
+        // knows whether to expect the app to self-heal or to act manually.
+        var policy = autoCreateFlag
+            ? "\n  Auto-create policy: ENABLED but did not fire. The app login " +
+              "almost certainly lacks CREATE DATABASE on master — grant it the " +
+              "dbcreator server role (ALTER SERVER ROLE dbcreator ADD MEMBER " +
+              "[<login>];), or pre-create the database with the manual fix above. " +
+              "Check the previous log line for the master connection error."
+            : "\n  Auto-create policy: DISABLED (Database:AutoCreateDatabase=false). " +
+              "Set it to true so the app creates the database on next start " +
+              "(the login then needs the dbcreator server role).";
 
         return baseHint + policy;
     }

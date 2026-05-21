@@ -11,17 +11,15 @@ namespace SMSManagement.Tests.Infrastructure;
 /// </summary>
 public sealed class StartupDatabaseGuardTests
 {
-    // HintFor is internal — invoke via reflection. The method has two
-    // optional bool params (autoCreateFlag, isDevelopment) that defaulted
-    // to false; supply them explicitly because reflection doesn't fill
-    // defaults the way the C# compiler does.
-    private static string Invoke(int sqlNumber, string? user,
-        bool autoCreateFlag = false, bool isDevelopment = false)
+    // HintFor is internal — invoke via reflection. The optional autoCreateFlag
+    // bool defaults to false; supply it explicitly because reflection doesn't
+    // fill defaults the way the C# compiler does.
+    private static string Invoke(int sqlNumber, string? user, bool autoCreateFlag = false)
     {
         var m = typeof(StartupDatabaseGuard).GetMethod("HintFor",
             BindingFlags.Static | BindingFlags.NonPublic)!;
         return (string)m.Invoke(null, new object?[]
-            { sqlNumber, user, autoCreateFlag, isDevelopment })!;
+            { sqlNumber, user, autoCreateFlag })!;
     }
 
     private static string Redact(string? cs)
@@ -52,38 +50,27 @@ public sealed class StartupDatabaseGuardTests
         => Invoke(18487, "admin").Should().Contain("ALTER LOGIN [admin]");
 
     [Fact]
-    public void Hint_4060_dev_with_flag_on_explains_why_autocreate_did_not_fire()
+    public void Hint_4060_with_flag_on_explains_why_autocreate_did_not_fire()
     {
-        // If the operator sees this it almost always means the binary they're
-        // running predates the auto-create feature — the hint says exactly that.
-        var hint = Invoke(4060, "admin", autoCreateFlag: true, isDevelopment: true);
-        hint.Should().Contain("ENABLED in this build but did not fire");
-        hint.Should().Contain("rebuild");
+        // Flag on but a 4060 still surfaced — the login lacks CREATE DATABASE.
+        var hint = Invoke(4060, "admin", autoCreateFlag: true);
+        hint.Should().Contain("ENABLED but did not fire");
+        hint.Should().Contain("dbcreator");
     }
 
     [Fact]
-    public void Hint_4060_dev_with_flag_off_tells_operator_how_to_enable()
+    public void Hint_4060_with_flag_off_tells_operator_how_to_enable()
     {
-        var hint = Invoke(4060, "admin", autoCreateFlag: false, isDevelopment: true);
+        var hint = Invoke(4060, "admin", autoCreateFlag: false);
         hint.Should().Contain("DISABLED");
-        hint.Should().Contain("AutoCreateDatabaseInDev");
-        hint.Should().Contain("appsettings.Development.json");
-    }
-
-    [Fact]
-    public void Hint_4060_prod_says_must_pre_create()
-    {
-        var hint = Invoke(4060, "admin", autoCreateFlag: true, isDevelopment: false);
-        hint.Should().Contain("only honoured when");
-        hint.Should().Contain("ASPNETCORE_ENVIRONMENT=Development");
-        hint.Should().Contain("Production must pre-create");
+        hint.Should().Contain("AutoCreateDatabase");
     }
 
     [Fact]
     public void Hint_4060_always_includes_manual_fix_sql()
     {
-        foreach (var (flag, dev) in new[] { (true,true),(false,true),(true,false),(false,false) })
-            Invoke(4060, "admin", flag, dev)
+        foreach (var flag in new[] { true, false })
+            Invoke(4060, "admin", flag)
                 .Should().Contain("CREATE DATABASE")
                 .And.Contain("CREATE USER");
     }

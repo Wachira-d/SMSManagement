@@ -8,7 +8,7 @@ namespace SMSManagement.Infrastructure.Bootstrap;
 /// <summary>
 /// Dev-only convenience that ensures every cryptographic secret the app
 /// needs is populated before DI starts resolving services. Mirrors the
-/// <c>Database:AutoCreateDatabaseInDev</c> pattern:
+/// <c>Database:AutoCreateDatabase</c> pattern:
 ///
 ///   - In Development AND with <c>Secrets:AutoGenerateInDev = true</c>:
 ///     missing secrets are generated, persisted to <c>dev-secrets.json</c>
