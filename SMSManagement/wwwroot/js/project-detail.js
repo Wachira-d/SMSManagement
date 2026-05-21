@@ -1694,11 +1694,27 @@ function renderFormView() {
     list.querySelectorAll('[data-step]').forEach(card => bindStepCard(card));
 }
 
+// Known workflow signals shown as plain-language events. The model still
+// stores the raw signal name (e.g. "shortlink.clicked"); only the label is
+// friendly. An unknown signal already in the spec is preserved as-is.
+const WF_SIGNALS = {
+    'shortlink.clicked':  '📲 ผู้รับคลิกลิงก์ในข้อความ',
+    'sms.sent':           '✅ SMS ถูกส่งออกเรียบร้อย',
+    'delivery.confirmed': '📬 ยืนยันส่งถึงเครื่องแล้ว',
+};
+function wfSigSelectHtml(currentSig) {
+    let opts = Object.entries(WF_SIGNALS)
+        .map(([v, l]) => `<option value="${v}" ${v === currentSig ? 'selected' : ''}>${l}</option>`)
+        .join('');
+    if (currentSig && !WF_SIGNALS[currentSig])
+        opts += `<option value="${esc(currentSig)}" selected>${esc(currentSig)}</option>`;
+    return `<select class="form-select form-select-sm sig-name">${opts}</select>`;
+}
+
 function stepCardHtml(name, step, allSteps) {
-    const otherSteps = allSteps.filter(s => s !== name);
     const signalRows = Object.entries(step.onSignal || {}).map(([sig, tgt]) => `
         <tr data-sig="${esc(sig)}">
-            <td><input class="form-control form-control-sm sig-name" value="${esc(sig)}" /></td>
+            <td>${wfSigSelectHtml(sig)}</td>
             <td>→ <select class="form-select form-select-sm sig-target">
                 ${allSteps.map(s => `<option value="${esc(s)}" ${s===tgt?'selected':''}>${esc(s)}</option>`).join('')}
             </select></td>
@@ -1710,58 +1726,58 @@ function stepCardHtml(name, step, allSteps) {
       <div class="card-body p-2">
         <div class="row g-2">
           <div class="col-md-4">
-            <label class="form-label small">Step name</label>
+            <label class="form-label small">ชื่อขั้นตอน</label>
             <input class="form-control form-control-sm step-name" value="${esc(name)}" />
           </div>
           <div class="col-md-3">
-            <label class="form-label small">Type</label>
+            <label class="form-label small">ขั้นตอนนี้ทำอะไร</label>
             <select class="form-select form-select-sm step-type">
-              <option value="send_sms"     ${step.type==='send_sms'    ?'selected':''}>send_sms</option>
-              <option value="issue_coupon" ${step.type==='issue_coupon'?'selected':''}>issue_coupon</option>
-              <option value="wait"         ${step.type==='wait'        ?'selected':''}>wait</option>
-              <option value="complete"     ${step.type==='complete'    ?'selected':''}>complete</option>
+              <option value="send_sms"     ${step.type==='send_sms'    ?'selected':''}>📤 ส่ง SMS</option>
+              <option value="issue_coupon" ${step.type==='issue_coupon'?'selected':''}>🎟 ออกคูปอง</option>
+              <option value="wait"         ${step.type==='wait'        ?'selected':''}>⏳ รอ (ไม่ส่งอะไร)</option>
+              <option value="complete"     ${step.type==='complete'    ?'selected':''}>🏁 จบ workflow</option>
             </select>
           </div>
           <div class="col-md-3 step-wait-col" style="${step.type==='complete'||step.type==='issue_coupon'?'display:none':''}">
-            <label class="form-label small">Wait (d.HH:MM:SS)</label>
+            <label class="form-label small">รอ (วัน.ชม:นาที:วินาที)</label>
             <input class="form-control form-control-sm step-wait" value="${esc(step.wait||'')}" placeholder="2.00:00:00" />
           </div>
           <div class="col-md-2 step-maxrep-col" style="${step.type==='complete'||step.type==='issue_coupon'?'display:none':''}">
-            <label class="form-label small">Max repeats</label>
+            <label class="form-label small">ทำซ้ำได้สูงสุด</label>
             <input type="number" min="1" max="20" class="form-control form-control-sm step-maxrep"
                    value="${step.maxRepeats||1}" />
           </div>
           <div class="col-12 step-template-col" style="${step.type==='send_sms'?'':'display:none'}">
-            <label class="form-label small">SMS body template (use {{column}} placeholders)</label>
+            <label class="form-label small">ข้อความ SMS — ใช้ <code>{{ชื่อคอลัมน์}}</code> แทนค่าจากไฟล์ เช่น {{name}} {{url}}</label>
             <textarea class="form-control form-control-sm step-template" rows="2">${esc(step.template||'')}</textarea>
           </div>
           <div class="col-12 step-coupon-col" style="${step.type==='issue_coupon'?'':'display:none'}">
-            <label class="form-label small">Coupon batch to allocate from</label>
+            <label class="form-label small">ชุดคูปองที่จะแจก</label>
             <select class="form-select form-select-sm step-coupon-batch">
-              <option value="">— pick a batch —</option>
+              <option value="">— เลือกชุดคูปอง —</option>
             </select>
             <div class="form-text">
-              Allocates one coupon per recipient and exposes
-              <code>{{coupon_code}}</code> / <code>{{coupon_url}}</code> to later send_sms steps.
+              แจกคูปอง 1 ใบต่อผู้รับ 1 คน และส่งค่า
+              <code>{{coupon_code}}</code> / <code>{{coupon_url}}</code> ให้ขั้นส่ง SMS ถัดไปใช้
             </div>
           </div>
           <div class="col-12 step-transitions-col" style="${step.type==='complete'?'display:none':''}">
-            <label class="form-label small">Transitions</label>
+            <label class="form-label small">เงื่อนไข — เมื่อเกิดเหตุการณ์ ให้ข้ามไปขั้นตอนใด</label>
             <table class="table table-sm mb-1">
-              <thead><tr><th>On signal</th><th>Target</th><th></th></tr></thead>
+              <thead><tr><th style="width:52%">เมื่อเกิดเหตุการณ์</th><th>→ ไปขั้นตอน</th><th></th></tr></thead>
               <tbody class="sig-body">${signalRows}</tbody>
             </table>
-            <button type="button" class="btn btn-link btn-sm p-0 add-sig">+ Add signal</button>
-            <span class="ms-3 small">On timeout →
+            <button type="button" class="btn btn-link btn-sm p-0 add-sig">+ เพิ่มเงื่อนไข</button>
+            <div class="small mt-1 text-muted">ถ้าไม่มีเหตุการณ์ใดเกิดภายในเวลา "รอ" ข้างบน → ไปขั้นตอน
               <select class="form-select form-select-sm d-inline-block w-auto step-ontimeout">
-                <option value="">(none)</option>
+                <option value="">(จบ — ไม่ทำต่อ)</option>
                 ${allSteps.map(s => `<option value="${esc(s)}" ${s===step.onTimeout?'selected':''}>${esc(s)}</option>`).join('')}
               </select>
-            </span>
+            </div>
           </div>
           <div class="col-12 text-end">
             <button type="button" class="btn btn-link btn-sm text-danger p-0 step-del">
-              <i class="bi bi-trash"></i> Delete step
+              <i class="bi bi-trash"></i> ลบขั้นตอนนี้
             </button>
           </div>
         </div>
@@ -1802,7 +1818,7 @@ function bindStepCard(card) {
         const others = Object.keys(wfModel.steps);
         tbody.insertAdjacentHTML('beforeend', `
             <tr data-sig="">
-                <td><input class="form-control form-control-sm sig-name" value="" /></td>
+                <td>${wfSigSelectHtml('')}</td>
                 <td>→ <select class="form-select form-select-sm sig-target">
                     ${others.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('')}
                 </select></td>
