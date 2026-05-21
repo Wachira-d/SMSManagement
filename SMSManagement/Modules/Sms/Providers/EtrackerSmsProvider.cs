@@ -93,6 +93,13 @@ public sealed class EtrackerSmsProvider : ISmsProvider
             "Dispatching SMS provider={Provider} project={ProjectId} to={MaskedTo}",
             Name, request.ProjectId, PiiMasking.MaskPhone(normalised));
 
+        // Full request as an equivalent mesapi URL (password masked) so the
+        // exact to / from / type / text / servid being sent can be diffed
+        // against a known-good manual request.
+        _log.LogInformation(
+            "Etracker request project={ProjectId} url={RequestUrl}",
+            request.ProjectId, BuildDebugUrl(endpoint, fields));
+
         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct)
             .ConfigureAwait(false);
         var raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
@@ -182,6 +189,20 @@ public sealed class EtrackerSmsProvider : ISmsProvider
             "200" => new ProviderTestResult(true, "etracker accepted the test request."),
             _ => new ProviderTestResult(false, $"etracker status {status}: {DescribeStatus(status)}"),
         };
+    }
+
+    /// <summary>Renders the request as an equivalent mesapi GET URL for
+    /// diagnostics — the "pass" value is masked so secrets never hit the log.</summary>
+    private static string BuildDebugUrl(string endpoint, IReadOnlyDictionary<string, string> fields)
+    {
+        var qs = string.Join("&", fields.Select(kv =>
+        {
+            var value = kv.Key.Equals("pass", StringComparison.OrdinalIgnoreCase)
+                ? "***"
+                : Uri.EscapeDataString(kv.Value);
+            return $"{kv.Key}={value}";
+        }));
+        return $"{endpoint}?{qs}";
     }
 
     /// <summary>Encodes text as a UCS-2 (UTF-16 big-endian) hex string — the
