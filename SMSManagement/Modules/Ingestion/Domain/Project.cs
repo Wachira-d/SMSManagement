@@ -113,6 +113,14 @@ public sealed class ColumnMapping
     /// <summary>Separator inserted BEFORE this value when joining
     /// (ignored on the first entry). Defaults to a single space when null.</summary>
     public string? JoinSeparator { get; set; }
+
+    /// <summary>
+    /// Plain-language "field type + options" the operator picked in the
+    /// friendly setup screen (JSON of <c>ColumnSetupItem</c>). The engine runs
+    /// off CanonicalField/TransformChainJson — this only lets the UI re-render
+    /// the friendly toggles. Null for mappings created via the advanced editor.
+    /// </summary>
+    public string? PresetJson { get; set; }
 }
 
 public sealed class IngestionBatch

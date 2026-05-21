@@ -10,6 +10,7 @@ using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Identity.Domain;
 using SMSManagement.Modules.Identity.Services;
 using SMSManagement.Modules.Ingestion.Domain;
+using SMSManagement.Modules.Ingestion.Processors;
 
 namespace SMSManagement.Modules.Ingestion.Controllers;
 
@@ -57,7 +58,7 @@ public sealed class ColumnMappingsController : ControllerBase
             .OrderBy(m => m.CanonicalField).ThenBy(m => m.JoinOrder).ThenBy(m => m.SourceColumn)
             .Select(m => new
             {
-                m.Id, m.SourceColumn, m.CanonicalField, m.JoinOrder, m.JoinSeparator,
+                m.Id, m.SourceColumn, m.CanonicalField, m.JoinOrder, m.JoinSeparator, m.PresetJson,
                 TransformChain = JsonSerializer.Deserialize<string[]>(m.TransformChainJson, (JsonSerializerOptions?)null)
             })
             .ToListAsync(ct);
@@ -102,6 +103,100 @@ public sealed class ColumnMappingsController : ControllerBase
         await _db.SaveChangesAsync(ct);
         return Ok(new { existing.Id, existing.SourceColumn, existing.CanonicalField,
                         existing.JoinOrder, existing.JoinSeparator });
+    }
+
+    public sealed record SetupRequest(List<ColumnSetupItem> Columns);
+
+    /// <summary>
+    /// Friendly bulk setup: the operator picks a plain-language field type and
+    /// toggles per column; this expands each into the engine's column mapping
+    /// + validation rule and persists everything in one go. The friendly
+    /// choices are kept on <c>ColumnMapping.PresetJson</c> so the UI can
+    /// re-render the toggles later.
+    /// </summary>
+    [HttpPut("setup")]
+    public async Task<IActionResult> Setup(
+        Guid projectId, [FromBody] SetupRequest req, CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Admin, ct);
+        if (req?.Columns is null)
+            return BadRequest("Columns are required.");
+
+        foreach (var c in req.Columns)
+            if (!FieldPresetExpander.IsKnownType(c.FieldType))
+                return BadRequest($"Unknown field type '{c.FieldType}'. Allowed: "
+                    + string.Join(", ", FieldPresetExpander.FieldTypes));
+
+        var maps = await _db.ColumnMappings
+            .Where(m => m.ProjectId == projectId).ToListAsync(ct);
+        var rules = await _db.CanonicalFieldRules
+            .Where(r => r.ProjectId == projectId).ToListAsync(ct);
+
+        var wantedRules = new Dictionary<string, CanonicalFieldRule>(StringComparer.OrdinalIgnoreCase);
+        var touchedCanonicals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in req.Columns)
+        {
+            if (string.IsNullOrWhiteSpace(item.SourceColumn)) continue;
+
+            var map = maps.FirstOrDefault(m =>
+                string.Equals(m.SourceColumn, item.SourceColumn, StringComparison.OrdinalIgnoreCase));
+
+            if (item.FieldType.Equals("ignore", StringComparison.OrdinalIgnoreCase))
+            {
+                if (map is not null) _db.ColumnMappings.Remove(map);
+                continue;
+            }
+
+            var exp = FieldPresetExpander.Expand(item, projectId);
+            touchedCanonicals.Add(exp.CanonicalField);
+
+            if (map is null)
+            {
+                map = new ColumnMapping { ProjectId = projectId, SourceColumn = item.SourceColumn };
+                _db.ColumnMappings.Add(map);
+            }
+            map.CanonicalField = exp.CanonicalField;
+            map.TransformChainJson = JsonSerializer.Serialize(exp.TransformChain);
+            map.PresetJson = JsonSerializer.Serialize(item);
+
+            if (exp.Rule is not null)
+                wantedRules[exp.CanonicalField] = exp.Rule;   // last column wins for a shared canonical
+        }
+
+        // Sync validation rules for every canonical the setup touched.
+        foreach (var canonical in touchedCanonicals)
+        {
+            var current = rules.FirstOrDefault(r =>
+                string.Equals(r.CanonicalField, canonical, StringComparison.OrdinalIgnoreCase));
+
+            if (wantedRules.TryGetValue(canonical, out var want))
+            {
+                if (current is null)
+                {
+                    _db.CanonicalFieldRules.Add(want);
+                }
+                else
+                {
+                    current.Required = want.Required;
+                    current.MinLength = want.MinLength;
+                    current.MaxLength = want.MaxLength;
+                    current.Pattern = want.Pattern;
+                    current.StartsWithAny = want.StartsWithAny;
+                    current.EndsWithAny = want.EndsWithAny;
+                    current.AllowedValues = want.AllowedValues;
+                    current.UpdatedAt = DateTimeOffset.UtcNow;
+                }
+            }
+            else if (current is not null)
+            {
+                // The preset no longer asks for any validation on this field.
+                _db.CanonicalFieldRules.Remove(current);
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { Saved = req.Columns.Count });
     }
 
     /// <summary>
@@ -164,6 +259,98 @@ public sealed class ColumnMappingsController : ControllerBase
         {
             return BadRequest(new { Message = $"Failed to parse file: {ex.Message}" });
         }
+    }
+
+    /// <summary>
+    /// Runs the friendly column setup against a sample of the uploaded file
+    /// and returns each row before vs after cleansing plus a plain-language
+    /// accept/reject verdict. Nothing is saved or ingested.
+    /// </summary>
+    [HttpPost("preview-cleansing")]
+    [Authorize(Policy = "ingestion.upload")]
+    [RequestSizeLimit(MaxPreviewBytes)]
+    public async Task<IActionResult> PreviewCleansing(
+        Guid projectId, IFormFile file, [FromForm] string columns,
+        CancellationToken ct = default)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Member, ct);
+
+        if (file is null || file.Length == 0)
+            return BadRequest(new { Message = "No file uploaded." });
+        if (file.Length > MaxPreviewBytes)
+            return BadRequest(new { Message = $"Preview file too large (max {MaxPreviewBytes / (1024 * 1024)} MB)." });
+
+        var ext = Path.GetExtension(file.FileName);
+        if (!AllowedExt.Contains(ext))
+            return BadRequest(new { Message = $"Unsupported extension {ext}." });
+
+        List<ColumnSetupItem>? setup;
+        try
+        {
+            setup = JsonSerializer.Deserialize<List<ColumnSetupItem>>(
+                columns ?? "[]",
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch (JsonException)
+        {
+            return BadRequest(new { Message = "Invalid columns configuration." });
+        }
+        if (setup is null || setup.Count == 0)
+            return BadRequest(new { Message = "No columns configured." });
+
+        // Build the engine config in memory — never persisted.
+        var maps = new List<ColumnMapping>();
+        var rules = new Dictionary<string, CanonicalFieldRule>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in setup)
+        {
+            if (string.IsNullOrWhiteSpace(item.SourceColumn)
+                || item.FieldType.Equals("ignore", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var exp = FieldPresetExpander.Expand(item, projectId);
+            maps.Add(new ColumnMapping
+            {
+                ProjectId = projectId,
+                SourceColumn = item.SourceColumn,
+                CanonicalField = exp.CanonicalField,
+                TransformChainJson = JsonSerializer.Serialize(exp.TransformChain)
+            });
+            if (exp.Rule is not null) rules[exp.CanonicalField] = exp.Rule;
+        }
+
+        List<Dictionary<string, string>> samples;
+        try
+        {
+            (_, samples) = ext.ToLowerInvariant() switch
+            {
+                ".xlsx" or ".xls" => ReadExcelPreview(file),
+                _                 => await ReadCsvPreviewAsync(file, ct)
+            };
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { Message = $"Failed to parse file: {ex.Message}" });
+        }
+
+        var mapper = new ColumnMapper(maps, rules);
+        var rows = new List<object>();
+        var accepted = 0;
+        foreach (var raw in samples)
+        {
+            var result = mapper.Map(raw);
+            if (result.IsValid) accepted++;
+            rows.Add(new
+            {
+                Before = maps.ToDictionary(
+                    m => m.SourceColumn,
+                    m => raw.TryGetValue(m.SourceColumn, out var v) ? v : string.Empty,
+                    StringComparer.OrdinalIgnoreCase),
+                After = result.Row,
+                Ok = result.IsValid,
+                Reasons = result.Errors.Select(RejectionHumanizer.Describe).Distinct().ToList()
+            });
+        }
+
+        return Ok(new { Rows = rows, Accepted = accepted, Rejected = samples.Count - accepted });
     }
 
     private static async Task<(string[] headers, List<Dictionary<string, string>> samples)>
