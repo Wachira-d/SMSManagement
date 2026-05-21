@@ -476,21 +476,50 @@ public sealed class WorkflowEngine : IWorkflowEngine
 
         var baseUrl = _shortlinkOpts.PublicBaseUrl.TrimEnd('/');
 
-        // Cheap URL detection; production should use a vetted Regex with timeout.
-        var tokens = body.Split(' ');
-        for (var i = 0; i < tokens.Length; i++)
+        // Shorten EVERY http/https URL in the body — not just long ones. A
+        // shortlink isn't only about saving characters: it carries the
+        // WorkflowInstanceId so a click raises the "shortlink.clicked" signal.
+        // Skip a URL only when it is already one of our shortlinks.
+        var matches = UrlPatternCache.Matches(body);
+        if (matches.Count == 0) return body;
+
+        var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (System.Text.RegularExpressions.Match m in matches)
         {
-            if (Uri.TryCreate(tokens[i], UriKind.Absolute, out var uri)
-                && (uri.Scheme == "http" || uri.Scheme == "https")
-                && tokens[i].Length > 32)
+            var token = m.Value;
+            if (replacements.ContainsKey(token)) continue;
+
+            // Peel trailing sentence punctuation off the URL itself.
+            var trail = string.Empty;
+            var url = token;
+            while (url.Length > 0 && ".,;:!?)]}>\"'".IndexOf(url[^1]) >= 0)
             {
-                var slug = await _shortlinks.CreateAsync(
-                    projectId, tokens[i], instance.Id, TimeSpan.FromDays(60), null, ct);
-                tokens[i] = $"{baseUrl}/{slug}";
+                trail = url[^1] + trail;
+                url = url[..^1];
             }
+
+            if (url.StartsWith(baseUrl, StringComparison.OrdinalIgnoreCase)
+                || !Uri.TryCreate(url, UriKind.Absolute, out var uri)
+                || (uri.Scheme != "http" && uri.Scheme != "https"))
+            {
+                replacements[token] = token;   // already a shortlink, or not a real URL
+                continue;
+            }
+
+            var slug = await _shortlinks.CreateAsync(
+                projectId, url, instance.Id, TimeSpan.FromDays(60), null, ct);
+            replacements[token] = $"{baseUrl}/{slug}{trail}";
         }
-        return string.Join(' ', tokens);
+
+        return UrlPatternCache.Replace(body,
+            m => replacements.TryGetValue(m.Value, out var r) ? r : m.Value);
     }
+
+    private static readonly System.Text.RegularExpressions.Regex UrlPatternCache =
+        new(@"https?://\S+",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            | System.Text.RegularExpressions.RegexOptions.Compiled,
+            TimeSpan.FromMilliseconds(200));
 
     private async Task TransitionAsync(
         WorkflowInstance instance, string nextStep, string trigger,
