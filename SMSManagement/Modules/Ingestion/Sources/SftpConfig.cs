@@ -32,6 +32,15 @@ public static class SftpClientFactory
     {
         if (!string.IsNullOrWhiteSpace(cfg.PrivateKeyPem))
         {
+            // Catch the common mistake of pasting a public-key fingerprint
+            // (ssh-keygen -l output) instead of the private key file.
+            if (!cfg.PrivateKeyPem.Contains("PRIVATE KEY", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    "privateKeyPem is not a private key. Paste the full PEM block " +
+                    "starting with '-----BEGIN ... PRIVATE KEY-----'. The value supplied " +
+                    "looks like a public-key fingerprint, which cannot be used to log in — " +
+                    "use the private key file, or switch to password auth.");
+
             using var keyStream = new MemoryStream(
                 System.Text.Encoding.UTF8.GetBytes(cfg.PrivateKeyPem));
             var keyFile = string.IsNullOrEmpty(cfg.Passphrase)
