@@ -452,29 +452,35 @@ public sealed class WorkflowEngine : IWorkflowEngine
     private async Task<string> ReplaceUrlsWithShortlinksAsync(
         string body, WorkflowInstance instance, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(_shortlinkOpts.PublicBaseUrl))
+        // Project-level toggle + per-project shortlink base URL. When
+        // ShortlinkEnabled = false, leave URLs as their original form
+        // (operator opted out). IgnoreQueryFilters: the engine runs on behalf
+        // of the system, and ExecuteStepAsync can be driven by an anonymous
+        // shortlink click (SignalAsync) which has no project membership — the
+        // project-scope filter would otherwise hide the project and wrongly
+        // skip shortening.
+        var projectId = await ProjectIdForAsync(instance.DefinitionId, ct);
+        var pcfg = await _db.Projects
+            .IgnoreQueryFilters()
+            .Where(p => p.Id == projectId)
+            .Select(p => new { p.ShortlinkEnabled, p.ShortlinkBaseUrl })
+            .FirstOrDefaultAsync(ct);
+        if (pcfg is null || !pcfg.ShortlinkEnabled) return body;
+
+        // Per-project base URL wins; fall back to the global default.
+        var effectiveBase = !string.IsNullOrWhiteSpace(pcfg.ShortlinkBaseUrl)
+            ? pcfg.ShortlinkBaseUrl
+            : _shortlinkOpts.PublicBaseUrl;
+        if (string.IsNullOrWhiteSpace(effectiveBase))
         {
             _log.LogWarning(
-                "Shortlink:PublicBaseUrl not configured — leaving URLs as-is.");
+                "Shortlink base URL not configured (project {ProjectId} has none and "
+                + "global Shortlink:PublicBaseUrl is blank) — leaving URLs as-is.",
+                projectId);
             return body;
         }
 
-        // Project-level toggle: when ShortlinkEnabled = false, leave URLs as
-        // their original form (operator opted out — e.g. they're tracking
-        // clicks via a third-party redirector and don't want a double-hop).
-        // IgnoreQueryFilters: the engine runs on behalf of the system, and
-        // ExecuteStepAsync can be driven by an anonymous shortlink click
-        // (SignalAsync) which has no project membership — the project-scope
-        // filter would otherwise hide the project and wrongly skip shortening.
-        var projectId = await ProjectIdForAsync(instance.DefinitionId, ct);
-        var shortlinkOn = await _db.Projects
-            .IgnoreQueryFilters()
-            .Where(p => p.Id == projectId)
-            .Select(p => p.ShortlinkEnabled)
-            .FirstOrDefaultAsync(ct);
-        if (!shortlinkOn) return body;
-
-        var baseUrl = _shortlinkOpts.PublicBaseUrl.TrimEnd('/');
+        var baseUrl = effectiveBase.TrimEnd('/');
 
         // Shorten EVERY http/https URL in the body — not just long ones. A
         // shortlink isn't only about saving characters: it carries the

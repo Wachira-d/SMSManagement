@@ -49,7 +49,8 @@ public sealed class ProjectsController : ControllerBase
         bool? WorkflowEnabled = null,
         bool? IngestionEnabled = null,
         bool? EmailAlertsEnabled = null,
-        string? CouponRedeemDomain = null);
+        string? CouponRedeemDomain = null,
+        string? ShortlinkBaseUrl = null);
 
     private static readonly System.Text.RegularExpressions.Regex AlphabetRegex =
         new("^[A-Za-z0-9_-]+$", System.Text.RegularExpressions.RegexOptions.Compiled);
@@ -151,7 +152,7 @@ public sealed class ProjectsController : ControllerBase
         {
             p.Id, p.Code, p.Name, p.DefaultProvider, p.CreatedAt, p.ArchivedAt,
             p.RunningNumber, p.CouponRedeemDomain,
-            Shortlink = new { p.ShortlinkSlugLength, p.ShortlinkAlphabet },
+            Shortlink = new { p.ShortlinkSlugLength, p.ShortlinkAlphabet, p.ShortlinkBaseUrl },
             Features = new
             {
                 Sms = p.SmsEnabled,
@@ -340,6 +341,24 @@ public sealed class ProjectsController : ControllerBase
                     return Conflict(new { Message =
                         $"Domain '{domain}' is already the coupon domain of another project." });
                 project.CouponRedeemDomain = domain;
+            }
+        }
+
+        if (req.ShortlinkBaseUrl is not null)
+        {
+            var url = req.ShortlinkBaseUrl.Trim().TrimEnd('/');
+            if (url.Length == 0)
+            {
+                project.ShortlinkBaseUrl = null;   // clear → use global default
+            }
+            else if (!Uri.TryCreate(url, UriKind.Absolute, out var u)
+                     || (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps))
+            {
+                return BadRequest("ShortlinkBaseUrl must be an absolute http(s) URL, e.g. https://sms.example.com/s");
+            }
+            else
+            {
+                project.ShortlinkBaseUrl = url;
             }
         }
 

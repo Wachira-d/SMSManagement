@@ -128,8 +128,9 @@ function fillSettings(p) {
     document.getElementById('featIngestion').checked = p.features.ingestion;
     document.getElementById('featEmail').checked     = p.features.emailAlerts;
 
-    document.getElementById('slLength').value = p.shortlink.shortlinkSlugLength ?? '';
-    document.getElementById('slAlpha').value  = p.shortlink.shortlinkAlphabet ?? '';
+    document.getElementById('slLength').value  = p.shortlink.shortlinkSlugLength ?? '';
+    document.getElementById('slAlpha').value   = p.shortlink.shortlinkAlphabet ?? '';
+    document.getElementById('slBaseUrl').value = p.shortlink.shortlinkBaseUrl ?? '';
 
     document.getElementById('notifEmails').value  = (p.notifications.recipients || []).join(', ');
     document.getElementById('notifPrefix').value  = (p.notifications.subjectPrefix || '');
@@ -171,7 +172,8 @@ document.getElementById('formShortlink').addEventListener('submit', (ev) => {
     const alpha = document.getElementById('slAlpha').value;
     saveAndReload({
         shortlinkSlugLength: len === '' ? null : parseInt(len, 10),
-        shortlinkAlphabet:   alpha || ''
+        shortlinkAlphabet:   alpha || '',
+        shortlinkBaseUrl:    document.getElementById('slBaseUrl').value.trim()
     }, 'Shortlink config saved.');
 });
 document.getElementById('formNotif').addEventListener('submit', (ev) => {

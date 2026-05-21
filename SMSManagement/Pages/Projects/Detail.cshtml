@@ -88,6 +88,15 @@
                     <div class="card-body">
                         <form id="formShortlink">
                             <div class="mb-2">
+                                <label class="form-label small">Shortlink domain (base URL)</label>
+                                <input id="slBaseUrl" class="form-control" type="url"
+                                       placeholder="https://sms.ipsossurvey.com/s" />
+                                <div class="form-text">
+                                    โดเมนที่ใช้เขียนลิงก์ย่อในข้อความของโปรเจ็คนี้ — ลิงก์จะเป็น
+                                    <code>{โดเมนนี้}/{slug}</code>. เว้นว่าง = ใช้ค่ากลางของระบบ.
+                                </div>
+                            </div>
+                            <div class="mb-2">
                                 <label class="form-label small">Slug length (4-16)</label>
                                 <input id="slLength" type="number" min="4" max="16" class="form-control" />
                                 <div class="form-text">Blank = use platform default (8).</div>

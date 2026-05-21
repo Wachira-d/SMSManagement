@@ -93,6 +93,16 @@ public sealed class Project
     /// the /r/{RunningNumber}/{token} form.
     /// </summary>
     public string? CouponRedeemDomain { get; set; }
+
+    /// <summary>
+    /// Per-project public base URL for shortlinks written into this project's
+    /// SMS bodies (e.g. "https://sms.ipsossurvey.com/s"). Null/blank => use the
+    /// global <c>Shortlink:PublicBaseUrl</c>. The slug is appended as
+    /// <c>{base}/{slug}</c>. Only affects how outgoing links are *written* —
+    /// slug resolution is cross-project, so any configured host that routes to
+    /// the platform resolves every project's slugs.
+    /// </summary>
+    public string? ShortlinkBaseUrl { get; set; }
 }
 
 public sealed class ColumnMapping
