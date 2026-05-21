@@ -731,6 +731,7 @@ async function loadSources() {
 
 function showSrcEditor(reset) {
     document.getElementById('srcEditor').style.display = '';
+    document.getElementById('srcTestResult').textContent = '';
     document.getElementById('srcEditTitle').textContent = reset ? 'New source binding' : 'Edit source binding';
     if (reset) {
         document.getElementById('srcId').value = '';
@@ -754,6 +755,36 @@ function showSrcEditor(reset) {
 document.getElementById('btnSrcNew').addEventListener('click', () => showSrcEditor(true));
 document.getElementById('btnSrcCancel').addEventListener('click', () => {
     document.getElementById('srcEditor').style.display = 'none';
+});
+
+document.getElementById('btnSrcTest').addEventListener('click', async () => {
+    const btn = document.getElementById('btnSrcTest');
+    const out = document.getElementById('srcTestResult');
+    const sourceType = document.getElementById('srcType').value;
+
+    let config;
+    try {
+        config = JSON.parse(document.getElementById('srcConfig').value || '{}');
+    } catch (e) {
+        out.textContent = 'Config is not valid JSON: ' + e.message;
+        out.className = 'small ms-2 text-danger';
+        return;
+    }
+
+    btn.disabled = true;
+    out.textContent = 'Testing…';
+    out.className = 'small ms-2 text-muted';
+    try {
+        const res = await api.post(`${api_proj}/ingestion-sources/test-connection`,
+            { sourceType, config });
+        out.textContent = res.message;
+        out.className = 'small ms-2 ' + (res.ok ? 'text-success' : 'text-danger');
+    } catch (e) {
+        out.textContent = e.message;
+        out.className = 'small ms-2 text-danger';
+    } finally {
+        btn.disabled = false;
+    }
 });
 
 // ============ POLLING SCHEDULE PICKER ============

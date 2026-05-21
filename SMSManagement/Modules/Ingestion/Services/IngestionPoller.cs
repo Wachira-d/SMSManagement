@@ -19,6 +19,9 @@ namespace SMSManagement.Modules.Ingestion.Services;
 /// </summary>
 public sealed class IngestionPoller : IIngestionPoller
 {
+    private static readonly JsonSerializerOptions CaseInsensitiveJson =
+        new() { PropertyNameCaseInsensitive = true };
+
     private readonly AppDbContext _db;
     private readonly FieldEncryptor _crypto;
     private readonly IIngestionPipeline _pipeline;
@@ -100,7 +103,9 @@ public sealed class IngestionPoller : IIngestionPoller
         SftpConfig cfg;
         try
         {
-            cfg = JsonSerializer.Deserialize<SftpConfig>(_crypto.Decrypt(s.EncryptedConfig))
+            // Case-insensitive: the editor stores camelCase keys (host, port…).
+            cfg = JsonSerializer.Deserialize<SftpConfig>(
+                      _crypto.Decrypt(s.EncryptedConfig), CaseInsensitiveJson)
                   ?? throw new InvalidOperationException("Empty SFTP config.");
         }
         catch (Exception ex)
@@ -112,7 +117,7 @@ public sealed class IngestionPoller : IIngestionPoller
         SftpClient client;
         try
         {
-            client = BuildSftpClient(cfg);
+            client = SftpClientFactory.Create(cfg);
         }
         catch (Exception ex)
         {
@@ -167,49 +172,9 @@ public sealed class IngestionPoller : IIngestionPoller
         }
     }
 
-    /// <summary>
-    /// Builds an <see cref="SftpClient"/> from the binding's config. Private-key
-    /// auth takes precedence when <c>privateKeyPem</c> is supplied (optionally
-    /// passphrase-protected); otherwise <c>password</c> is used. One of the two
-    /// must be present.
-    /// </summary>
-    private static SftpClient BuildSftpClient(SftpConfig cfg)
-    {
-        if (!string.IsNullOrWhiteSpace(cfg.PrivateKeyPem))
-        {
-            using var keyStream = new MemoryStream(
-                System.Text.Encoding.UTF8.GetBytes(cfg.PrivateKeyPem));
-            var keyFile = string.IsNullOrEmpty(cfg.Passphrase)
-                ? new PrivateKeyFile(keyStream)
-                : new PrivateKeyFile(keyStream, cfg.Passphrase);
-            return new SftpClient(cfg.Host, cfg.Port, cfg.Username, keyFile);
-        }
-
-        if (!string.IsNullOrWhiteSpace(cfg.Password))
-            return new SftpClient(cfg.Host, cfg.Port, cfg.Username, cfg.Password);
-
-        throw new InvalidOperationException(
-            "SFTP config must supply either privateKeyPem or password.");
-    }
-
     private static void TryCreateRemoteDir(SftpClient client, string path)
     {
         try { if (!client.Exists(path)) client.CreateDirectory(path); }
         catch { /* idempotent best-effort */ }
-    }
-
-    /// <summary>JSON shape of <c>IngestionSourceSettings.EncryptedConfig</c> for SFTP.</summary>
-    private sealed class SftpConfig
-    {
-        public string Host { get; set; } = string.Empty;
-        public int Port { get; set; } = 22;
-        public string Username { get; set; } = string.Empty;
-        public string PrivateKeyPem { get; set; } = string.Empty;
-        /// <summary>Optional passphrase for an encrypted private key.</summary>
-        public string Passphrase { get; set; } = string.Empty;
-        /// <summary>Used when no private key is supplied (password auth).</summary>
-        public string Password { get; set; } = string.Empty;
-        public string RemoteDirectory { get; set; } = "/incoming";
-        public string FilePattern { get; set; } = "*.csv";
     }
 }

@@ -48,6 +48,8 @@ public sealed class IngestionSettingsController : ControllerBase
         bool Enabled,
         string PollingSchedule);
 
+    public sealed record TestConnectionRequest(string SourceType, JsonElement Config);
+
     [HttpGet]
     public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
     {
@@ -121,6 +123,25 @@ public sealed class IngestionSettingsController : ControllerBase
 
         jobs.Enqueue<IIngestionPoller>(p => p.PollSourceAsync(settingsId, CancellationToken.None));
         return Accepted(new { settingsId, status = "queued" });
+    }
+
+    /// <summary>
+    /// Verifies a source binding can be reached with the supplied config,
+    /// without saving it or running the pipeline. Lets operators validate
+    /// SFTP host/credentials/path before committing the binding.
+    /// </summary>
+    [HttpPost("test-connection")]
+    public async Task<IActionResult> TestConnection(
+        Guid projectId, [FromBody] TestConnectionRequest req, CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Admin, ct);
+
+        if (!AllowedSources.Contains(req.SourceType))
+            return BadRequest($"SourceType must be one of: {string.Join(", ", AllowedSources)}");
+
+        var result = await SourceConnectionTester.TestAsync(
+            req.SourceType, req.Config.GetRawText(), ct);
+        return Ok(new { result.Ok, result.Message });
     }
 
     [HttpDelete("{settingsId:guid}")]
