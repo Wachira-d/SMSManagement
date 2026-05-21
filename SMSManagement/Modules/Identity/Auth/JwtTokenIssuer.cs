@@ -25,6 +25,7 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
     private readonly AdminOptions _adminOpts;
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly ILogger<JwtTokenIssuer> _log;
     private SigningCredentials? _signing;
 
     public JwtTokenIssuer(
@@ -32,13 +33,15 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
         IOptions<UserCacheAuthOptions> sessionOpts,
         IOptions<AdminOptions> adminOpts,
         AppDbContext db,
-        TimeProvider clock)
+        TimeProvider clock,
+        ILogger<JwtTokenIssuer> log)
     {
         _opts = opts.Value;
         _sessionOpts = sessionOpts.Value;
         _adminOpts = adminOpts.Value;
         _db = db;
         _clock = clock;
+        _log = log;
     }
 
     /// <summary>Lazy — see <c>Sha256PasswordHasher</c> for the deferral rationale.</summary>
@@ -126,15 +129,26 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
             return existing;
         }
 
+        // Bootstrap admin: if the system has no system_admin yet, the first
+        // person to log in is promoted automatically. Stops a fresh AD-backed
+        // deployment from having zero admins (and no way to reach /Admin/*).
+        var noAdminYet = !await _db.Users
+            .AnyAsync(u => u.IsSystemAdmin && u.Status == "Active", ct);
+
         var created = new Modules.Identity.Domain.User
         {
             ExternalSubject = cached.Username,
             Email = cached.Email ?? string.Empty,
             DisplayName = cached.DisplayName ?? cached.Username,
-            LastLoginAt = _clock.GetUtcNow()
+            LastLoginAt = _clock.GetUtcNow(),
+            IsSystemAdmin = noAdminYet
         };
         _db.Users.Add(created);
         await _db.SaveChangesAsync(ct);
+        if (noAdminYet)
+            _log.LogWarning(
+                "First user '{User}' promoted to system_admin — no admin existed.",
+                created.ExternalSubject);
         return created;
     }
 

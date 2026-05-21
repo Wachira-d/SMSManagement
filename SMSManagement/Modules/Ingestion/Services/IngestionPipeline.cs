@@ -291,8 +291,17 @@ public sealed class IngestionPipeline : IIngestionPipeline
         switch (settings.Action)
         {
             case PostProcessAction.Archive:
+                // A missing archive directory must not abort the run — the rows
+                // were already ingested. Log and leave the file; failing here
+                // would also block the SFTP poller from archiving the remote
+                // copy, making it re-poll the same file forever.
                 if (string.IsNullOrEmpty(settings.ArchiveDirectory))
-                    throw new InvalidOperationException("ArchiveDirectory not configured.");
+                {
+                    _log.LogWarning(
+                        "PostProcess=Archive but ArchiveDirectory not configured for "
+                        + "source {SourceId} — file left in place.", settings.Id);
+                    break;
+                }
                 await TryMoveAsync(filePath, settings.ArchiveDirectory, string.Empty, ct);
                 break;
 

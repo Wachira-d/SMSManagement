@@ -181,11 +181,32 @@ public sealed class IngestionPoller : IIngestionPoller
 
                     // Pipeline already archived/deleted the temp; only the remote
                     // file may still be present. Rename it into the remote /archive
-                    // so we don't re-pick it up.
+                    // so we don't re-pick it up. The archived name carries a
+                    // timestamp: daily exports reuse the same filename, so a
+                    // plain rename would collide with a prior run's archived
+                    // copy, throw, and leave the file to be polled forever.
                     var archiveDir = $"{cfg.RemoteDirectory.TrimEnd('/')}/archive";
                     TryCreateRemoteDir(client, archiveDir);
-                    var archived = $"{archiveDir}/{file.Name}";
-                    client.RenameFile(file.FullName, archived);
+                    var stamp = _clock.GetUtcNow().ToString("yyyyMMddHHmmss");
+                    var stem  = Path.GetFileNameWithoutExtension(file.Name);
+                    var ext   = Path.GetExtension(file.Name);
+                    var archived = $"{archiveDir}/{stem}.{stamp}{ext}";
+                    try
+                    {
+                        client.RenameFile(file.FullName, archived);
+                    }
+                    catch (Exception ex)
+                    {
+                        // The data was ingested fine; only the move failed
+                        // (permissions / archive dir). Log loudly — the file
+                        // stays put and will be skipped as a duplicate on the
+                        // next poll, but the operator needs to know it isn't
+                        // being archived.
+                        _log.LogError(ex,
+                            "SFTP poll {Source}: ingested {File} but could NOT archive it "
+                            + "to {Archived} — file left in place and will re-poll.",
+                            s.Id, file.Name, archived);
+                    }
                 }
                 finally
                 {

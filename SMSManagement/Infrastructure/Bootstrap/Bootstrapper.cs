@@ -66,6 +66,12 @@ public static class Bootstrapper
         // Idempotent — flips no rows that already have the flag.
         await PromoteAsync(db, log, opts.PromoteToSystemAdmin, ct);
 
+        // Safety net: a deployment must never be left with zero admins (no way
+        // to reach /Admin/*). If no system_admin exists but users already do,
+        // promote the earliest-created user. New deployments get the same
+        // guarantee at first login (see JwtTokenIssuer).
+        await EnsureFirstUserAdminAsync(db, log, ct);
+
         // ---- Path 1: explicit Bootstrap config ----
         if (!string.IsNullOrWhiteSpace(opts.AdminUsername))
         {
@@ -209,6 +215,26 @@ public static class Bootstrapper
                 "Bootstrap: SEEDED admin user '{Username}'. Rotate this credential immediately.",
                 username);
         }
+    }
+
+    private static async Task EnsureFirstUserAdminAsync(
+        AppDbContext db, ILogger log, CancellationToken ct)
+    {
+        var hasAdmin = await db.Users
+            .AnyAsync(u => u.IsSystemAdmin && u.Status == "Active", ct);
+        if (hasAdmin) return;
+
+        var first = await db.Users
+            .Where(u => u.Status == "Active")
+            .OrderBy(u => u.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+        if (first is null) return;   // no users yet — first login handles it
+
+        first.IsSystemAdmin = true;
+        await db.SaveChangesAsync(ct);
+        log.LogWarning(
+            "Bootstrap: no system_admin existed — promoted earliest user '{User}' ({Email}).",
+            first.ExternalSubject, first.Email);
     }
 
     private static async Task PromoteAsync(
