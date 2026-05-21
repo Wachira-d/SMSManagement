@@ -129,13 +129,40 @@ public sealed class SmsRoundSummaryNotifier : ISmsRoundSummaryNotifier
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(p => p.Id == batch.ProjectId, ct);
 
-        if (project is { EmailAlertsEnabled: true, NotifyOnSmsRoundComplete: true })
+        // Log the outcome explicitly so an operator can see WHY a round did or
+        // did not produce a summary email (the single most common support
+        // question). Warning-level skips surface in /Admin/ErrorLogs.
+        if (project is null)
+        {
+            _log.LogWarning(
+                "SMS round summary: batch {BatchId} — project {ProjectId} not found.",
+                batch.Id, batch.ProjectId);
+        }
+        else if (!project.EmailAlertsEnabled || !project.NotifyOnSmsRoundComplete)
+        {
+            _log.LogWarning(
+                "SMS round summary skipped for batch {BatchId}: project '{Project}' has "
+                + "EmailAlertsEnabled={Alerts}, NotifyOnSmsRoundComplete={Notify}.",
+                batch.Id, project.Name, project.EmailAlertsEnabled,
+                project.NotifyOnSmsRoundComplete);
+        }
+        else
         {
             var recipients = IngestionBatchNotifier.ParseRecipients(project.NotificationEmails);
-            if (recipients.Length > 0)
-                await _email.SendAsync(BuildEmail(project, batch, sms, recipients), ct);
+            if (recipients.Length == 0)
+            {
+                _log.LogWarning(
+                    "SMS round summary skipped for batch {BatchId}: project '{Project}' has "
+                    + "no notification email addresses configured.", batch.Id, project.Name);
+            }
             else
-                _log.LogDebug("Batch {BatchId}: no SMS-summary recipients configured.", batch.Id);
+            {
+                await _email.SendAsync(BuildEmail(project, batch, sms, recipients), ct);
+                _log.LogInformation(
+                    "SMS round summary handed to the email sender for batch {BatchId} — "
+                    + "{Count} recipient(s): {Recipients}.",
+                    batch.Id, recipients.Length, string.Join(", ", recipients));
+            }
         }
 
         await _db.SaveChangesAsync(ct);
