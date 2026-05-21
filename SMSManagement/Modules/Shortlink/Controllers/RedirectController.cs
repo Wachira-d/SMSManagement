@@ -7,7 +7,6 @@ using SMSManagement.Modules.Workflow.Engine;
 namespace SMSManagement.Modules.Shortlink.Controllers;
 
 [ApiController]
-[Route("s")]
 public sealed class RedirectController : ControllerBase
 {
     private readonly IShortlinkService _shortlinks;
@@ -27,7 +26,13 @@ public sealed class RedirectController : ControllerBase
         _log = log;
     }
 
-    [HttpGet("{slug}")]
+    // Shortlinks resolve at the bare root — "{domain}/{slug}" — now that the
+    // operator console lives under "/campaign". "/s/{slug}" is kept so links
+    // already sent under the old scheme keep working. Razor Pages and other
+    // controllers use literal route segments, which out-rank this {slug}
+    // parameter, so "/campaign", "/blocked", etc. are never shadowed.
+    [HttpGet("/{slug}")]
+    [HttpGet("/s/{slug}")]
     [EnableRateLimiting("shortlink")]
     public async Task<IActionResult> Get(string slug, CancellationToken ct)
     {
