@@ -17,17 +17,23 @@ public interface ISmsRoundSummaryNotifier
 }
 
 /// <summary>
-/// Sends the per-round SMS summary. A "round" is one ingestion batch; the
-/// round is complete when every workflow it started is terminal and every
-/// SMS those workflows produced has settled (Sent/Delivered/Failed/Rejected/
-/// Expired). Tolerant of misconfig — a settled round is always stamped so it
-/// is never re-scanned, even when email is disabled.
+/// Sends the per-round SMS summary. A "round" is one ingestion batch. The
+/// round is summarised once every workflow it started is terminal and every
+/// SMS has reached a final delivery state (Delivered/Failed/Rejected/Expired)
+/// — "Sent" is NOT final, since a delivery notification later flips it to
+/// Delivered/Failed, so the summary waits for the DLR. As a backstop (no DLR
+/// configured, or a workflow stuck awaiting action), a round is summarised
+/// anyway once it is older than <see cref="MaxWait"/>. Tolerant of misconfig —
+/// a summarised round is stamped so it is never re-scanned.
 /// </summary>
 public sealed class SmsRoundSummaryNotifier : ISmsRoundSummaryNotifier
 {
     // Grace period after ingestion before a batch is considered — gives the
     // workflow engine time to tick and enqueue the round's SMS.
     private static readonly TimeSpan Grace = TimeSpan.FromMinutes(2);
+    // Backstop: summarise a round even if SMS never reach a final delivery
+    // state (no DLR wired) or a workflow is stuck non-terminal.
+    private static readonly TimeSpan MaxWait = TimeSpan.FromHours(24);
     private const int BatchScanCap = 25;
 
     private readonly AppDbContext _db;
@@ -74,6 +80,10 @@ public sealed class SmsRoundSummaryNotifier : ISmsRoundSummaryNotifier
 
     private async Task TryNotifyAsync(IngestionBatch batch, CancellationToken ct)
     {
+        // Past MaxWait we summarise whatever state the round is in — covers a
+        // workflow stuck non-terminal or SMS that never get a delivery report.
+        var expired = _clock.GetUtcNow() - batch.IngestedAt > MaxWait;
+
         // 1. Every workflow the batch started must be terminal — otherwise more
         //    SMS may still be enqueued and the round is not over.
         var workflows = await _db.WorkflowInstances
@@ -82,7 +92,7 @@ public sealed class SmsRoundSummaryNotifier : ISmsRoundSummaryNotifier
             .Select(w => new { w.Id, w.State })
             .ToListAsync(ct);
 
-        if (workflows.Any(w => w.State is not (
+        if (!expired && workflows.Any(w => w.State is not (
                 WorkflowState.Completed or WorkflowState.Failed or WorkflowState.Expired)))
             return;
 
@@ -97,8 +107,12 @@ public sealed class SmsRoundSummaryNotifier : ISmsRoundSummaryNotifier
                 m.SentAt, m.DeliveredAt))
             .ToListAsync(ct);
 
-        // 3. Wait until every SMS has settled.
-        if (sms.Any(m => m.Status is SmsStatus.Queued or SmsStatus.Sending))
+        // 3. Wait until every SMS has reached a final delivery state. "Sent"
+        //    (gateway-accepted) is NOT final — a DLR later flips it to
+        //    Delivered/Failed, so the summary would otherwise report stale
+        //    counts. Past MaxWait we stop waiting.
+        if (!expired && sms.Any(m => m.Status is
+                SmsStatus.Queued or SmsStatus.Sending or SmsStatus.Sent))
             return;
 
         // The round is settled — stamp now so it is summarised exactly once,
