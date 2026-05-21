@@ -366,3 +366,6 @@ FodyWeavers.xsd
 
 # Auto-generated dev crypto secrets
 dev-secrets.json
+
+# DataProtection key ring — must never be committed (encrypts auth cookies)
+dataprotection-keys/
