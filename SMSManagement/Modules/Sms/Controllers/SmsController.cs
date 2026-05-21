@@ -118,7 +118,7 @@ public sealed class SmsController : ControllerBase
             {
                 x.Id, x.Provider, x.Status, x.MaskedTo, x.Attempts,
                 x.CreatedAt, x.ScheduledFor, x.SentAt, x.DeliveredAt,
-                x.ProviderMessageId, x.ErrorCode
+                x.ProviderMessageId, x.ErrorCode, x.RawProviderResponse
             })
             .FirstOrDefaultAsync(ct);
         return m is null ? NotFound() : Ok(m);

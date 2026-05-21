@@ -44,4 +44,9 @@ public sealed class SmsMessage
     public DateTimeOffset? SentAt { get; set; }
     public DateTimeOffset? DeliveredAt { get; set; }
     public string? ErrorCode { get; set; }
+
+    /// <summary>Verbatim provider response from the last dispatch attempt
+    /// (etracker gateway body / Infobip payload). Diagnostic only — surfaced
+    /// in the SMS detail view so operators can see why a send was rejected.</summary>
+    public string? RawProviderResponse { get; set; }
 }

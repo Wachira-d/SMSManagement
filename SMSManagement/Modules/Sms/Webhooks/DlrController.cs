@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -40,22 +42,40 @@ public sealed class DlrController : ControllerBase
         _log = log;
     }
 
+    /// <summary>
+    /// etracker (MACROKIOSK) delivery notification. Unlike the HMAC-signed
+    /// Infobip webhook, etracker DN is an unsigned GET/POST carrying form or
+    /// query params (msgID, msisdn, status, statusDetail). It is authenticated
+    /// by a shared-secret token embedded in the DN URL configured on the
+    /// etracker account: …/api/sms/dlr/etracker?token=THE_SECRET
+    /// </summary>
+    [HttpGet("etracker")]
     [HttpPost("etracker")]
     public async Task<IActionResult> Etracker(CancellationToken ct)
     {
-        if (!await VerifyAsync(_secrets.EtrackerSecretBase64, ct)) return Unauthorized();
-        Request.Body.Position = 0;
-        using var doc = await JsonDocument.ParseAsync(Request.Body, cancellationToken: ct);
+        if (!TokenValid(_secrets.EtrackerDnToken))
+        {
+            _log.LogWarning("etracker DN rejected — missing or wrong token.");
+            return Unauthorized();
+        }
 
-        // Etracker DLR shape (representative): { "messageId": "...", "status": "DELIVERED"|"FAILED", "code": "..." }
-        var id = doc.RootElement.GetProperty("messageId").GetString();
-        var status = doc.RootElement.GetProperty("status").GetString();
-        var code = doc.RootElement.TryGetProperty("code", out var c) ? c.GetString() : null;
+        var msgId = Param("msgID");
+        var status = Param("status");
+        var detail = Param("statusDetail");
 
-        if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(status))
-            return BadRequest("messageId and status required.");
+        if (string.IsNullOrEmpty(msgId) || string.IsNullOrEmpty(status))
+            return BadRequest("msgID and status are required.");
 
-        await ApplyAsync("etracker", id, MapStatus(status), code, ct);
+        var mapped = MapStatus(status);
+        // Carry the failure reason into ErrorCode for non-delivered receipts.
+        var code = mapped is SmsStatus.Failed or SmsStatus.Rejected or SmsStatus.Expired
+            ? $"DN_{status.ToUpperInvariant()}"
+              + (string.IsNullOrWhiteSpace(detail) ? "" : $": {detail}")
+            : null;
+
+        _log.LogInformation("etracker DN msgID={MsgId} status={Status} -> {Mapped}",
+            msgId, status, mapped);
+        await ApplyAsync("etracker", msgId, mapped, code, ct);
         return Ok();
     }
 
@@ -79,6 +99,29 @@ public sealed class DlrController : ControllerBase
     }
 
     // ---- helpers ----
+
+    /// <summary>Constant-time comparison of the URL <c>token</c> param against
+    /// the configured etracker DN secret.</summary>
+    private bool TokenValid(string? configured)
+    {
+        if (string.IsNullOrWhiteSpace(configured)) return false;
+        var supplied = Param("token");
+        if (string.IsNullOrEmpty(supplied)) return false;
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(supplied), Encoding.UTF8.GetBytes(configured));
+    }
+
+    /// <summary>Reads a parameter from the query string or, for POSTs, the
+    /// form body — both are case-insensitive collections.</summary>
+    private string? Param(string name)
+    {
+        if (Request.Query.TryGetValue(name, out var q) && !string.IsNullOrEmpty(q))
+            return q.ToString();
+        if (Request.HasFormContentType
+            && Request.Form.TryGetValue(name, out var f) && !string.IsNullOrEmpty(f))
+            return f.ToString();
+        return null;
+    }
 
     private async Task<bool> VerifyAsync(string? secret, CancellationToken ct)
     {
@@ -122,6 +165,15 @@ public sealed class DlrController : ControllerBase
             return;
         }
 
+        // Delivered is terminal — a late ACCEPTED/PROCESSING receipt (DNs can
+        // arrive out of order) must not downgrade it.
+        if (msg.Status == SmsStatus.Delivered && newStatus != SmsStatus.Delivered)
+        {
+            _log.LogInformation("DLR {Status} for already-delivered {Provider}/{Id} — ignored.",
+                newStatus, provider, providerMessageId);
+            return;
+        }
+
         msg.Status = newStatus;
         if (newStatus == SmsStatus.Delivered)
         {
@@ -136,13 +188,15 @@ public sealed class DlrController : ControllerBase
         await _db.SaveChangesAsync(ct);
     }
 
+    // Common map across providers. etracker DN words: DELIVERED, UNDELIVERED,
+    // ACCEPTED, PROCESSING (spec 4.3). Infobip uses group names.
     private static SmsStatus MapStatus(string raw) => raw.ToUpperInvariant() switch
     {
         "DELIVERED" or "DELIVERED_TO_HANDSET" => SmsStatus.Delivered,
-        "PENDING" or "PENDING_ENROUTE" => SmsStatus.Sent,
+        "ACCEPTED" or "PROCESSING" or "PENDING" or "PENDING_ENROUTE" => SmsStatus.Sent,
         "EXPIRED" => SmsStatus.Expired,
         "REJECTED" => SmsStatus.Rejected,
-        "UNDELIVERABLE" or "FAILED" => SmsStatus.Failed,
+        "UNDELIVERED" or "UNDELIVERABLE" or "FAILED" => SmsStatus.Failed,
         _ => SmsStatus.Sent
     };
 }

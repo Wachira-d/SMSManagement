@@ -113,6 +113,7 @@ public sealed class SmsDispatcher : ISmsDispatcher
         try
         {
             var result = await provider.DispatchAsync(req, ct).ConfigureAwait(false);
+            msg.RawProviderResponse = Truncate(result.RawResponse);
             if (result.Success)
             {
                 msg.Status = SmsStatus.Sent;
@@ -148,6 +149,7 @@ public sealed class SmsDispatcher : ISmsDispatcher
                         msg.SentAt = _clock.GetUtcNow();
                         msg.ProviderMessageId = fbResult.ProviderMessageId;
                         msg.ErrorCode = null;
+                        msg.RawProviderResponse = Truncate(fbResult.RawResponse);
                         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
                         return;
                     }
@@ -175,6 +177,10 @@ public sealed class SmsDispatcher : ISmsDispatcher
             await _db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
     }
+
+    // Diagnostic field — cap so a misbehaving provider can't bloat the row.
+    private static string? Truncate(string? raw)
+        => raw is { Length: > 4000 } ? raw[..4000] : raw;
 
     private static string ComputeDedupKey(SmsRequest r)
     {

@@ -1984,12 +1984,20 @@ async function loadSmsList() {
                           onclick="event.stopPropagation()"
                           aria-label="Select message for bulk action" />`
                 : '';
+            // "Sent" only means the provider gateway accepted the message —
+            // handset delivery is confirmed separately by a DN. Make that
+            // explicit so operators don't read Sent as "delivered".
+            const sentUnconfirmed = s.status === 'Sent' && !s.deliveredAt;
+            const statusTitle = s.status === 'Sent'
+                ? ' title="Accepted by the provider gateway. Delivery to the handset is confirmed separately by a delivery notification (DN)."'
+                : '';
             return `<tr style="cursor:pointer" onclick="showSmsDetail('${esc(s.id)}')">
                 <td>${cb}</td>
                 <td class="small">${fmtDate(s.createdAt)}</td>
                 <td><code class="small">${esc(s.maskedTo)}</code></td>
                 <td class="small">${esc(s.provider)}</td>
-                <td><span class="badge bg-${c}">${esc(s.status)}</span>
+                <td><span class="badge bg-${c}"${statusTitle}>${esc(s.status)}</span>
+                    ${sentUnconfirmed ? '<small class="text-muted ms-1">delivery unconfirmed</small>' : ''}
                     ${s.errorCode ? `<small class="text-danger ms-1">${esc(s.errorCode)}</small>` : ''}
                 </td>
                 <td>${s.attempts} ${retryBtn}</td>
