@@ -231,6 +231,20 @@ public sealed class WorkflowDefinitionsController : ControllerBase
                 }
                 if (step.OnTimeout is { } t && !parsed.Steps.ContainsKey(t))
                 { error = $"Step '{name}' OnTimeout targets unknown step '{t}'."; return false; }
+
+                // MaxRepeats only takes effect on a self-looping step: the
+                // engine re-runs the step on timeout and stops at MaxRepeats.
+                // If repeat > 1 but the timeout goes somewhere else, the step
+                // runs exactly once and the repeat silently never happens —
+                // the single most common authoring mistake.
+                if (step.MaxRepeats > 1 && step.OnTimeout != name)
+                {
+                    error = $"Step '{name}' is set to repeat {step.MaxRepeats} times, but its "
+                          + $"timeout goes to '{step.OnTimeout ?? "(none)"}' instead of back to "
+                          + $"'{name}'. The repeat would never run. For reminders, set the "
+                          + $"timeout step to '{name}'.";
+                    return false;
+                }
             }
 
             // Reject multi-step OnTimeout cycles. OnTimeout edges auto-advance

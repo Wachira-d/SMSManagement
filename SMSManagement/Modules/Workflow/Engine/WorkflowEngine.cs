@@ -267,9 +267,12 @@ public sealed class WorkflowEngine : IWorkflowEngine
                 // target step enforces its own MaxRepeats.
                 if (inst.StepRepeatCount >= step.MaxRepeats && step.OnTimeout == inst.CurrentStep)
                 {
-                    // Reminders exhausted — let expiry handle final state.
+                    // Reminders exhausted — finish the instance now rather than
+                    // leaving it idle in AwaitingAction until the (e.g. 60-day)
+                    // expiry sweep eventually marks it Expired.
                     inst.NextCheckAt = null;
-                    await _db.SaveChangesAsync(ct);
+                    await TransitionAsync(inst, inst.CurrentStep, "reminders_exhausted", ct,
+                        forceState: WorkflowState.Completed);
                     continue;
                 }
 
