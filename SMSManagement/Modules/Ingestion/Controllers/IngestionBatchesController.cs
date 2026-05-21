@@ -4,6 +4,8 @@ using Microsoft.EntityFrameworkCore;
 using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Identity.Domain;
 using SMSManagement.Modules.Identity.Services;
+using SMSManagement.Modules.Sms.Domain;
+using SMSManagement.Modules.Workflow.Domain;
 
 namespace SMSManagement.Modules.Ingestion.Controllers;
 
@@ -53,6 +55,88 @@ public sealed class IngestionBatchesController : ControllerBase
             .ToListAsync(ct);
 
         return Ok(rows);
+    }
+
+    /// <summary>
+    /// Per-run ("flow round") rollup: for each ingestion batch, the
+    /// stage-by-stage outcome — ingestion (rows), workflow (instances), and
+    /// SMS (messages) counts — so an operator can see how many rounds the
+    /// flow has run and how each part fared.
+    /// </summary>
+    [HttpGet("runs")]
+    public async Task<IActionResult> Runs(
+        Guid projectId, [FromQuery] int take = 20, CancellationToken ct = default)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
+        take = Math.Clamp(take, 1, 100);
+
+        var batches = await _db.IngestionBatches
+            .AsNoTracking()
+            .Where(b => b.ProjectId == projectId)
+            .OrderByDescending(b => b.IngestedAt)
+            .Take(take)
+            .Select(b => new
+            {
+                b.Id, b.SourceType, b.SourceRef, b.Status, b.IngestedAt,
+                b.TotalRows, b.AcceptedRows, b.RejectedRows
+            })
+            .ToListAsync(ct);
+
+        var batchIds = batches.Select(b => b.Id).ToList();
+
+        // Workflow rollup per batch.
+        var wfRollup = await _db.WorkflowInstances
+            .AsNoTracking()
+            .Where(w => w.IngestionBatchId != null && batchIds.Contains(w.IngestionBatchId.Value))
+            .GroupBy(w => w.IngestionBatchId!.Value)
+            .Select(g => new
+            {
+                BatchId   = g.Key,
+                Total     = g.Count(),
+                Completed = g.Count(x => x.State == WorkflowState.Completed),
+                Failed    = g.Count(x => x.State == WorkflowState.Failed
+                                      || x.State == WorkflowState.Expired),
+                Active    = g.Count(x => x.State != WorkflowState.Completed
+                                      && x.State != WorkflowState.Failed
+                                      && x.State != WorkflowState.Expired)
+            })
+            .ToListAsync(ct);
+
+        // SMS rollup per batch (SmsMessage -> WorkflowInstance -> IngestionBatchId).
+        var smsRollup = await (
+            from m in _db.SmsMessages.AsNoTracking()
+            join w in _db.WorkflowInstances.AsNoTracking() on m.WorkflowInstanceId equals w.Id
+            where w.IngestionBatchId != null && batchIds.Contains(w.IngestionBatchId.Value)
+            group m by w.IngestionBatchId!.Value into g
+            select new
+            {
+                BatchId   = g.Key,
+                Total     = g.Count(),
+                Delivered = g.Count(x => x.Status == SmsStatus.Delivered),
+                Sent      = g.Count(x => x.Status == SmsStatus.Sent),
+                Failed    = g.Count(x => x.Status == SmsStatus.Failed
+                                      || x.Status == SmsStatus.Rejected
+                                      || x.Status == SmsStatus.Expired),
+                Pending   = g.Count(x => x.Status == SmsStatus.Queued
+                                      || x.Status == SmsStatus.Sending)
+            }).ToListAsync(ct);
+
+        var wfMap  = wfRollup.ToDictionary(x => x.BatchId);
+        var smsMap = smsRollup.ToDictionary(x => x.BatchId);
+
+        var runs = batches.Select(b => new
+        {
+            b.Id, b.SourceType, b.SourceRef, b.Status, b.IngestedAt,
+            Ingestion = new { b.TotalRows, b.AcceptedRows, b.RejectedRows },
+            Workflow = wfMap.TryGetValue(b.Id, out var w)
+                ? new { w.Total, w.Completed, w.Failed, w.Active }
+                : new { Total = 0, Completed = 0, Failed = 0, Active = 0 },
+            Sms = smsMap.TryGetValue(b.Id, out var s)
+                ? new { s.Total, s.Delivered, s.Sent, s.Failed, s.Pending }
+                : new { Total = 0, Delivered = 0, Sent = 0, Failed = 0, Pending = 0 }
+        });
+
+        return Ok(new { count = batches.Count, runs });
     }
 
     /// <summary>Returns the captured rejection sample (first 50) for one batch.</summary>

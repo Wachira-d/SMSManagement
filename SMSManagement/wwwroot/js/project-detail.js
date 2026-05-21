@@ -103,7 +103,7 @@ document.querySelectorAll('[data-bs-toggle="tab"]').forEach(el => {
     el.addEventListener('shown.bs.tab', (ev) => {
         const target = ev.target.getAttribute('href');
         switch (target) {
-            case '#tab-pipeline':   loadPipeline(); break;
+            case '#tab-pipeline':   loadPipeline(); loadPipelineRuns(); break;
             case '#tab-members':    if (!loaded.members)    { loaded.members    = true; loadMembers();    } break;
             case '#tab-mappings':   if (!loaded.mappings)   { loaded.mappings   = true; loadMappings(); loadRules(); } break;
             case '#tab-sources':    if (!loaded.sources)    { loaded.sources    = true; loadSources(); loadBatches(); } break;
@@ -561,7 +561,53 @@ async function loadPipeline() {
         el.innerHTML = `<span class="text-danger small">${esc(e.message)}</span>`;
     }
 }
-document.getElementById('btnPipelineRefresh')?.addEventListener('click', loadPipeline);
+async function loadPipelineRuns() {
+    const el = document.getElementById('pipelineRuns');
+    if (!el) return;
+    el.innerHTML = '<span class="text-muted small">กำลังโหลด…</span>';
+    try {
+        const data = await api.get(`${api_proj}/ingestion-batches/runs`);
+        const runs = data.runs || [];
+        if (!runs.length) {
+            el.innerHTML = '<div class="text-muted small">ยังไม่มีการรัน — '
+                + 'อัปโหลดไฟล์ หรือรอ SFTP poll รอบแรก</div>';
+            return;
+        }
+        let html = `<div class="small mb-2">flow นี้ทำงานไปแล้ว `
+            + `<strong>${data.count}</strong> รอบ (แสดงล่าสุด ${runs.length})</div>`;
+        html += '<div class="table-responsive"><table class="table table-sm small align-middle">'
+            + '<thead><tr><th>รอบ (เวลา)</th><th>แหล่ง</th><th>① นำเข้า</th>'
+            + '<th>② Workflow</th><th>③ SMS</th><th>สถานะ</th></tr></thead><tbody>';
+        runs.forEach(r => {
+            const ing = r.ingestion, wf = r.workflow, sms = r.sms;
+            html += `<tr>
+                <td class="text-nowrap">${fmtDate(r.ingestedAt)}</td>
+                <td>${esc(r.sourceType)}</td>
+                <td>${ing.totalRows} → <span class="text-success">รับ ${ing.acceptedRows}</span>`
+                + (ing.rejectedRows ? ` <span class="text-danger">ตก ${ing.rejectedRows}</span>` : '')
+                + `</td>
+                <td>${wf.total} → <span class="text-success">จบ ${wf.completed}</span>`
+                + (wf.failed ? ` <span class="text-danger">ล้ม ${wf.failed}</span>` : '')
+                + (wf.active ? ` <span class="text-warning">ค้าง ${wf.active}</span>` : '')
+                + `</td>
+                <td>${sms.total} → <span class="text-success">ถึง ${sms.delivered}</span>`
+                + (sms.sent ? ` <span class="text-primary">ส่ง ${sms.sent}</span>` : '')
+                + (sms.failed ? ` <span class="text-danger">พลาด ${sms.failed}</span>` : '')
+                + (sms.pending ? ` <span class="text-muted">รอ ${sms.pending}</span>` : '')
+                + `</td>
+                <td>${esc(r.status)}</td>
+            </tr>`;
+        });
+        html += '</tbody></table></div>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = `<span class="text-danger small">${esc(e.message)}</span>`;
+    }
+}
+document.getElementById('btnPipelineRefresh')?.addEventListener('click', () => {
+    loadPipeline();
+    loadPipelineRuns();
+});
 
 // ==================== EASY SETUP (friendly file config) ====================
 const EASY_TYPES = [
