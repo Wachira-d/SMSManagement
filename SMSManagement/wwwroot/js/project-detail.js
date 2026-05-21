@@ -592,7 +592,9 @@ async function loadPipelineRuns() {
         runs.forEach(r => {
             const ing = r.ingestion, wf = r.workflow, sms = r.sms;
             html += `<tr>
-                <td class="text-nowrap">${fmtDate(r.ingestedAt)}</td>
+                <td class="text-nowrap"><a href="#" onclick="showRunDetail('${esc(r.id)}');return false;"
+                    class="text-decoration-none">${fmtDate(r.ingestedAt)}
+                    <i class="bi bi-search small"></i></a></td>
                 <td>${esc(r.sourceType)}</td>
                 <td>${ing.totalRows} → <span class="text-success">รับ ${ing.acceptedRows}</span>`
                 + (ing.rejectedRows ? ` <span class="text-danger">ตก ${ing.rejectedRows}</span>` : '')
@@ -622,6 +624,127 @@ document.getElementById('btnPipelineRefresh')?.addEventListener('click', () => {
     loadPipeline();
     loadPipelineRuns();
 });
+
+// ---- Run detail drill-down: ingestion → workflow timeline → SMS ----
+const WF_STATE_COLOR = {
+    Pending: 'secondary', Scheduled: 'info', Dispatching: 'info',
+    AwaitingAction: 'warning', ReminderDue: 'warning',
+    Completed: 'success', Failed: 'danger', Expired: 'dark',
+};
+function wfStateBadge(st) {
+    return `<span class="badge bg-${WF_STATE_COLOR[st] || 'secondary'}">${esc(st)}</span>`;
+}
+function smsStatusBadge(st) {
+    const n = smsStatusName(st);
+    return `<span class="badge bg-${SMS_STATUS_COLOR[n] || 'secondary'}">${esc(n)}</span>`;
+}
+
+window.showRunDetail = async function (batchId) {
+    const modalEl = document.getElementById('runDetailModal');
+    const body    = document.getElementById('runDetailBody');
+    body.innerHTML = '<div class="text-muted small">กำลังโหลด…</div>';
+    new bootstrap.Modal(modalEl).show();
+    try {
+        const d = await api.get(`${api_proj}/ingestion-batches/${batchId}/detail`);
+        const ing = d.ingestion || {};
+        let html = `<div class="card mb-3"><div class="card-body p-2 small">
+            <div class="d-flex justify-content-between flex-wrap">
+              <div><strong>① นำเข้า</strong> — แหล่ง ${esc(d.sourceType)}
+                ${d.sourceRef ? `<span class="text-muted">(${esc(d.sourceRef)})</span>` : ''}</div>
+              <div class="text-muted">${fmtDate(d.ingestedAt)} · สถานะ ${esc(d.status)}</div>
+            </div>
+            <div class="mt-1">${ing.totalRows} แถว →
+              <span class="text-success">รับ ${ing.acceptedRows}</span>`
+            + (ing.rejectedRows
+                ? ` · <a href="#" onclick="showRejections('${esc(d.id)}');return false;"
+                       class="text-danger text-decoration-none">ตก ${ing.rejectedRows} (ดูเหตุผล)</a>`
+                : '')
+            + `</div></div></div>`;
+
+        const insts = d.instances || [];
+        if (!insts.length) {
+            html += '<div class="text-muted small">รอบนี้ยังไม่มี workflow instance — '
+                + 'อาจถูกปฏิเสธทั้งหมดในขั้นนำเข้า หรือยังไม่ได้ผูก workflow</div>';
+            body.innerHTML = html;
+            return;
+        }
+        html += `<div class="small mb-2"><strong>② Workflow + ③ SMS</strong> — `
+            + `${insts.length} รายการ`
+            + (d.truncated ? ' (แสดงบางส่วน)' : '') + '</div>';
+        html += '<div class="accordion" id="runInstAcc">';
+        insts.forEach((it, idx) => {
+            const smsList = it.sms || [];
+            const txList  = it.transitions || [];
+            const smsBadges = smsList.map(s => smsStatusBadge(s.status)).join(' ');
+            html += `<div class="accordion-item">
+              <h2 class="accordion-header">
+                <button class="accordion-button collapsed py-2 small" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#runInst${idx}">
+                  <span class="me-2">${esc(it.maskedPhone || '(ไม่มีเบอร์)')}</span>
+                  ${wfStateBadge(it.state)}
+                  <span class="text-muted ms-2">ขั้น: ${esc(it.currentStep || '—')}</span>
+                  <span class="ms-2">${smsBadges}</span>
+                </button>
+              </h2>
+              <div id="runInst${idx}" class="accordion-collapse collapse"
+                   data-bs-parent="#runInstAcc">
+                <div class="accordion-body p-2">`;
+
+            html += '<div class="small fw-semibold mb-1">ไทม์ไลน์ workflow</div>';
+            if (txList.length) {
+                html += '<table class="table table-sm small mb-3"><tbody>';
+                txList.forEach(t => {
+                    html += `<tr>
+                      <td class="text-nowrap text-muted" style="width:140px">${fmtDate(t.at)}</td>
+                      <td>${wfStateBadge(t.from)} → ${wfStateBadge(t.to)}</td>
+                      <td><code class="small">${esc(t.trigger || '')}</code></td>
+                      <td class="text-muted small">${t.dataJson ? esc(t.dataJson) : ''}</td>
+                    </tr>`;
+                });
+                html += '</tbody></table>';
+            } else {
+                html += '<div class="text-muted small mb-3">ไม่มีการเปลี่ยนสถานะที่บันทึกไว้</div>';
+            }
+
+            html += '<div class="small fw-semibold mb-1">SMS ของรายการนี้</div>';
+            if (smsList.length) {
+                smsList.forEach(s => {
+                    html += `<div class="border rounded p-2 mb-2 small">
+                      <div class="d-flex justify-content-between">
+                        <div>${smsStatusBadge(s.status)}
+                          <span class="ms-1">${esc(s.maskedTo)}</span>
+                          <span class="text-muted ms-1">· ${esc(s.provider || '')}</span>
+                          ${s.senderId ? `<span class="text-muted">· จาก ${esc(s.senderId)}</span>` : ''}
+                        </div>
+                        <div class="text-muted">${fmtDate(s.createdAt)}</div>
+                      </div>
+                      <div class="mt-1"><span class="text-muted">ข้อความ:</span> ${esc(s.body || '')}</div>`;
+                    const meta = [];
+                    if (s.sentAt)      meta.push(`ส่ง ${fmtDate(s.sentAt)}`);
+                    if (s.deliveredAt) meta.push(`ถึง ${fmtDate(s.deliveredAt)}`);
+                    if (s.attempts)    meta.push(`พยายาม ${s.attempts} ครั้ง`);
+                    if (s.providerMessageId) meta.push(`id: ${esc(s.providerMessageId)}`);
+                    if (meta.length)
+                        html += `<div class="text-muted mt-1">${meta.join(' · ')}</div>`;
+                    if (s.errorCode)
+                        html += `<div class="text-danger mt-1">ข้อผิดพลาด: ${esc(s.errorCode)}</div>`;
+                    if (s.rawProviderResponse)
+                        html += `<div class="mt-1"><span class="text-muted">คำตอบจากผู้ให้บริการ:</span>
+                          <pre class="small bg-light p-1 mb-0 mt-1"
+                               style="white-space:pre-wrap">${esc(s.rawProviderResponse)}</pre></div>`;
+                    html += '</div>';
+                });
+            } else {
+                html += '<div class="text-muted small">ยังไม่มี SMS</div>';
+            }
+            html += '</div></div></div>';
+        });
+        html += '</div>';
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = `<div class="text-danger">${esc(e.message)}</div>`;
+    }
+};
 
 // ==================== EASY SETUP (friendly file config) ====================
 const EASY_TYPES = [
