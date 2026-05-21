@@ -1953,11 +1953,37 @@ document.getElementById('formSms').addEventListener('submit', async (ev) => {
             senderId:  document.getElementById('smsFrom').value.trim() || null,
             scheduledFor: sched ? new Date(sched).toISOString() : null
         });
+        // Status comes back as an enum — handle both the string and numeric forms.
+        const st = String(r.status);
+        const accepted = ['Sent', 'Delivered', '2', '3'].includes(st);
+        const scheduled = !!sched && ['Queued', '0'].includes(st);
+
         out.classList.remove('d-none');
-        out.textContent = JSON.stringify(r, null, 2);
-        toast(`Dispatched: ${r.status}`);
+        out.className = 'mt-3 small alert py-2 '
+            + (accepted ? 'alert-success' : scheduled ? 'alert-info' : 'alert-warning');
+        out.textContent = accepted
+            ? `Sent to provider — message id ${r.providerMessageId || '—'}. `
+              + 'Note: this confirms the gateway accepted it, not handset delivery.'
+            : scheduled
+                ? 'Scheduled — it will be dispatched at the chosen time.'
+                : `Not accepted — status ${st}${r.errorCode ? ' (' + r.errorCode + ')' : ''}.`;
+
+        toast(accepted ? 'SMS dispatched.'
+              : scheduled ? 'SMS scheduled.'
+              : `SMS not accepted: ${r.errorCode || st}`,
+              accepted || scheduled ? 'success' : 'warning');
+
+        // Clear the body so it is visually obvious the message went out;
+        // keep the recipient/sender for a quick repeat send.
+        if (accepted || scheduled) {
+            document.getElementById('smsBody').value = '';
+            document.getElementById('smsSched').value = '';
+        }
         loadSmsList();
     } catch (e) {
+        out.classList.remove('d-none');
+        out.className = 'mt-3 small alert alert-danger py-2';
+        out.textContent = e.message;
         toast(e.message, 'danger');
     } finally {
         btn.disabled = false;
