@@ -21,9 +21,9 @@ public sealed class InfobipOptions
 }
 
 /// <summary>
-/// Infobip SMS provider. Credentials resolved per-request via
-/// <see cref="IProviderConfigResolver"/> so each project can use its own
-/// Infobip account without sharing one global API key.
+/// Infobip SMS provider — Send SMS API v3 (<c>POST /sms/3/messages</c>).
+/// Credentials are resolved per-request via <see cref="IProviderConfigResolver"/>
+/// so each project can use its own Infobip account.
 /// </summary>
 public sealed class InfobipSmsProvider : ISmsProvider
 {
@@ -48,21 +48,22 @@ public sealed class InfobipSmsProvider : ISmsProvider
         var opts = await _configResolver.ResolveInfobipAsync(request.ProjectId, ct);
         var to = NormaliseE164(request.Recipient);
 
-        // Infobip Send SMS API v2: POST /sms/2/text/advanced
+        // Send SMS API v3: messages[].{sender, destinations[].to, content.text}.
         var payload = new
         {
             messages = new[]
             {
                 new
                 {
+                    sender = request.SenderId ?? opts.DefaultSenderId,
                     destinations = new[] { new { to } },
-                    from = request.SenderId ?? opts.DefaultSenderId,
-                    text = request.Body
+                    content = new { text = request.Body }
                 }
             }
         };
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, $"{opts.BaseUrl}/sms/2/text/advanced")
+        var endpoint = $"{opts.BaseUrl.TrimEnd('/')}/sms/3/messages";
+        using var req = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
             Content = JsonContent.Create(payload)
         };
@@ -77,6 +78,9 @@ public sealed class InfobipSmsProvider : ISmsProvider
             .ConfigureAwait(false);
         var raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
+        _log.LogInformation("Infobip response project={ProjectId} http={Http} body={Body}",
+            request.ProjectId, (int)resp.StatusCode, raw);
+
         if (!resp.IsSuccessStatusCode)
         {
             if (resp.StatusCode is HttpStatusCode.RequestTimeout
@@ -85,31 +89,94 @@ public sealed class InfobipSmsProvider : ISmsProvider
                 throw new HttpRequestException(
                     $"Transient Infobip failure {(int)resp.StatusCode}", null, resp.StatusCode);
 
-            return new ProviderDispatchResult(false, null, $"HTTP_{(int)resp.StatusCode}", raw);
+            return new ProviderDispatchResult(false, null, ExtractHttpErrorCode(raw, resp.StatusCode), raw);
         }
 
-        var providerMessageId = TryExtractMessageId(raw);
-        return new ProviderDispatchResult(true, providerMessageId, null, raw);
+        // Infobip returns HTTP 200 even when a message is rejected — the verdict
+        // is the per-message status group, not the HTTP code.
+        var outcome = ParseSendResponse(raw);
+        if (outcome.Accepted)
+            return new ProviderDispatchResult(true, outcome.MessageId, null, raw);
+
+        _log.LogWarning("Infobip rejected SMS project={ProjectId} status={Status}",
+            request.ProjectId, outcome.StatusName);
+        return new ProviderDispatchResult(false, null, $"INFOBIP_{outcome.StatusName}", raw);
     }
 
+    /// <summary>Normalises a recipient to international format (no leading "+").
+    /// A national Thai number (leading 0) is mapped to the 66 country code.</summary>
     private static string NormaliseE164(string input)
     {
         var digits = new string(input.Where(char.IsDigit).ToArray());
-        // Strip leading 0 only if no country code present; routing layer should normalise upstream.
-        if (digits.StartsWith("00")) digits = digits[2..];
+        if (digits.StartsWith("00"))                                  // 00 intl prefix
+            digits = digits[2..];
+        else if (digits.StartsWith('0') && digits.Length >= 9)        // TH national
+            digits = "66" + digits[1..];
         return digits;
     }
 
-    private static string? TryExtractMessageId(string body)
+    public sealed record InfobipSendOutcome(bool Accepted, string? MessageId, string StatusName);
+
+    /// <summary>
+    /// Parses a Send SMS v3 response. Infobip status groups:
+    /// 1 PENDING, 2 UNDELIVERABLE, 3 DELIVERED, 4 EXPIRED, 5 REJECTED.
+    /// A submission is "accepted" only for PENDING / DELIVERED.
+    /// </summary>
+    public static InfobipSendOutcome ParseSendResponse(string? raw)
     {
+        var body = (raw ?? string.Empty).Trim();
+        if (body.Length == 0) return new(false, null, "EMPTY_RESPONSE");
+
         try
         {
             using var doc = JsonDocument.Parse(body);
-            return doc.RootElement
-                .GetProperty("messages")[0]
-                .GetProperty("messageId")
-                .GetString();
+            if (!doc.RootElement.TryGetProperty("messages", out var messages)
+                || messages.ValueKind != JsonValueKind.Array
+                || messages.GetArrayLength() == 0)
+                return new(false, null, "NO_MESSAGES");
+
+            var m = messages[0];
+            var messageId = m.TryGetProperty("messageId", out var mid) ? mid.GetString() : null;
+
+            if (!m.TryGetProperty("status", out var status)
+                || status.ValueKind != JsonValueKind.Object)
+                // No status block — accept if a message id was issued.
+                return new(messageId is not null, messageId, "NO_STATUS");
+
+            var groupId = status.TryGetProperty("groupId", out var g)
+                          && g.ValueKind == JsonValueKind.Number
+                ? g.GetInt32() : -1;
+            var groupName = status.TryGetProperty("groupName", out var gn)
+                ? gn.GetString() : null;
+            var name = status.TryGetProperty("name", out var n) ? n.GetString() : null;
+
+            var accepted = groupId is 1 or 3
+                || string.Equals(groupName, "PENDING", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(groupName, "DELIVERED", StringComparison.OrdinalIgnoreCase);
+
+            return new(accepted, messageId, name ?? groupName ?? "UNKNOWN");
         }
-        catch { return null; }
+        catch (JsonException)
+        {
+            return new(false, null, "UNPARSEABLE_RESPONSE");
+        }
+    }
+
+    /// <summary>On an HTTP error, Infobip returns
+    /// <c>{"requestError":{"serviceException":{"messageId":"...","text":"..."}}}</c>.
+    /// Use that error id when present, else fall back to the HTTP status.</summary>
+    private static string ExtractHttpErrorCode(string raw, HttpStatusCode http)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            if (doc.RootElement.TryGetProperty("requestError", out var re)
+                && re.TryGetProperty("serviceException", out var se)
+                && se.TryGetProperty("messageId", out var id)
+                && id.GetString() is { Length: > 0 } code)
+                return $"INFOBIP_{code}";
+        }
+        catch (JsonException) { /* not JSON — fall through */ }
+        return $"HTTP_{(int)http}";
     }
 }
