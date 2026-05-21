@@ -47,7 +47,7 @@ public sealed class BlockedIpsController : ControllerBase
             .Take(Math.Clamp(take, 1, 500))
             .Select(b => new
             {
-                b.Id, b.IpHash, b.Reason, b.FailureCount,
+                b.Id, b.IpHash, b.IpAddress, b.Reason, b.FailureCount,
                 b.FirstFailureAt, b.LastFailureAt,
                 b.BlockedAt, b.BlockedUntil, b.UnblockedAt
             })
@@ -57,6 +57,7 @@ public sealed class BlockedIpsController : ControllerBase
         var view = rows.Select(b => new
         {
             b.Id,
+            b.IpAddress,
             IpHashPrefix = "0x" + Convert.ToHexString(b.IpHash.AsSpan(0, Math.Min(4, b.IpHash.Length))),
             b.Reason,
             b.FailureCount,

@@ -85,7 +85,7 @@ public sealed class ShortlinkAbuseTracker : IShortlinkAbuseTracker
     }
 
     public async Task<BlockedIp?> RecordFailureAsync(
-        byte[] ipHash, string reason, string? slug, CancellationToken ct = default)
+        byte[] ipHash, string ip, string reason, string? slug, CancellationToken ct = default)
     {
         var now = _clock.GetUtcNow();
         _db.IpAccessFailures.Add(new IpAccessFailure
@@ -128,6 +128,7 @@ public sealed class ShortlinkAbuseTracker : IShortlinkAbuseTracker
         var block = new BlockedIp
         {
             IpHash = ipHash,
+            IpAddress = ip,
             Reason = reason,
             FailureCount = count,
             FirstFailureAt = firstAt,

@@ -236,7 +236,7 @@ public sealed class CouponRedeemer : ICouponRedeemer
             // module uses — a flood of bad coupon tokens from one IP trips
             // the threshold and creates a block row.
             var hash = _abuse.HashIp(ip);
-            await _abuse.RecordFailureAsync(hash, "coupon_not_found",
+            await _abuse.RecordFailureAsync(hash, ip, "coupon_not_found",
                 badToken.Length > 32 ? badToken[..32] : badToken, ct);
         }
         catch (Exception ex) { _log.LogDebug(ex, "Coupon abuse-track skipped."); }

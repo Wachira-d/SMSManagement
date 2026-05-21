@@ -54,7 +54,7 @@ public sealed class RedirectController : ControllerBase
             // ResolveAndRecordAsync returns null for all of those — we can't
             // tell which without changing the contract; "slug_unresolved" is
             // sufficient for the abuse counter.
-            var block = await _abuse.RecordFailureAsync(ipHash, "slug_unresolved", slug, ct);
+            var block = await _abuse.RecordFailureAsync(ipHash, ip, "slug_unresolved", slug, ct);
             if (block is not null)
             {
                 _log.LogWarning("Auto-blocked IP after repeated unresolved slug requests.");

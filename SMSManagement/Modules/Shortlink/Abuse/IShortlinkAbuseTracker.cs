@@ -14,9 +14,11 @@ public interface IShortlinkAbuseTracker
     Task<BlockedIp?> GetActiveBlockAsync(byte[] ipHash, CancellationToken ct = default);
 
     /// <summary>Record a failure. If the cumulative failures in the window
-    /// reach the threshold, atomically create a BlockedIp row and return it.</summary>
+    /// reach the threshold, atomically create a BlockedIp row and return it.
+    /// <paramref name="ip"/> is the raw client IP — stored on the block record
+    /// for administrator triage (the failure log itself stays hashed).</summary>
     Task<BlockedIp?> RecordFailureAsync(
-        byte[] ipHash, string reason, string? slug, CancellationToken ct = default);
+        byte[] ipHash, string ip, string reason, string? slug, CancellationToken ct = default);
 
     /// <summary>Admin action — clears the block and records who/why.</summary>
     Task UnblockAsync(Guid blockId, Guid actorUserId, string reason, CancellationToken ct = default);

@@ -121,8 +121,8 @@ internal sealed class CouponFixture : IDisposable
         public byte[] HashIp(string ip) => System.Text.Encoding.UTF8.GetBytes(ip);
         public Task<BlockedIp?> GetActiveBlockAsync(byte[] ipHash, CancellationToken ct = default)
             => Task.FromResult<BlockedIp?>(null);
-        public Task<BlockedIp?> RecordFailureAsync(byte[] ipHash, string reason, string? slug,
-            CancellationToken ct = default) => Task.FromResult<BlockedIp?>(null);
+        public Task<BlockedIp?> RecordFailureAsync(byte[] ipHash, string ip, string reason,
+            string? slug, CancellationToken ct = default) => Task.FromResult<BlockedIp?>(null);
         public Task UnblockAsync(Guid blockId, Guid actorUserId, string reason,
             CancellationToken ct = default) => Task.CompletedTask;
     }

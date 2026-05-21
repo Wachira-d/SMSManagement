@@ -62,7 +62,7 @@ public sealed class BlockedIpsModel : PageModel
             .Take(200)
             .Select(b => new
             {
-                b.Id, b.IpHash, b.Reason, b.FailureCount,
+                b.Id, b.IpHash, b.IpAddress, b.Reason, b.FailureCount,
                 b.FirstFailureAt, b.LastFailureAt,
                 b.BlockedAt, b.BlockedUntil, b.UnblockedAt
             })
@@ -71,6 +71,7 @@ public sealed class BlockedIpsModel : PageModel
         Rows = raw.Select(b => new Row
         {
             Id = b.Id,
+            IpAddress = b.IpAddress,
             FingerprintHex = "0x" + Convert.ToHexString(
                 b.IpHash.AsSpan(0, Math.Min(4, b.IpHash.Length))),
             Reason = b.Reason,
@@ -87,6 +88,7 @@ public sealed class BlockedIpsModel : PageModel
     public sealed class Row
     {
         public Guid Id { get; set; }
+        public string? IpAddress { get; set; }
         public string FingerprintHex { get; set; } = string.Empty;
         public string Reason { get; set; } = string.Empty;
         public int FailureCount { get; set; }

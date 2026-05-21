@@ -73,7 +73,7 @@ public sealed class ShortlinkAbuseTrackerTests
 
         for (var i = 0; i < 2; i++)
         {
-            var b = await tracker.RecordFailureAsync(ip, "slug_unresolved", "abc");
+            var b = await tracker.RecordFailureAsync(ip, "203.0.113.9", "slug_unresolved", "abc");
             b.Should().BeNull();
         }
         (await tracker.GetActiveBlockAsync(ip)).Should().BeNull();
@@ -87,7 +87,7 @@ public sealed class ShortlinkAbuseTrackerTests
 
         BlockedIp? lastBlock = null;
         for (var i = 0; i < 3; i++)
-            lastBlock = await tracker.RecordFailureAsync(ip, "slug_unresolved", $"slug{i}");
+            lastBlock = await tracker.RecordFailureAsync(ip, "203.0.113.9", "slug_unresolved", $"slug{i}");
 
         lastBlock.Should().NotBeNull();
         lastBlock!.FailureCount.Should().Be(3);
@@ -103,8 +103,8 @@ public sealed class ShortlinkAbuseTrackerTests
         var (_, tracker, clock) = Build(threshold: 2, blockMin: 5);
         var ip = tracker.HashIp("10.0.0.3");
 
-        await tracker.RecordFailureAsync(ip, "slug_unresolved", null);
-        await tracker.RecordFailureAsync(ip, "slug_unresolved", null);
+        await tracker.RecordFailureAsync(ip, "203.0.113.9", "slug_unresolved", null);
+        await tracker.RecordFailureAsync(ip, "203.0.113.9", "slug_unresolved", null);
 
         (await tracker.GetActiveBlockAsync(ip)).Should().NotBeNull();
 
@@ -120,13 +120,13 @@ public sealed class ShortlinkAbuseTrackerTests
         var ip = tracker.HashIp("10.0.0.4");
 
         // Two failures inside window, then advance past it.
-        await tracker.RecordFailureAsync(ip, "slug_unresolved", null);
-        await tracker.RecordFailureAsync(ip, "slug_unresolved", null);
+        await tracker.RecordFailureAsync(ip, "203.0.113.9", "slug_unresolved", null);
+        await tracker.RecordFailureAsync(ip, "203.0.113.9", "slug_unresolved", null);
         clock.Now = clock.Now.AddMinutes(10);
 
         // Two more failures — count restarts because the first two are out of window.
-        await tracker.RecordFailureAsync(ip, "slug_unresolved", null);
-        var b = await tracker.RecordFailureAsync(ip, "slug_unresolved", null);
+        await tracker.RecordFailureAsync(ip, "203.0.113.9", "slug_unresolved", null);
+        var b = await tracker.RecordFailureAsync(ip, "203.0.113.9", "slug_unresolved", null);
         b.Should().BeNull("only 2 in-window failures, threshold is 3");
     }
 
@@ -136,8 +136,8 @@ public sealed class ShortlinkAbuseTrackerTests
         var (db, tracker, _) = Build(threshold: 2);
         var ip = tracker.HashIp("10.0.0.5");
 
-        await tracker.RecordFailureAsync(ip, "slug_unresolved", null);
-        var block = await tracker.RecordFailureAsync(ip, "slug_unresolved", null);
+        await tracker.RecordFailureAsync(ip, "203.0.113.9", "slug_unresolved", null);
+        var block = await tracker.RecordFailureAsync(ip, "203.0.113.9", "slug_unresolved", null);
         block.Should().NotBeNull();
 
         var actor = Guid.NewGuid();
@@ -157,9 +157,9 @@ public sealed class ShortlinkAbuseTrackerTests
         var ipA = tracker.HashIp("10.0.0.6");
         var ipB = tracker.HashIp("10.0.0.7");
 
-        await tracker.RecordFailureAsync(ipA, "x", null);
-        await tracker.RecordFailureAsync(ipA, "x", null);
-        await tracker.RecordFailureAsync(ipB, "x", null);
+        await tracker.RecordFailureAsync(ipA, "203.0.113.6", "x", null);
+        await tracker.RecordFailureAsync(ipA, "203.0.113.6", "x", null);
+        await tracker.RecordFailureAsync(ipB, "203.0.113.7", "x", null);
 
         (await tracker.GetActiveBlockAsync(ipA)).Should().NotBeNull();
         (await tracker.GetActiveBlockAsync(ipB)).Should().BeNull();

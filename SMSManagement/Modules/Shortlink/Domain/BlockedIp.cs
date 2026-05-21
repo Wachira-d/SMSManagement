@@ -1,15 +1,23 @@
 namespace SMSManagement.Modules.Shortlink.Domain;
 
 /// <summary>
-/// Per-IP block record for shortlink abuse protection. We never store the raw
-/// IP — only the salted SHA-256 hash, consistent with ShortlinkClick.IpHash.
+/// Per-IP block record for shortlink abuse protection. The salted SHA-256
+/// hash is the lookup key (matched on the redirect hot path); the raw IP is
+/// also stored so an administrator can actually act on a block — whitelist,
+/// investigate, or report it. Raw IPs live ONLY on these low-volume block
+/// records; the bulk failure log and click log stay hashed. Access is
+/// restricted to system administrators and rows are purged on retention.
 /// </summary>
 public sealed class BlockedIp
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    /// <summary>Salted SHA-256 of the offending IP.</summary>
+    /// <summary>Salted SHA-256 of the offending IP — the lookup key.</summary>
     public byte[] IpHash { get; set; } = Array.Empty<byte>();
+
+    /// <summary>Raw offending IP address, for administrator triage. Null on
+    /// legacy rows created before raw-IP capture was enabled.</summary>
+    public string? IpAddress { get; set; }
 
     /// <summary>Why the block was applied (e.g. "shortlink.404_flood", "rate_limit").</summary>
     public string Reason { get; set; } = string.Empty;

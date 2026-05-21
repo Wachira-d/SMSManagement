@@ -15,8 +15,10 @@
 </style>
 
 <h1>Blocked IPs</h1>
-<p>Read-only fingerprint is the first 4 bytes of the salted-SHA256(IP).
-   Raw IPs are never persisted.</p>
+<p>Raw IP addresses are stored on block records for administrator triage
+   (restricted to system administrators; purged on retention). The
+   fingerprint is the first 4 bytes of the salted-SHA256(IP). Older rows
+   created before raw-IP capture show no IP.</p>
 
 @if (!string.IsNullOrEmpty(Model.Message))
 {
@@ -35,6 +37,7 @@
 <table>
     <thead>
         <tr>
+            <th>IP address</th>
             <th>Fingerprint</th>
             <th>Reason</th>
             <th>Failures</th>
@@ -50,6 +53,7 @@
     {
         var active = row.IsActive;
         <tr class="@(active ? "active" : "expired")">
+            <td><code>@(string.IsNullOrEmpty(row.IpAddress) ? "—" : row.IpAddress)</code></td>
             <td><code>@row.FingerprintHex</code></td>
             <td>@row.Reason</td>
             <td style="text-align:right">@row.FailureCount</td>
@@ -72,7 +76,7 @@
     }
     @if (Model.Rows.Count == 0)
     {
-        <tr><td colspan="8" style="text-align:center;color:#888;padding:24px">No matching rows.</td></tr>
+        <tr><td colspan="9" style="text-align:center;color:#888;padding:24px">No matching rows.</td></tr>
     }
     </tbody>
 </table>
