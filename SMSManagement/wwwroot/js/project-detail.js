@@ -2347,6 +2347,28 @@ document.getElementById('formProvInfobip').addEventListener('submit', async (ev)
     } catch (e) { toast(e.message, 'danger'); }
 });
 
+async function testProvider(provider, btnId, statusId) {
+    const btn = document.getElementById(btnId);
+    const out = document.getElementById(statusId);
+    btn.disabled = true;
+    out.className = 'ms-auto small text-muted';
+    out.textContent = 'Testing…';
+    try {
+        const r = await api.post(`${api_proj}/sms-providers/${provider}/test`, {});
+        out.textContent = r.message;
+        out.className = 'ms-auto small ' + (r.ok ? 'text-success' : 'text-danger');
+    } catch (e) {
+        out.textContent = e.message;
+        out.className = 'ms-auto small text-danger';
+    } finally {
+        btn.disabled = false;
+    }
+}
+document.getElementById('btnEtTest').addEventListener('click',
+    () => testProvider('etracker', 'btnEtTest', 'etStatus'));
+document.getElementById('btnIbTest').addEventListener('click',
+    () => testProvider('infobip', 'btnIbTest', 'ibStatus'));
+
 document.getElementById('btnEtClear').addEventListener('click', async () => {
     if (!confirm('Remove project override and revert to global MacroKiosk defaults?')) return;
     try {

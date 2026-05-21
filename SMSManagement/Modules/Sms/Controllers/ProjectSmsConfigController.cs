@@ -32,6 +32,7 @@ public sealed class ProjectSmsConfigController : ControllerBase
     private readonly FieldEncryptor _crypto;
     private readonly IOptions<EtrackerOptions> _etrackerDefaults;
     private readonly IOptions<InfobipOptions> _infobipDefaults;
+    private readonly IEnumerable<ISmsProvider> _providers;
 
     public ProjectSmsConfigController(
         AppDbContext db,
@@ -39,7 +40,8 @@ public sealed class ProjectSmsConfigController : ControllerBase
         ICurrentUser user,
         FieldEncryptor crypto,
         IOptions<EtrackerOptions> etrackerDefaults,
-        IOptions<InfobipOptions> infobipDefaults)
+        IOptions<InfobipOptions> infobipDefaults,
+        IEnumerable<ISmsProvider> providers)
     {
         _db = db;
         _access = access;
@@ -47,6 +49,29 @@ public sealed class ProjectSmsConfigController : ControllerBase
         _crypto = crypto;
         _etrackerDefaults = etrackerDefaults;
         _infobipDefaults = infobipDefaults;
+        _providers = providers;
+    }
+
+    /// <summary>
+    /// Tests the project's resolved provider credentials without sending a
+    /// real message — the provider probes its gateway with an invalid
+    /// recipient and reports whether the account authenticated.
+    /// </summary>
+    [HttpPost("{provider}/test")]
+    public async Task<IActionResult> TestCredentials(
+        Guid projectId, string provider, CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Admin, ct);
+
+        if (!AllowedProviders.Contains(provider))
+            return BadRequest($"provider must be one of: {string.Join(", ", AllowedProviders)}");
+
+        var impl = _providers.FirstOrDefault(
+            p => string.Equals(p.Name, provider, StringComparison.OrdinalIgnoreCase));
+        if (impl is null) return BadRequest($"No provider registered for '{provider}'.");
+
+        var result = await impl.TestCredentialsAsync(projectId, ct);
+        return Ok(new { result.Ok, result.Message });
     }
 
     public sealed record EtrackerConfigDto(

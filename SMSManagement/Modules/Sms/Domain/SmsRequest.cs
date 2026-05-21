@@ -29,3 +29,6 @@ public sealed record ProviderDispatchResult(
     string? ProviderMessageId,
     string? ErrorCode,
     string? RawResponse);
+
+/// <summary>Outcome of a provider credential / connectivity check.</summary>
+public sealed record ProviderTestResult(bool Ok, string Message);

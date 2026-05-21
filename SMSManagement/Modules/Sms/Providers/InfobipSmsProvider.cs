@@ -103,6 +103,55 @@ public sealed class InfobipSmsProvider : ISmsProvider
         return new ProviderDispatchResult(false, null, $"INFOBIP_{outcome.StatusName}", raw);
     }
 
+    public async Task<ProviderTestResult> TestCredentialsAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var opts = await _configResolver.ResolveInfobipAsync(projectId, ct);
+        if (string.IsNullOrWhiteSpace(opts.BaseUrl) || string.IsNullOrWhiteSpace(opts.ApiKey))
+            return new ProviderTestResult(false, "Base URL and API key are not configured.");
+
+        // Probe with an invalid recipient ("0") — Infobip rejects it per-message
+        // (or with HTTP 400), so nothing deliverable is sent. Only HTTP 401/403
+        // indicates the API key itself is bad.
+        var payload = new
+        {
+            messages = new[]
+            {
+                new
+                {
+                    sender = string.IsNullOrWhiteSpace(opts.DefaultSenderId)
+                        ? "TEST" : opts.DefaultSenderId,
+                    destinations = new[] { new { to = "0" } },
+                    content = new { text = "connection test" }
+                }
+            }
+        };
+
+        try
+        {
+            using var req = new HttpRequestMessage(
+                HttpMethod.Post, $"{opts.BaseUrl.TrimEnd('/')}/sms/3/messages")
+            {
+                Content = JsonContent.Create(payload)
+            };
+            req.Headers.Authorization = new AuthenticationHeaderValue("App", opts.ApiKey);
+            req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+
+            if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                return new ProviderTestResult(false,
+                    $"API key rejected (HTTP {(int)resp.StatusCode}) — check the API key and Base URL.");
+            if ((int)resp.StatusCode >= 500)
+                return new ProviderTestResult(false, $"Infobip returned HTTP {(int)resp.StatusCode}.");
+
+            return new ProviderTestResult(true, "API key accepted — reached Infobip.");
+        }
+        catch (Exception ex)
+        {
+            return new ProviderTestResult(false, $"Cannot reach Infobip: {ex.Message}");
+        }
+    }
+
     /// <summary>Normalises a recipient to international format (no leading "+").
     /// A national Thai number (leading 0) is mapped to the 66 country code.</summary>
     private static string NormaliseE164(string input)

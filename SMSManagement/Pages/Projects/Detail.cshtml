@@ -1092,6 +1092,8 @@ Other SFTP keys: <code>host, port, username, remoteDirectory</code>.<br><br>
                                         <input id="etType" class="form-control form-control-sm" placeholder="auto" /></div>
                                     <div class="col-12 d-flex gap-2">
                                         <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> Save</button>
+                                        <button type="button" id="btnEtTest" class="btn btn-outline-secondary btn-sm"
+                                                title="Verifies the saved credentials against etracker without sending a real SMS.">Test connection</button>
                                         <button type="button" id="btnEtClear" class="btn btn-outline-danger btn-sm">Remove override</button>
                                         <span id="etStatus" class="ms-auto small text-muted"></span>
                                     </div>
@@ -1107,6 +1109,8 @@ Other SFTP keys: <code>host, port, username, remoteDirectory</code>.<br><br>
                                         <input id="ibSender" class="form-control form-control-sm" /></div>
                                     <div class="col-12 d-flex gap-2">
                                         <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> Save</button>
+                                        <button type="button" id="btnIbTest" class="btn btn-outline-secondary btn-sm"
+                                                title="Verifies the saved API key against Infobip without sending a real SMS.">Test connection</button>
                                         <button type="button" id="btnIbClear" class="btn btn-outline-danger btn-sm">Remove override</button>
                                         <span id="ibStatus" class="ms-auto small text-muted"></span>
                                     </div>

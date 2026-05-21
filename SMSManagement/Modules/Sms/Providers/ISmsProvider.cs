@@ -14,4 +14,11 @@ public interface ISmsProvider
     string Name { get; }
 
     Task<ProviderDispatchResult> DispatchAsync(SmsRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Verifies the project's resolved credentials against the provider
+    /// without sending a real (deliverable) message. Used by the "test
+    /// connection" action on the provider-config UI.
+    /// </summary>
+    Task<ProviderTestResult> TestCredentialsAsync(Guid projectId, CancellationToken ct = default);
 }

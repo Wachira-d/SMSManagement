@@ -122,6 +122,61 @@ public sealed class EtrackerSmsProvider : ISmsProvider
         return new ProviderDispatchResult(false, null, $"ETRACKER_{status}", raw);
     }
 
+    public async Task<ProviderTestResult> TestCredentialsAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        var opts = await _configResolver.ResolveEtrackerAsync(projectId, ct);
+        if (string.IsNullOrWhiteSpace(opts.Username) || string.IsNullOrWhiteSpace(opts.Password))
+            return new ProviderTestResult(false, "Username and Password are not configured.");
+
+        // Probe with a deliberately invalid recipient ("0") — etracker rejects
+        // it at parameter validation, so no real SMS is queued or charged. The
+        // gateway status still tells us whether the account authenticated.
+        var fields = new Dictionary<string, string>
+        {
+            ["user"]   = opts.Username,
+            ["pass"]   = opts.Password,
+            ["to"]     = "0",
+            ["from"]   = string.IsNullOrWhiteSpace(opts.DefaultSenderId) ? "TEST" : opts.DefaultSenderId,
+            ["text"]   = "connection test",
+            ["servid"] = string.IsNullOrWhiteSpace(opts.ServiceId)
+                ? projectId.ToString("N") : opts.ServiceId
+        };
+
+        string raw;
+        HttpStatusCode http;
+        try
+        {
+            using var req = new HttpRequestMessage(
+                HttpMethod.Post, opts.BaseUrl.Trim().TrimEnd('?'))
+            {
+                Content = new FormUrlEncodedContent(fields)
+            };
+            req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            http = resp.StatusCode;
+            raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return new ProviderTestResult(false, $"Cannot reach etracker: {ex.Message}");
+        }
+
+        if ((int)http >= 500)
+            return new ProviderTestResult(false, $"etracker returned HTTP {(int)http}.");
+
+        var (status, _) = ParseEtrackerResponse(raw);
+        return status switch
+        {
+            "401" => new ProviderTestResult(false,
+                "Credentials rejected (401) — check Username, Password and ServID."),
+            "400" or "406" => new ProviderTestResult(true,
+                "Credentials accepted — etracker authenticated the account (test recipient rejected, as expected)."),
+            "200" => new ProviderTestResult(true, "etracker accepted the test request."),
+            _ => new ProviderTestResult(false, $"etracker status {status}: {DescribeStatus(status)}"),
+        };
+    }
+
     private static string NormaliseMsisdn(string input)
     {
         var digits = new string(input.Where(char.IsDigit).ToArray());
