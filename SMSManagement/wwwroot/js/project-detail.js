@@ -606,7 +606,10 @@ async function loadPipelineRuns() {
                 + (sms.failed ? ` <span class="text-danger">พลาด ${sms.failed}</span>` : '')
                 + (sms.pending ? ` <span class="text-muted">รอ ${sms.pending}</span>` : '')
                 + `</td>
-                <td>${esc(r.status)}</td>
+                <td><a href="#" onclick="showRejections('${esc(r.id)}');return false;"
+                       class="text-decoration-none">${esc(r.status)}
+                    ${r.status === 'Failed' || r.status === 'Partial'
+                        ? '<i class="bi bi-info-circle"></i>' : ''}</a></td>
             </tr>`;
         });
         html += '</tbody></table></div>';
@@ -1425,6 +1428,14 @@ window.showRejections = async function (batchId) {
     new bootstrap.Modal(modalEl).show();
     try {
         const d = await api.get(`${api_proj}/ingestion-batches/${batchId}/rejections`);
+        // Whole-round failure (ProcessRowsAsync threw before any row) — the
+        // pipeline stores the reason in "fatal".
+        if (d.fatal) {
+            body.innerHTML = `<div class="alert alert-danger small mb-0">
+                <strong>ทั้งรอบนี้ล้มเหลว</strong> — ไฟล์ไม่ถูกประมวลผลเลย<br>
+                <span class="text-muted">เหตุผล:</span> ${esc(d.fatal)}</div>`;
+            return;
+        }
         if (!d.items || d.items.length === 0) {
             body.innerHTML = '<div class="text-muted small">No rejection sample stored for this batch.</div>';
             return;
