@@ -1942,7 +1942,9 @@ document.querySelector('a[href="#tab-workflows"]').addEventListener('shown.bs.ta
 document.getElementById('formSms').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const out = document.getElementById('smsResult');
+    const btn = ev.target.querySelector('button[type=submit]');
     out.classList.add('d-none');
+    btn.disabled = true;   // guard against an accidental double-click
     try {
         const sched = document.getElementById('smsSched').value;
         const r = await api.post(`${api_proj}/sms/send`, {
@@ -1955,7 +1957,11 @@ document.getElementById('formSms').addEventListener('submit', async (ev) => {
         out.textContent = JSON.stringify(r, null, 2);
         toast(`Dispatched: ${r.status}`);
         loadSmsList();
-    } catch (e) { toast(e.message, 'danger'); }
+    } catch (e) {
+        toast(e.message, 'danger');
+    } finally {
+        btn.disabled = false;
+    }
 });
 
 async function loadSmsList() {

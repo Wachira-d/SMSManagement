@@ -49,9 +49,15 @@ public sealed class SmsController : ControllerBase
             return BadRequest("Recipient and Body are required.");
 
         var priority = req.ScheduledFor is { } ? SmsPriority.Scheduled : SmsPriority.Immediate;
+        // Ad-hoc operator sends are deliberately given a unique dedup
+        // discriminator: the dedup key exists to absorb automated double-runs,
+        // not to permanently block an operator from re-sending the same body
+        // to the same number (e.g. test messages). Accidental double-clicks
+        // are guarded client-side instead.
         var id = await _dispatcher.EnqueueAsync(new SmsRequest(
             projectId, req.Recipient, req.Body, req.SenderId,
-            priority, req.ScheduledFor, WorkflowInstanceId: null), ct);
+            priority, req.ScheduledFor, WorkflowInstanceId: null,
+            DedupDiscriminator: $"adhoc:{Guid.NewGuid():N}"), ct);
 
         // Synchronously dispatch unscheduled messages so the operator sees provider
         // feedback inline. Scheduled messages are picked up by the worker.

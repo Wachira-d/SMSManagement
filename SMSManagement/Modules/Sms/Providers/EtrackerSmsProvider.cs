@@ -74,7 +74,9 @@ public sealed class EtrackerSmsProvider : ISmsProvider
         if (!string.IsNullOrWhiteSpace(opts.DefaultType))
             fields["type"] = opts.DefaultType;
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, opts.BaseUrl)
+        // Tolerate a stray trailing "?" / whitespace in a hand-entered Base URL.
+        var endpoint = opts.BaseUrl.Trim().TrimEnd('?');
+        using var req = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
             Content = new FormUrlEncodedContent(fields)
         };
