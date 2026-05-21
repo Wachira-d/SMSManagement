@@ -13,7 +13,7 @@ namespace SMSManagement.Pages.Admin;
 /// <c>GET /api/admin/blocked-ips</c> but rendered server-side for ops
 /// folks who want a quick browser view instead of curling JSON.
 /// </summary>
-[Authorize(Policy = "audit.read")]
+[Authorize(Policy = "system_admin")]
 public sealed class BlockedIpsModel : PageModel
 {
     private readonly AppDbContext _db;

@@ -113,7 +113,7 @@ public sealed class ReportsController : ControllerBase
 
 // Cross-project (admin) endpoints
 [ApiController]
-[Authorize(Policy = "audit.read")]
+[Authorize(Policy = "system_admin")]
 [Route("api/reports")]
 public sealed class GlobalReportsController : ControllerBase
 {

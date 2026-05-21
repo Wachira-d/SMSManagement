@@ -12,7 +12,7 @@ namespace SMSManagement.Modules.Identity.Controllers;
 /// audit.read so only SecOps / system admins can see/restore.
 /// </summary>
 [ApiController]
-[Authorize(Policy = "audit.read")]
+[Authorize(Policy = "system_admin")]
 [Route("api/admin/archived-projects")]
 public sealed class ArchivedProjectsController : ControllerBase
 {

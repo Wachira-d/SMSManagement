@@ -12,7 +12,7 @@ namespace SMSManagement.Modules.Shortlink.Controllers;
 /// Permission: audit.read (system admins, security team).
 /// </summary>
 [ApiController]
-[Authorize(Policy = "audit.read")]
+[Authorize(Policy = "system_admin")]
 [Route("api/admin/blocked-ips")]
 public sealed class BlockedIpsController : ControllerBase
 {

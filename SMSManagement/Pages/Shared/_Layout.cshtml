@@ -83,21 +83,21 @@
                             {
                                 <a hidden data-hotkey="g a" href="/Admin/Users"></a>
                             }
-                            @if (User!.HasClaim("perm", "audit.read") || User.HasClaim("role", "system_admin"))
+                            @* Single admin tier: the whole menu (and every page
+                               behind it) is gated by role=system_admin. If you
+                               can see it, you can open it. *@
+                            @if (User!.HasClaim("role", "system_admin"))
                             {
                                 <li class="nav-item dropdown">
                                     <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#">
                                         <i class="bi bi-shield-lock"></i> @Loc.Get("nav.admin")
                                     </a>
                                     <ul class="dropdown-menu">
-                                        @if (User.HasClaim("role", "system_admin"))
-                                        {
-                                            <li><h6 class="dropdown-header">Administration</h6></li>
-                                            <li><a class="dropdown-item" asp-page="/Admin/Users">Users</a></li>
-                                            <li><a class="dropdown-item" asp-page="/Admin/AllProjects">All projects</a></li>
-                                            <li><a class="dropdown-item" asp-page="/Admin/Settings">System settings</a></li>
-                                            <li><hr class="dropdown-divider"></li>
-                                        }
+                                        <li><h6 class="dropdown-header">Administration</h6></li>
+                                        <li><a class="dropdown-item" asp-page="/Admin/Users">Users</a></li>
+                                        <li><a class="dropdown-item" asp-page="/Admin/AllProjects">All projects</a></li>
+                                        <li><a class="dropdown-item" asp-page="/Admin/Settings">System settings</a></li>
+                                        <li><hr class="dropdown-divider"></li>
                                         <li><h6 class="dropdown-header">Operations</h6></li>
                                         <li><a class="dropdown-item" asp-page="/Admin/Reports">Global reports</a></li>
                                         <li><a class="dropdown-item" asp-page="/Admin/ErrorLogs">Error logs</a></li>

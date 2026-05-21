@@ -11,7 +11,7 @@ namespace SMSManagement.Modules.Core.Logging;
 /// Serilog sink and aged out by the Hangfire <c>error-log-purge</c> job.
 /// </summary>
 [ApiController]
-[Authorize(Policy = "audit.read")]
+[Authorize(Policy = "system_admin")]
 [Route("api/admin/error-logs")]
 public sealed class ErrorLogsController : ControllerBase
 {

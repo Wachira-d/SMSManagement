@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace SMSManagement.Pages.Admin;
 
-[Authorize(Policy = "audit.read")]
+[Authorize(Policy = "system_admin")]
 public sealed class ReportsModel : PageModel
 {
     public void OnGet() { }
