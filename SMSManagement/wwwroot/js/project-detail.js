@@ -2150,6 +2150,11 @@ function stepCardHtml(name, step, allSteps) {
                 ${allSteps.map(s => `<option value="${esc(s)}" ${s===step.onTimeout?'selected':''}>${esc(s)}</option>`).join('')}
               </select>
             </div>
+            <div class="small mt-1 text-danger step-repeat-warn" style="display:none">
+              <i class="bi bi-exclamation-triangle"></i>
+              ตั้ง "ทำซ้ำได้สูงสุด" มากกว่า 1 แต่ timeout ไม่ได้วนกลับมาขั้นนี้ —
+              การทำซ้ำจะไม่ทำงาน ให้เลือก timeout → ขั้นนี้
+            </div>
           </div>
           <div class="col-12 text-end">
             <button type="button" class="btn btn-link btn-sm text-danger p-0 step-del">
@@ -2206,6 +2211,20 @@ function bindStepCard(card) {
     });
     card.querySelectorAll('.sig-del').forEach(b => b.addEventListener('click', (ev) =>
         ev.target.closest('tr').remove()));
+    // Live warning: "ทำซ้ำ > 1" only works when the timeout self-loops.
+    const warnEl = card.querySelector('.step-repeat-warn');
+    function refreshRepeatWarn() {
+        if (!warnEl) return;
+        const reps = parseInt(card.querySelector('.step-maxrep')?.value, 10) || 1;
+        const tmo  = card.querySelector('.step-ontimeout')?.value || '';
+        const self = card.querySelector('.step-name')?.value.trim() || '';
+        warnEl.style.display = (reps > 1 && tmo !== self) ? '' : 'none';
+    }
+    card.querySelector('.step-maxrep')?.addEventListener('input', refreshRepeatWarn);
+    card.querySelector('.step-ontimeout')?.addEventListener('change', refreshRepeatWarn);
+    card.querySelector('.step-name')?.addEventListener('input', refreshRepeatWarn);
+    refreshRepeatWarn();
+
     card.querySelector('.step-del').addEventListener('click', () => {
         if (!confirm('Delete this step?')) return;
         // Capture current state first so other unsaved edits aren't lost.
@@ -2441,12 +2460,14 @@ function captureFormToModel() {
                             onTimeout: 'escalate'
                         },
                         escalate: {
+                            // Self-loops so maxRepeats actually repeats — the
+                            // escalation message is re-sent up to retries times.
                             type: 'send_sms',
                             template: esc,
                             wait,
                             maxRepeats: retries,
                             onSignal: { 'shortlink.clicked': 'done' },
-                            onTimeout: 'done'
+                            onTimeout: 'escalate'
                         },
                         done: { type: 'complete' }
                     }
@@ -2496,14 +2517,17 @@ function captureFormToModel() {
                     initialStep: 'send',
                     steps: {
                         send: {
-                            // Self-loops up to retries times when nothing happens,
-                            // exits early on a click signal from the shortlink module.
+                            // Self-loops up to retries times when nothing happens
+                            // (onTimeout points back at THIS step — that is what
+                            // makes maxRepeats actually repeat). Exits early on a
+                            // click signal; the engine completes the instance once
+                            // the repeats are exhausted.
                             type: 'send_sms',
                             template: body,
                             wait,
                             maxRepeats: retries,
                             onSignal: { 'shortlink.clicked': 'done' },
-                            onTimeout: 'done'
+                            onTimeout: 'send'
                         },
                         done: { type: 'complete' }
                     }
