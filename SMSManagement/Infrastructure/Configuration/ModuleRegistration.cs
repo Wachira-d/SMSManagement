@@ -125,6 +125,7 @@ public static class ModuleRegistration
         services.AddScoped<IIngestionPoller, IngestionPoller>();
 
         // ---------- Error log retention ----------
+        services.Configure<ErrorLogRetentionOptions>(cfg.GetSection("ErrorLogRetention"));
         services.AddScoped<IErrorLogPurger, ErrorLogPurger>();
 
         // ---------- Notifications ----------
