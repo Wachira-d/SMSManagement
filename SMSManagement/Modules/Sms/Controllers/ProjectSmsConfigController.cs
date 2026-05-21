@@ -2,7 +2,6 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Core.Security;
 using SMSManagement.Modules.Identity.Domain;
@@ -30,8 +29,6 @@ public sealed class ProjectSmsConfigController : ControllerBase
     private readonly IProjectAccessService _access;
     private readonly ICurrentUser _user;
     private readonly FieldEncryptor _crypto;
-    private readonly IOptions<EtrackerOptions> _etrackerDefaults;
-    private readonly IOptions<InfobipOptions> _infobipDefaults;
     private readonly IEnumerable<ISmsProvider> _providers;
 
     public ProjectSmsConfigController(
@@ -39,16 +36,12 @@ public sealed class ProjectSmsConfigController : ControllerBase
         IProjectAccessService access,
         ICurrentUser user,
         FieldEncryptor crypto,
-        IOptions<EtrackerOptions> etrackerDefaults,
-        IOptions<InfobipOptions> infobipDefaults,
         IEnumerable<ISmsProvider> providers)
     {
         _db = db;
         _access = access;
         _user = user;
         _crypto = crypto;
-        _etrackerDefaults = etrackerDefaults;
-        _infobipDefaults = infobipDefaults;
         _providers = providers;
     }
 
@@ -185,12 +178,16 @@ public sealed class ProjectSmsConfigController : ControllerBase
 
         var merged = new EtrackerOptions
         {
-            BaseUrl         = Coalesce(dto.BaseUrl, existing?.BaseUrl, _etrackerDefaults.Value.BaseUrl),
-            Username        = Coalesce(dto.Username, existing?.Username, ""),
-            Password        = Coalesce(dto.Password, existing?.Password, ""),
-            DefaultSenderId = Coalesce(dto.DefaultSenderId, existing?.DefaultSenderId, ""),
-            ServiceId       = Coalesce(dto.ServiceId, existing?.ServiceId, ""),
-            DefaultType     = Coalesce(dto.DefaultType, existing?.DefaultType, "")
+            // Non-secret fields round-trip through the form (GET returns them),
+            // so a blank value is an intentional "clear this override" — take
+            // the submitted value as-is rather than restoring the stored one.
+            BaseUrl         = dto.BaseUrl ?? "",
+            Username        = dto.Username ?? "",
+            DefaultSenderId = dto.DefaultSenderId ?? "",
+            ServiceId       = dto.ServiceId ?? "",
+            DefaultType     = dto.DefaultType ?? "",
+            // Password is never returned by GET — blank means "keep current".
+            Password        = Coalesce(dto.Password, existing?.Password, "")
         };
 
         await PersistAsync(row, projectId, "etracker", merged, ct);
@@ -207,9 +204,11 @@ public sealed class ProjectSmsConfigController : ControllerBase
 
         var merged = new InfobipOptions
         {
-            BaseUrl         = Coalesce(dto.BaseUrl, existing?.BaseUrl, _infobipDefaults.Value.BaseUrl),
-            ApiKey          = Coalesce(dto.ApiKey, existing?.ApiKey, ""),
-            DefaultSenderId = Coalesce(dto.DefaultSenderId, existing?.DefaultSenderId, "")
+            // Non-secret fields round-trip through the form — blank clears.
+            BaseUrl         = dto.BaseUrl ?? "",
+            DefaultSenderId = dto.DefaultSenderId ?? "",
+            // API key is never returned by GET — blank means "keep current".
+            ApiKey          = Coalesce(dto.ApiKey, existing?.ApiKey, "")
         };
 
         await PersistAsync(row, projectId, "infobip", merged, ct);
