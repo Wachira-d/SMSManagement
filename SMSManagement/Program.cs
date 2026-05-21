@@ -54,14 +54,19 @@ if (!testingEnabled)
         builder.Configuration.GetConnectionString("Default"));
 
 // ---------- DataProtection: persist keys across restarts / instances ----------
+// Keys MUST be persisted: without it every restart/redeploy generates a fresh
+// key ring, which invalidates every existing auth cookie and antiforgery token
+// ("The key {...} was not found in the key ring"). Default to a folder under
+// the content root so this works out of the box; point DataProtection:
+// KeyDirectory at a shared/mounted volume for multi-instance or ephemeral
+// containers.
 var keyDir = builder.Configuration["DataProtection:KeyDirectory"];
-if (!string.IsNullOrWhiteSpace(keyDir))
-{
-    Directory.CreateDirectory(keyDir);
-    builder.Services.AddDataProtection()
-        .PersistKeysToFileSystem(new DirectoryInfo(keyDir))
-        .SetApplicationName("CampaignPlatform");
-}
+if (string.IsNullOrWhiteSpace(keyDir))
+    keyDir = Path.Combine(builder.Environment.ContentRootPath, "dataprotection-keys");
+Directory.CreateDirectory(keyDir);
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(keyDir))
+    .SetApplicationName("CampaignPlatform");
 
 // ---------- Logging: structured + PII-masked + DB system-log sink ----------
 // The ErrorLogSink persists Warning/Error/Fatal events to the ErrorLogs

@@ -300,7 +300,35 @@ public sealed class AdminSettingsController : ControllerBase
             var via = string.IsNullOrWhiteSpace(opts.PickupDirectory)
                 ? $"{opts.Host}:{opts.Port} (SSL={opts.EnableSsl})"
                 : $"pickup directory {opts.PickupDirectory}";
-            return Ok(new { Ok = true, SentTo = body.To, Via = via });
+
+            // "Accepted by the relay" is all System.Net.Mail can tell us — it
+            // exposes neither a message-id nor the server's reply. Surface what
+            // actually matters for "the mail never arrived": which From address
+            // was used, and the deliverability checklist.
+            var fromUsed = mail.From!.Address;
+            var defaultFrom = string.IsNullOrWhiteSpace(opts.FromAddress)
+                || string.Equals(opts.FromAddress, "no-reply@example.com",
+                    StringComparison.OrdinalIgnoreCase);
+            var note =
+                "The relay ACCEPTED the message — this does NOT guarantee it reached the "
+                + "inbox. If it doesn't arrive: (1) check the spam/junk folder; (2) make "
+                + "sure the From-address domain is authorised to send through this relay "
+                + "and passes SPF/DKIM; (3) confirm the relay may deliver to external "
+                + "recipients (e.g. hotmail.com).";
+            if (defaultFrom)
+                note += " WARNING: the From address is the unconfigured default "
+                      + "(no-reply@example.com) — set Smtp:FromAddress to a real address on "
+                      + "your own domain, otherwise the message will almost certainly be "
+                      + "rejected or junked.";
+
+            return Ok(new
+            {
+                Ok = true,
+                SentTo = body.To,
+                From = fromUsed,
+                Via = via,
+                Note = note
+            });
         }
         catch (Exception ex)
         {
