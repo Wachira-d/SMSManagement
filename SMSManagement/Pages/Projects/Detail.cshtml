@@ -388,7 +388,7 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
             <i class="bi bi-info-circle"></i>
             <strong>Failure semantics:</strong> when ingestion runs, each row is mapped + validated independently.
             Rows that fail go to the rejected folder; the rest of the file still completes.
-            Click a batch in the <a href="#tab-sources" data-bs-toggle="tab">Sources</a> tab to see rejection details.
+            Click a batch in the <a href="#" onclick="gotoTab('#tab-sources');return false;">Sources</a> tab to see rejection details.
         </div>
 
         <div class="card mb-3">
@@ -421,7 +421,7 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
                                 <td>
                                     Replaced with <code>https://&lt;your-host&gt;/&lt;slug&gt;</code> at send time
                                     only when <strong>Shortlink</strong> feature is ON in
-                                    <a href="#tab-settings" data-bs-toggle="tab">Settings</a>.
+                                    <a href="#" onclick="gotoTab('#tab-settings');return false;">Settings</a>.
                                     When off, the original URL is sent as-is. Click events fire <code>shortlink.clicked</code> back to the workflow.
                                 </td>
                             </tr>
@@ -667,9 +667,9 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
                 <br>
                 <span class="text-muted">
                     Required: at least one column mapping in
-                    <a href="#tab-mappings" data-bs-toggle="tab">Mappings</a>
+                    <a href="#" onclick="gotoTab('#tab-mappings');return false;">Mappings</a>
                     and one active workflow in
-                    <a href="#tab-workflows" data-bs-toggle="tab">Workflows</a>.
+                    <a href="#" onclick="gotoTab('#tab-workflows');return false;">Workflows</a>.
                     Without those, ingested rows are dropped to the rejected folder.
                 </span>
             </div>

@@ -508,13 +508,21 @@ function pipelineStageHtml(s, n, isLast) {
             <div class="fw-semibold small">${n}. ${esc(s.name)}</div>
             <div class="small text-muted mb-1">${esc(s.desc)}</div>
             ${badge}
-            <div class="mt-1"><a href="${s.tab}" data-bs-toggle="tab" class="small text-decoration-none">ตั้งค่า ›</a></div>
+            <div class="mt-1"><a href="#" onclick="gotoTab('${s.tab}');return false;" class="small text-decoration-none">ตั้งค่า ›</a></div>
         </div>
     </div>`;
     const arrow = isLast ? ''
         : '<div class="d-flex align-items-center text-muted" style="font-size:1.3rem">→</div>';
     return card + arrow;
 }
+
+// Activate a real nav tab. The pipeline "ตั้งค่า" links live inside cards, not
+// the .nav, so Bootstrap's data-bs-toggle="tab" no-ops there — drive the
+// matching nav-tabs link instead.
+window.gotoTab = function (target) {
+    const nav = document.querySelector(`.nav-tabs a[data-bs-toggle="tab"][href="${target}"]`);
+    if (nav) bootstrap.Tab.getOrCreateInstance(nav).show();
+};
 
 async function loadPipeline() {
     const el = document.getElementById('pipelineStages');
