@@ -116,7 +116,7 @@ public sealed class SmsController : ControllerBase
             .Where(x => x.Id == messageId && x.ProjectId == projectId)
             .Select(x => new
             {
-                x.Id, x.Provider, x.Status, x.MaskedTo, x.Attempts,
+                x.Id, x.Provider, x.SenderId, x.Status, x.MaskedTo, x.Attempts,
                 x.CreatedAt, x.ScheduledFor, x.SentAt, x.DeliveredAt,
                 x.ProviderMessageId, x.ErrorCode, x.RawProviderResponse
             })

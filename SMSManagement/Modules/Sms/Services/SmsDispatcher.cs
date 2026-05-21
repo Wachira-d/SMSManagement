@@ -67,6 +67,7 @@ public sealed class SmsDispatcher : ISmsDispatcher
             WorkflowInstanceId = request.WorkflowInstanceId,
             DedupKey = dedup,
             Provider = _router.Resolve(request).Name,
+            SenderId = request.SenderId,
             MaskedTo = PiiMasking.MaskPhone(request.Recipient),
             EncryptedTo = _crypto.Encrypt(request.Recipient),
             EncryptedBody = _crypto.Encrypt(request.Body),
@@ -99,7 +100,7 @@ public sealed class SmsDispatcher : ISmsDispatcher
 
         var recipient = _crypto.Decrypt(msg.EncryptedTo);
         var body = _crypto.Decrypt(msg.EncryptedBody);
-        var req = new SmsRequest(msg.ProjectId, recipient, body, null,
+        var req = new SmsRequest(msg.ProjectId, recipient, body, msg.SenderId,
             msg.Priority, msg.ScheduledFor, msg.WorkflowInstanceId);
 
         var provider = _router.Resolve(req);

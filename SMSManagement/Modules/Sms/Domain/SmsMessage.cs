@@ -26,6 +26,10 @@ public sealed class SmsMessage
     public string Provider { get; set; } = string.Empty;
     public string? ProviderMessageId { get; set; }
 
+    /// <summary>Caller-supplied sender id / CLI for this message. Null means
+    /// "use the provider's configured default sender".</summary>
+    public string? SenderId { get; set; }
+
     /// <summary>Human-safe display value (e.g. "+66****1234"). Goes in logs.</summary>
     public string MaskedTo { get; set; } = string.Empty;
 
