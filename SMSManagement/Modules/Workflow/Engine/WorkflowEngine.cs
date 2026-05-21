@@ -513,8 +513,11 @@ public sealed class WorkflowEngine : IWorkflowEngine
                 continue;
             }
 
-            var slug = await _shortlinks.CreateAsync(
-                projectId, url, instance.Id, TimeSpan.FromDays(60), null, ct);
+            // Reuse the instance's existing shortlink for this URL if there is
+            // one — a 2nd/3rd reminder pointing at the same URL must carry the
+            // SAME shortlink, not a freshly-minted slug each round.
+            var slug = await _shortlinks.GetOrCreateForInstanceAsync(
+                projectId, url, instance.Id, TimeSpan.FromDays(60), ct);
             replacements[token] = $"{baseUrl}/{slug}{trail}";
             shortened++;
         }

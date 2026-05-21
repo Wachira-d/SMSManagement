@@ -157,6 +157,36 @@ public sealed class ShortlinkService : IShortlinkService
         throw new InvalidOperationException("Could not allocate a unique slug.");
     }
 
+    public async Task<string> GetOrCreateForInstanceAsync(
+        Guid projectId, string targetUrl, Guid workflowInstanceId,
+        TimeSpan? lifetime, CancellationToken ct = default)
+    {
+        var now = _clock.GetUtcNow();
+
+        // Reuse a shortlink already minted for this instance that targets the
+        // same URL and is still usable, so a reminder re-send carries the same
+        // link every round. IgnoreQueryFilters: the engine runs system-context
+        // with no project membership.
+        var existing = await _db.Shortlinks
+            .IgnoreQueryFilters()
+            .Where(s => s.WorkflowInstanceId == workflowInstanceId && !s.Disabled)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        foreach (var s in existing)
+        {
+            if (s.ExpiresAt is { } exp && exp <= now) continue;
+            string stored;
+            try { stored = _crypto.Decrypt(s.EncryptedTargetUrl); }
+            catch { continue; }
+            if (string.Equals(stored, targetUrl, StringComparison.Ordinal))
+                return s.Slug;
+        }
+
+        return await CreateAsync(projectId, targetUrl, workflowInstanceId, lifetime, null, ct)
+            .ConfigureAwait(false);
+    }
+
     public async Task<ResolveResult?> ResolveAndRecordAsync(
         string slug,
         string clientIp,
