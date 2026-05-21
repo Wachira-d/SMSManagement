@@ -47,18 +47,23 @@ public sealed class ColumnMappingsController : ControllerBase
         string CanonicalField,
         string[]? TransformChain,
         int? JoinOrder = null,
-        string? JoinSeparator = null);
+        string? JoinSeparator = null,
+        Guid? SourceId = null);
 
+    // sourceId scopes a "pipeline": null = the project-shared mapping set,
+    // a value = that ingestion source's own mapping set.
     [HttpGet]
-    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    public async Task<IActionResult> List(
+        Guid projectId, [FromQuery] Guid? sourceId, CancellationToken ct)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
         var rows = await _db.ColumnMappings
-            .Where(m => m.ProjectId == projectId)
+            .Where(m => m.ProjectId == projectId && m.SourceId == sourceId)
             .OrderBy(m => m.CanonicalField).ThenBy(m => m.JoinOrder).ThenBy(m => m.SourceColumn)
             .Select(m => new
             {
-                m.Id, m.SourceColumn, m.CanonicalField, m.JoinOrder, m.JoinSeparator, m.PresetJson,
+                m.Id, m.SourceColumn, m.CanonicalField, m.JoinOrder, m.JoinSeparator,
+                m.PresetJson, m.SourceId,
                 TransformChain = JsonSerializer.Deserialize<string[]>(m.TransformChainJson, (JsonSerializerOptions?)null)
             })
             .ToListAsync(ct);
@@ -83,13 +88,15 @@ public sealed class ColumnMappingsController : ControllerBase
 
         var existing = await _db.ColumnMappings
             .FirstOrDefaultAsync(m => m.ProjectId == projectId
-                                   && m.SourceColumn == req.SourceColumn, ct);
+                                   && m.SourceColumn == req.SourceColumn
+                                   && m.SourceId == req.SourceId, ct);
         if (existing is null)
         {
             existing = new ColumnMapping
             {
                 ProjectId = projectId,
                 SourceColumn = req.SourceColumn,
+                SourceId = req.SourceId,
             };
             _db.ColumnMappings.Add(existing);
         }
@@ -108,7 +115,7 @@ public sealed class ColumnMappingsController : ControllerBase
                         existing.JoinOrder, existing.JoinSeparator });
     }
 
-    public sealed record SetupRequest(List<ColumnSetupItem> Columns);
+    public sealed record SetupRequest(List<ColumnSetupItem> Columns, Guid? SourceId = null);
 
     /// <summary>
     /// Friendly bulk setup: the operator picks a plain-language field type and
@@ -130,10 +137,13 @@ public sealed class ColumnMappingsController : ControllerBase
                 return BadRequest($"Unknown field type '{c.FieldType}'. Allowed: "
                     + string.Join(", ", FieldPresetExpander.FieldTypes));
 
+        // Everything in this call is scoped to one pipeline (sourceId), or to
+        // the project-shared set when sourceId is null.
+        var sourceId = req.SourceId;
         var maps = await _db.ColumnMappings
-            .Where(m => m.ProjectId == projectId).ToListAsync(ct);
+            .Where(m => m.ProjectId == projectId && m.SourceId == sourceId).ToListAsync(ct);
         var rules = await _db.CanonicalFieldRules
-            .Where(r => r.ProjectId == projectId).ToListAsync(ct);
+            .Where(r => r.ProjectId == projectId && r.SourceId == sourceId).ToListAsync(ct);
 
         var wantedRules = new Dictionary<string, CanonicalFieldRule>(StringComparer.OrdinalIgnoreCase);
         var touchedCanonicals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -156,7 +166,10 @@ public sealed class ColumnMappingsController : ControllerBase
 
             if (map is null)
             {
-                map = new ColumnMapping { ProjectId = projectId, SourceColumn = item.SourceColumn };
+                map = new ColumnMapping
+                {
+                    ProjectId = projectId, SourceColumn = item.SourceColumn, SourceId = sourceId
+                };
                 _db.ColumnMappings.Add(map);
             }
             map.CanonicalField = exp.CanonicalField;
@@ -164,7 +177,10 @@ public sealed class ColumnMappingsController : ControllerBase
             map.PresetJson = JsonSerializer.Serialize(item);
 
             if (exp.Rule is not null)
+            {
+                exp.Rule.SourceId = sourceId;
                 wantedRules[exp.CanonicalField] = exp.Rule;   // last column wins for a shared canonical
+            }
         }
 
         // Sync validation rules for every canonical the setup touched.
@@ -213,6 +229,7 @@ public sealed class ColumnMappingsController : ControllerBase
     public async Task<IActionResult> PreviewHeaders(
         Guid projectId,
         IFormFile file,
+        [FromQuery] Guid? sourceId = null,
         CancellationToken ct = default)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Member, ct);
@@ -235,7 +252,7 @@ public sealed class ColumnMappingsController : ControllerBase
             };
 
             var existing = await _db.ColumnMappings
-                .Where(m => m.ProjectId == projectId)
+                .Where(m => m.ProjectId == projectId && m.SourceId == sourceId)
                 .Select(m => new { m.SourceColumn, m.CanonicalField, m.PresetJson })
                 .ToListAsync(ct);
             var existingMap = existing.ToDictionary(

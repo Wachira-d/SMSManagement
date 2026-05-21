@@ -20,6 +20,13 @@ public sealed class CanonicalFieldRule
     /// <summary>"phone" | "name" | "url" | "message" | "email" | "custom".</summary>
     public string CanonicalField { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The ingestion source (pipeline) this rule belongs to. Null =
+    /// project-shared: used by any source that has no rules of its own.
+    /// Set = this source's own pipeline.
+    /// </summary>
+    public Guid? SourceId { get; set; }
+
     /// <summary>If true, the canonical must be present (post-merge) and non-blank.</summary>
     public bool Required { get; set; }
 

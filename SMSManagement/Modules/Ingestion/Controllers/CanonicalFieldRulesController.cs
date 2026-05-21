@@ -41,14 +41,18 @@ public sealed class CanonicalFieldRulesController : ControllerBase
         string? StartsWithAny,
         string? EndsWithAny,
         string? Pattern,
-        string? AllowedValues);
+        string? AllowedValues,
+        Guid? SourceId = null);
 
+    // sourceId scopes a "pipeline": null = the project-shared rule set,
+    // a value = that ingestion source's own rule set.
     [HttpGet]
-    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    public async Task<IActionResult> List(
+        Guid projectId, [FromQuery] Guid? sourceId, CancellationToken ct)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
         var rows = await _db.CanonicalFieldRules
-            .Where(r => r.ProjectId == projectId)
+            .Where(r => r.ProjectId == projectId && r.SourceId == sourceId)
             .OrderBy(r => r.CanonicalField)
             .ToListAsync(ct);
         return Ok(rows);
@@ -79,10 +83,15 @@ public sealed class CanonicalFieldRulesController : ControllerBase
 
         var canonical = req.CanonicalField.ToLowerInvariant();
         var row = await _db.CanonicalFieldRules
-            .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.CanonicalField == canonical, ct);
+            .FirstOrDefaultAsync(r => r.ProjectId == projectId
+                                   && r.CanonicalField == canonical
+                                   && r.SourceId == req.SourceId, ct);
         if (row is null)
         {
-            row = new CanonicalFieldRule { ProjectId = projectId, CanonicalField = canonical };
+            row = new CanonicalFieldRule
+            {
+                ProjectId = projectId, CanonicalField = canonical, SourceId = req.SourceId
+            };
             _db.CanonicalFieldRules.Add(row);
         }
         row.Required       = req.Required;
@@ -100,12 +109,13 @@ public sealed class CanonicalFieldRulesController : ControllerBase
 
     [HttpDelete("{canonicalField}")]
     public async Task<IActionResult> Delete(
-        Guid projectId, string canonicalField, CancellationToken ct)
+        Guid projectId, string canonicalField, [FromQuery] Guid? sourceId, CancellationToken ct)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Admin, ct);
         var row = await _db.CanonicalFieldRules
             .FirstOrDefaultAsync(r => r.ProjectId == projectId
-                                   && r.CanonicalField == canonicalField.ToLowerInvariant(), ct);
+                                   && r.CanonicalField == canonicalField.ToLowerInvariant()
+                                   && r.SourceId == sourceId, ct);
         if (row is null) return NotFound();
         _db.CanonicalFieldRules.Remove(row);
         await _db.SaveChangesAsync(ct);

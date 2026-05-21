@@ -105,7 +105,7 @@ document.querySelectorAll('[data-bs-toggle="tab"]').forEach(el => {
         switch (target) {
             case '#tab-pipeline':   loadPipeline(); loadPipelineRuns(); break;
             case '#tab-members':    if (!loaded.members)    { loaded.members    = true; loadMembers();    } break;
-            case '#tab-mappings':   if (!loaded.mappings)   { loaded.mappings   = true; loadMappings(); loadRules(); } break;
+            case '#tab-mappings':   if (!loaded.mappings)   { loaded.mappings   = true; loadMapScope(); loadMappings(); loadRules(); } break;
             case '#tab-sources':    if (!loaded.sources)    { loaded.sources    = true; loadSources(); loadBatches(); } break;
             case '#tab-workflows':  if (!loaded.workflows)  { loaded.workflows  = true; loadWorkflows(); loadWfInstances(); loadWfCouponBatches(); } break;
             case '#tab-shortlinks': if (!loaded.shortlinks) { loaded.shortlinks = true; loadShortlinks(); } break;
@@ -389,7 +389,7 @@ document.getElementById('formShare').addEventListener('submit', async (ev) => {
 // exists, so projects that opt in fully take over.
 async function loadRules() {
     try {
-        const rows = await api.get(`${api_proj}/canonical-rules`);
+        const rows = await api.get(`${api_proj}/canonical-rules${mapScopeQs()}`);
         const body = document.getElementById('rulesBody');
         if (!rows.length) {
             body.innerHTML = '<tr><td colspan="5" class="text-muted small">No custom rules yet. The built-in phone check still applies.</td></tr>';
@@ -432,7 +432,7 @@ window.editRule = function (r) {
 window.deleteRule = async function (canonical) {
     if (!confirm(`Delete rule for "${canonical}"?`)) return;
     try {
-        await api.delete(`${api_proj}/canonical-rules/${encodeURIComponent(canonical)}`);
+        await api.delete(`${api_proj}/canonical-rules/${encodeURIComponent(canonical)}${mapScopeQs()}`);
         toast('Rule removed.');
         loadRules();
     } catch (e) { toast(e.message, 'danger'); }
@@ -457,7 +457,8 @@ document.getElementById('formRule').addEventListener('submit', async (ev) => {
             startsWithAny:  trimOrNull('ruleStarts'),
             endsWithAny:    trimOrNull('ruleEnds'),
             pattern:        trimOrNull('rulePattern'),
-            allowedValues:  trimOrNull('ruleAllowed')
+            allowedValues:  trimOrNull('ruleAllowed'),
+            sourceId:       mapScopeId()
         });
         toast('Rule saved.');
         loadRules();
@@ -733,7 +734,7 @@ function renderEasyPreview(data) {
         const fd = new FormData();
         fd.append('file', f);
         try {
-            const resp = await fetch(`${api_proj}/column-mappings/preview-headers`,
+            const resp = await fetch(`${api_proj}/column-mappings/preview-headers${mapScopeQs()}`,
                 { method: 'POST', body: fd, credentials: 'include' });
             const data = await resp.json();
             if (!resp.ok) { toast(data.message || 'อ่านไฟล์ไม่สำเร็จ', 'danger'); return; }
@@ -774,7 +775,8 @@ function renderEasyPreview(data) {
         status.textContent = 'กำลังบันทึก…';
         status.className = 'small ms-2 text-muted';
         try {
-            await api.put(`${api_proj}/column-mappings/setup`, { columns: easyGather() });
+            await api.put(`${api_proj}/column-mappings/setup`,
+                { columns: easyGather(), sourceId: mapScopeId() });
             status.textContent = '✓ บันทึกการตั้งค่าแล้ว';
             status.className = 'small ms-2 text-success';
             if (loaded.mappings) loadMappings();
@@ -785,10 +787,38 @@ function renderEasyPreview(data) {
     });
 })();
 
+// ---- Pipeline scope: cleansing/validation per ingestion source ----
+function mapScopeId() { return document.getElementById('mapScope')?.value || null; }
+function mapScopeQs() {
+    const v = mapScopeId();
+    return v ? `?sourceId=${encodeURIComponent(v)}` : '';
+}
+async function loadMapScope() {
+    const sel = document.getElementById('mapScope');
+    if (!sel) return;
+    try {
+        const sources = await api.get(`${api_proj}/ingestion-sources`);
+        const cur = sel.value;
+        sel.innerHTML = '<option value="">📋 ใช้ร่วมทุก source (shared)</option>'
+            + (sources || []).map(s =>
+                `<option value="${esc(s.id)}">${esc(s.sourceType)} — ${esc(String(s.id).slice(0, 8))}…</option>`
+              ).join('');
+        sel.value = cur;
+    } catch { /* keep the shared option only */ }
+}
+document.getElementById('mapScope')?.addEventListener('change', () => {
+    loadMappings();
+    loadRules();
+    // The easy-setup panel's columns belong to the previous scope — reset it.
+    document.getElementById('easyCols')?.classList.add('d-none');
+    const ef = document.getElementById('easyFile');
+    if (ef) ef.value = '';
+});
+
 // ==================== MAPPINGS ====================
 async function loadMappings() {
     try {
-        const rows = await api.get(`${api_proj}/column-mappings`);
+        const rows = await api.get(`${api_proj}/column-mappings${mapScopeQs()}`);
         const body = document.getElementById('mapBody');
         if (!rows.length) {
             body.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-4"><i class="bi bi-arrow-left-right fs-3 d-block"></i>No mappings yet. <strong>Drop a sample file above</strong> to auto-detect headers, or add one manually.</td></tr>';
@@ -864,7 +894,8 @@ document.getElementById('formMap').addEventListener('submit', async (ev) => {
             // Empty input → null → defaults to " " server-side. Operators can
             // still set an explicit empty separator by typing a single space then deleting it
             // and re-saving — but the common case is "I forgot to fill it in".
-            joinSeparator:  sepRaw.length > 0 ? sepRaw : null
+            joinSeparator:  sepRaw.length > 0 ? sepRaw : null,
+            sourceId:       mapScopeId()
         });
         toast('Saved.');
         loadMappings();
@@ -913,7 +944,7 @@ document.getElementById('formMap').addEventListener('submit', async (ev) => {
         try {
             // Bypass api.req — it always sets Content-Type: application/json.
             // FormData needs the browser to set its own multipart boundary.
-            const resp = await fetch(`${api_proj}/column-mappings/preview-headers`, {
+            const resp = await fetch(`${api_proj}/column-mappings/preview-headers${mapScopeQs()}`, {
                 method: 'POST', body: fd, credentials: 'include'
             });
             const data = await resp.json();
@@ -980,7 +1011,8 @@ document.getElementById('formMap').addEventListener('submit', async (ev) => {
                 await api.post(`${api_proj}/column-mappings`, {
                     sourceColumn:   r.header,
                     canonicalField: r.field,
-                    transformChain: r.chain.split(',').map(s => s.trim()).filter(Boolean)
+                    transformChain: r.chain.split(',').map(s => s.trim()).filter(Boolean),
+                    sourceId:       mapScopeId()
                 });
                 ok++;
             } catch { fail++; }

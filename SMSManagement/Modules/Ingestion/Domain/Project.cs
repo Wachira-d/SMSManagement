@@ -126,6 +126,14 @@ public sealed class ColumnMapping
     /// the friendly toggles. Null for mappings created via the advanced editor.
     /// </summary>
     public string? PresetJson { get; set; }
+
+    /// <summary>
+    /// The ingestion source (pipeline) this mapping belongs to. Null =
+    /// project-shared: used by any source that has no mappings of its own.
+    /// Set = this source's own pipeline, letting one project run sources
+    /// with different file layouts.
+    /// </summary>
+    public Guid? SourceId { get; set; }
 }
 
 public sealed class IngestionBatch

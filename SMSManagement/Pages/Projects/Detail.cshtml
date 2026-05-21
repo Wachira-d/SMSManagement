@@ -284,6 +284,21 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
 
     <!-- ============ MAPPINGS ============ -->
     <div class="tab-pane fade" id="tab-mappings">
+        <!-- Pipeline scope: cleansing + validation can be configured per
+             ingestion source (each source = its own pipeline), or shared. -->
+        <div class="card mb-3">
+            <div class="card-body py-2 d-flex align-items-center gap-2 flex-wrap">
+                <label class="form-label small mb-0">ตั้งค่าให้ pipeline:</label>
+                <select id="mapScope" class="form-select form-select-sm" style="max-width:320px">
+                    <option value="">📋 ใช้ร่วมทุก source (shared)</option>
+                </select>
+                <span class="small text-muted">
+                    เลือก source เพื่อตั้งค่าทำความสะอาด/ตรวจสอบเฉพาะของ source นั้น —
+                    source ที่ไม่มีของตัวเองจะใช้ชุด "shared"
+                </span>
+            </div>
+        </div>
+
         <!-- Easy setup: a non-technical operator uploads a sample, picks a
              plain-language field type per column, previews before/after, and
              saves. Expands into transforms + rules behind the scenes. -->

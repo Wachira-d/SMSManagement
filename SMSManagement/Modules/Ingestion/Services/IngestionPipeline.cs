@@ -108,7 +108,8 @@ public sealed class IngestionPipeline : IIngestionPipeline
         try
         {
             (accepted, rejected, rejectionsJson) =
-                await ProcessRowsAsync(projectId, batch.Id, filePath, settings.WorkflowName, ct);
+                await ProcessRowsAsync(projectId, batch.Id, filePath, settingsId,
+                    settings.WorkflowName, ct);
         }
         catch (Exception ex)
         {
@@ -188,16 +189,28 @@ public sealed class IngestionPipeline : IIngestionPipeline
     // ---------------- helpers ----------------
 
     private async Task<(int accepted, int rejected, string? rejectionsJson)> ProcessRowsAsync(
-        Guid projectId, Guid batchId, string filePath, string? workflowName, CancellationToken ct)
+        Guid projectId, Guid batchId, string filePath, Guid sourceId,
+        string? workflowName, CancellationToken ct)
     {
-        var mappings = await _db.ColumnMappings
+        // Per-source (per-pipeline) config: use this source's own column
+        // mappings / validation rules; fall back to the project-shared ones
+        // (SourceId == null) when the source has none of its own.
+        var allMappings = await _db.ColumnMappings
             .Where(m => m.ProjectId == projectId)
             .ToListAsync(ct);
-        var rules = (await _db.CanonicalFieldRules
-                .Where(r => r.ProjectId == projectId)
-                .ToListAsync(ct))
-            .ToDictionary(r => r.CanonicalField, r => r,
-                StringComparer.OrdinalIgnoreCase);
+        var mappings = allMappings.Where(m => m.SourceId == sourceId).ToList();
+        if (mappings.Count == 0)
+            mappings = allMappings.Where(m => m.SourceId == null).ToList();
+
+        var allRules = await _db.CanonicalFieldRules
+            .Where(r => r.ProjectId == projectId)
+            .ToListAsync(ct);
+        var sourceRules = allRules.Where(r => r.SourceId == sourceId).ToList();
+        if (sourceRules.Count == 0)
+            sourceRules = allRules.Where(r => r.SourceId == null).ToList();
+        var rules = sourceRules.ToDictionary(r => r.CanonicalField, r => r,
+            StringComparer.OrdinalIgnoreCase);
+
         var mapper = new ColumnMapper(mappings, rules);
 
         // Resolve the workflow this source starts. A source may be bound to a
