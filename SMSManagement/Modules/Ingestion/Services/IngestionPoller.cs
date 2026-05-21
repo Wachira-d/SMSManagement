@@ -46,32 +46,52 @@ public sealed class IngestionPoller : IIngestionPoller
             .ToListAsync(ct);
 
         foreach (var s in sources)
+            await PollOneAsync(s, ct);
+    }
+
+    public async Task PollSourceAsync(Guid sourceId, CancellationToken ct = default)
+    {
+        var s = await _db.IngestionSourceSettings
+            .FirstOrDefaultAsync(x => x.Id == sourceId, ct);
+        if (s is null)
         {
-            try
+            _log.LogWarning("Manual poll requested for unknown source {SourceId}.", sourceId);
+            return;
+        }
+
+        _log.LogInformation("Manual poll triggered for source {SourceId} ({Type}).",
+            s.Id, s.SourceType);
+        await PollOneAsync(s, ct);
+    }
+
+    /// <summary>Polls one source, isolating failures so a bad binding never
+    /// aborts a multi-source sweep.</summary>
+    private async Task PollOneAsync(IngestionSourceSettings s, CancellationToken ct)
+    {
+        try
+        {
+            switch (s.SourceType.ToUpperInvariant())
             {
-                switch (s.SourceType.ToUpperInvariant())
-                {
-                    case "SFTP":
-                        await PollSftpAsync(s, ct);
-                        break;
-                    case "MANUAL_CSV":
-                    case "REST":
-                    case "SHAREPOINT":
-                    case "CLOUD":
-                        // Manual = pull from the upload portal; nothing to poll.
-                        // The other two are stubs the user can implement; their
-                        // adapters slot in here without touching the scheduler.
-                        break;
-                    default:
-                        _log.LogWarning("Unknown ingestion source type {Type}", s.SourceType);
-                        break;
-                }
+                case "SFTP":
+                    await PollSftpAsync(s, ct);
+                    break;
+                case "MANUAL_CSV":
+                case "REST":
+                case "SHAREPOINT":
+                case "CLOUD":
+                    // Manual = pull from the upload portal; nothing to poll.
+                    // The other two are stubs the user can implement; their
+                    // adapters slot in here without touching the scheduler.
+                    break;
+                default:
+                    _log.LogWarning("Unknown ingestion source type {Type}", s.SourceType);
+                    break;
             }
-            catch (Exception ex)
-            {
-                _log.LogError(ex, "Poll failed for source {SourceId} ({Type})",
-                    s.Id, s.SourceType);
-            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Poll failed for source {SourceId} ({Type})",
+                s.Id, s.SourceType);
         }
     }
 

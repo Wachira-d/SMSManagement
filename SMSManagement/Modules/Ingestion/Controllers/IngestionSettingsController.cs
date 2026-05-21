@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Hangfire;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -7,6 +8,7 @@ using SMSManagement.Modules.Core.Security;
 using SMSManagement.Modules.Identity.Domain;
 using SMSManagement.Modules.Identity.Services;
 using SMSManagement.Modules.Ingestion.Domain;
+using SMSManagement.Modules.Ingestion.Services;
 
 namespace SMSManagement.Modules.Ingestion.Controllers;
 
@@ -98,6 +100,27 @@ public sealed class IngestionSettingsController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
         return Ok(new { row.Id, row.SourceType, row.Enabled });
+    }
+
+    /// <summary>
+    /// Operator-triggered "run now" — queues an immediate poll of this one
+    /// source binding as a background job (SFTP fetches can be slow, so the
+    /// HTTP call returns straight away). Runs regardless of the binding's
+    /// Enabled flag or cron schedule.
+    /// </summary>
+    [HttpPost("{settingsId:guid}/run")]
+    public async Task<IActionResult> RunNow(
+        Guid projectId, Guid settingsId,
+        [FromServices] IBackgroundJobClient jobs, CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Admin, ct);
+
+        var exists = await _db.IngestionSourceSettings
+            .AnyAsync(s => s.Id == settingsId && s.ProjectId == projectId, ct);
+        if (!exists) return NotFound();
+
+        jobs.Enqueue<IIngestionPoller>(p => p.PollSourceAsync(settingsId, CancellationToken.None));
+        return Accepted(new { settingsId, status = "queued" });
     }
 
     [HttpDelete("{settingsId:guid}")]

@@ -716,6 +716,8 @@ async function loadSources() {
                 <td>${s.enabled ? '<span class="text-success">●</span>' : '<span class="text-muted">○</span>'}</td>
                 <td>
                     <button class="btn btn-link btn-sm p-0"
+                            onclick="runSrc('${esc(s.id)}')">Run now</button>
+                    <button class="btn btn-link btn-sm p-0"
                             onclick='editSrc(${JSON.stringify(s).replace(/'/g, "&apos;")})'>Edit</button>
                     <button class="btn btn-link btn-sm p-0 text-danger"
                             onclick="deleteSrc('${esc(s.id)}')">Delete</button>
@@ -919,6 +921,13 @@ window.deleteSrc = async function (id) {
         await api.delete(`${api_proj}/ingestion-sources/${id}`);
         toast('Deleted.');
         loadSources();
+    } catch (e) { toast(e.message, 'danger'); }
+};
+
+window.runSrc = async function (id) {
+    try {
+        await api.post(`${api_proj}/ingestion-sources/${id}/run`, {});
+        toast('Manual run queued — new files appear under Batches shortly.');
     } catch (e) { toast(e.message, 'danger'); }
 };
 
