@@ -157,11 +157,18 @@ builder.Services
 // in. See Modules/Identity/Auth/JwtTokenIssuer.MapGroupsToPermissions.
 builder.Services.AddAuthorization(o =>
 {
-    o.AddPolicy("project.create",   p => p.RequireClaim("perm", "project.create"));
-    o.AddPolicy("sms.dispatch",     p => p.RequireClaim("perm", "sms.dispatch"));
-    o.AddPolicy("workflow.author",  p => p.RequireClaim("perm", "workflow.author"));
-    o.AddPolicy("ingestion.upload", p => p.RequireClaim("perm", "ingestion.upload"));
-    o.AddPolicy("audit.read",       p => p.RequireClaim("perm", "audit.read"));
+    // A system_admin satisfies EVERY cross-project permission. Admins are
+    // superusers — they must never be locked out of an admin page (e.g.
+    // /Admin/ErrorLogs, gated by audit.read) just because their AD groups
+    // didn't happen to grant that specific perm claim.
+    void Perm(string name) => o.AddPolicy(name, p => p.RequireAssertion(ctx =>
+        ctx.User.HasClaim("perm", name) || ctx.User.HasClaim("role", "system_admin")));
+
+    Perm("project.create");
+    Perm("sms.dispatch");
+    Perm("workflow.author");
+    Perm("ingestion.upload");
+    Perm("audit.read");
     // System administration. The role claim is stamped by JwtTokenIssuer when
     // the user is in the configured AD group OR has IsSystemAdmin=true on
     // their local Users row. Gates the /Admin/* surface that mutates global
