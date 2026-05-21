@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using SMSManagement.Infrastructure.Persistence;
+using SMSManagement.Modules.Core.Security;
 using SMSManagement.Modules.Ingestion.Domain;
 using SMSManagement.Modules.Sms.Domain;
 using SMSManagement.Modules.Workflow.Domain;
@@ -31,15 +32,17 @@ public sealed class SmsRoundSummaryNotifier : ISmsRoundSummaryNotifier
 
     private readonly AppDbContext _db;
     private readonly IEmailSender _email;
+    private readonly FieldEncryptor _crypto;
     private readonly TimeProvider _clock;
     private readonly ILogger<SmsRoundSummaryNotifier> _log;
 
     public SmsRoundSummaryNotifier(
-        AppDbContext db, IEmailSender email, TimeProvider clock,
+        AppDbContext db, IEmailSender email, FieldEncryptor crypto, TimeProvider clock,
         ILogger<SmsRoundSummaryNotifier> log)
     {
         _db = db;
         _email = email;
+        _crypto = crypto;
         _clock = clock;
         _log = log;
     }
@@ -65,9 +68,9 @@ public sealed class SmsRoundSummaryNotifier : ISmsRoundSummaryNotifier
     }
 
     private sealed record RoundSms(
-        string MaskedTo, string Provider, string? SenderId, SmsStatus Status,
-        string? ProviderMessageId, string? ErrorCode,
-        DateTimeOffset? SentAt, DateTimeOffset? DeliveredAt);
+        byte[] EncryptedTo, byte[] EncryptedBody, string Provider, string? SenderId,
+        SmsStatus Status, string? ProviderMessageId, string? ErrorCode,
+        string? RawProviderResponse, DateTimeOffset? SentAt, DateTimeOffset? DeliveredAt);
 
     private async Task TryNotifyAsync(IngestionBatch batch, CancellationToken ct)
     {
@@ -89,8 +92,9 @@ public sealed class SmsRoundSummaryNotifier : ISmsRoundSummaryNotifier
             .IgnoreQueryFilters()
             .Where(m => m.WorkflowInstanceId != null && ids.Contains(m.WorkflowInstanceId.Value))
             .Select(m => new RoundSms(
-                m.MaskedTo, m.Provider, m.SenderId, m.Status,
-                m.ProviderMessageId, m.ErrorCode, m.SentAt, m.DeliveredAt))
+                m.EncryptedTo, m.EncryptedBody, m.Provider, m.SenderId, m.Status,
+                m.ProviderMessageId, m.ErrorCode, m.RawProviderResponse,
+                m.SentAt, m.DeliveredAt))
             .ToListAsync(ct);
 
         // 3. Wait until every SMS has settled.
@@ -123,7 +127,7 @@ public sealed class SmsRoundSummaryNotifier : ISmsRoundSummaryNotifier
         await _db.SaveChangesAsync(ct);
     }
 
-    private static EmailMessage BuildEmail(
+    private EmailMessage BuildEmail(
         Project project, IngestionBatch batch, IReadOnlyList<RoundSms> sms, string[] recipients)
     {
         int delivered = sms.Count(m => m.Status == SmsStatus.Delivered);
@@ -171,19 +175,35 @@ public sealed class SmsRoundSummaryNotifier : ISmsRoundSummaryNotifier
         return new EmailMessage(recipients, subject, html, text, new[] { csv });
     }
 
-    private static byte[] BuildCsv(IReadOnlyList<RoundSms> sms)
+    private byte[] BuildCsv(IReadOnlyList<RoundSms> sms)
     {
         var sb = new StringBuilder();
         sb.Append('﻿');   // UTF-8 BOM — Excel opens it cleanly
-        sb.AppendLine("Recipient,Status,Provider,Sender,ProviderMessageId,ErrorCode,SentAt,DeliveredAt");
+        sb.AppendLine("Recipient,Message,Status,Provider,Sender,"
+                    + "ProviderMessageId,ErrorCode,ProviderResponse,SentAt,DeliveredAt");
         foreach (var m in sms)
+        {
             sb.AppendLine(string.Join(',', new[]
             {
-                Csv(m.MaskedTo), Csv(m.Status.ToString()), Csv(m.Provider), Csv(m.SenderId),
-                Csv(m.ProviderMessageId), Csv(m.ErrorCode),
-                Csv(m.SentAt?.ToString("u")), Csv(m.DeliveredAt?.ToString("u"))
+                Csv(Decrypt(m.EncryptedTo)),
+                Csv(Decrypt(m.EncryptedBody)),
+                Csv(m.Status.ToString()),
+                Csv(m.Provider),
+                Csv(m.SenderId),
+                Csv(m.ProviderMessageId),
+                Csv(m.ErrorCode),
+                Csv(m.RawProviderResponse),
+                Csv(m.SentAt?.ToString("u")),
+                Csv(m.DeliveredAt?.ToString("u"))
             }));
+        }
         return Encoding.UTF8.GetBytes(sb.ToString());
+    }
+
+    private string Decrypt(byte[] cipher)
+    {
+        try { return _crypto.Decrypt(cipher); }
+        catch { return "(decrypt failed)"; }
     }
 
     private static string Csv(string? v)
