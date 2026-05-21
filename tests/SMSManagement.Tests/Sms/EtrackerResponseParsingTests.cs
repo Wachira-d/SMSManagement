@@ -77,6 +77,16 @@ public sealed class EtrackerResponseParsingTests
     }
 
     [Theory]
+    [InlineData("A", "0041")]                 // ASCII 'A' = U+0041
+    [InlineData("ก", "0E01")]                 // Thai 'ko kai' = U+0E01
+    [InlineData("一", "4E00")]            // CJK — matches the mesapi spec example
+    [InlineData("", "")]
+    public void ToUcs2Hex_encodes_utf16_big_endian(string input, string expected)
+    {
+        EtrackerSmsProvider.ToUcs2Hex(input).Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData("200", "Successful")]
     [InlineData("400", "Invalid Parameter — missing parameter or invalid field type")]
     [InlineData("401", "Invalid Account — invalid username, password or ServID")]

@@ -56,23 +56,30 @@ public sealed class EtrackerSmsProvider : ISmsProvider
 
         var normalised = NormaliseMsisdn(request.Recipient);
 
+        // Text encoding depends on the "type" parameter (mesapi spec 4.1.2.1):
+        //   type unset  -> gateway auto-detects; body is URL-encoded
+        //   type = 0    -> ASCII; body is URL-encoded
+        //   type = 5    -> Unicode; body MUST be a UCS-2 (UTF-16BE) HEX string
+        // FormUrlEncodedContent URL-encodes every value, so for type 5 we hand
+        // it the hex string (hex chars are URL-safe and pass through unchanged).
+        var type = opts.DefaultType?.Trim();
+        var text = type == "5" ? ToUcs2Hex(request.Body) : request.Body;
+
         // etracker's mesapi authenticates via clear-text "user"/"pass" FORM
-        // parameters — not an HTTP Basic auth header. "type" is omitted so the
-        // gateway auto-detects ASCII vs Unicode (handles Thai); the form body
-        // is UTF-8 URL-encoded, which is what mesapi expects when type is unset.
+        // parameters — not an HTTP Basic auth header.
         var fields = new Dictionary<string, string>
         {
             ["user"]   = opts.Username,
             ["pass"]   = opts.Password,
             ["to"]     = normalised,
             ["from"]   = request.SenderId ?? opts.DefaultSenderId,
-            ["text"]   = request.Body,
+            ["text"]   = text,
             ["servid"] = string.IsNullOrWhiteSpace(opts.ServiceId)
                 ? request.ProjectId.ToString("N")
                 : opts.ServiceId
         };
-        if (!string.IsNullOrWhiteSpace(opts.DefaultType))
-            fields["type"] = opts.DefaultType;
+        if (!string.IsNullOrWhiteSpace(type))
+            fields["type"] = type;
 
         // Tolerate a stray trailing "?" / whitespace in a hand-entered Base URL.
         var endpoint = opts.BaseUrl.Trim().TrimEnd('?');
@@ -176,6 +183,11 @@ public sealed class EtrackerSmsProvider : ISmsProvider
             _ => new ProviderTestResult(false, $"etracker status {status}: {DescribeStatus(status)}"),
         };
     }
+
+    /// <summary>Encodes text as a UCS-2 (UTF-16 big-endian) hex string — the
+    /// format mesapi requires for Unicode messages (type 5). e.g. "ก" -> "0E01".</summary>
+    public static string ToUcs2Hex(string text)
+        => Convert.ToHexString(System.Text.Encoding.BigEndianUnicode.GetBytes(text ?? string.Empty));
 
     private static string NormaliseMsisdn(string input)
     {
