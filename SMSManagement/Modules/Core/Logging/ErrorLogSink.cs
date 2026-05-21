@@ -25,7 +25,9 @@ public sealed class ErrorLogSink : ILogEventSink
 
     public void Emit(LogEvent logEvent)
     {
-        if (logEvent.Level < LogEventLevel.Error) return;
+        // Warning and above — captures notable operations from every module,
+        // not just hard failures.
+        if (logEvent.Level < LogEventLevel.Warning) return;
 
         // Fire-and-forget — the Serilog sink contract is synchronous but the
         // DB write isn't. Tasks aren't awaited; exceptions are swallowed and

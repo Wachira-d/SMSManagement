@@ -54,10 +54,11 @@ if (!string.IsNullOrWhiteSpace(keyDir))
         .SetApplicationName("CampaignPlatform");
 }
 
-// ---------- Logging: structured + PII-masked + DB error sink ----------
-// The ErrorLogSink writes Error/Fatal events to the ErrorLogs table; it
-// needs an IServiceScopeFactory to resolve AppDbContext, so we pull that
-// from the host-provided services parameter (available after DI is built).
+// ---------- Logging: structured + PII-masked + DB system-log sink ----------
+// The ErrorLogSink persists Warning/Error/Fatal events to the ErrorLogs
+// table so operators can inspect what each part of the system did without
+// scraping the JSON log files. It needs an IServiceScopeFactory to resolve
+// AppDbContext, pulled from the host-provided services parameter.
 builder.Host.UseSerilog((ctx, services, lc) => lc
     .ReadFrom.Configuration(ctx.Configuration)
     .Enrich.FromLogContext()
@@ -65,7 +66,7 @@ builder.Host.UseSerilog((ctx, services, lc) => lc
     .Enrich.With(new PiiMaskingEnricher())
     .WriteTo.Console(formatter: new Serilog.Formatting.Compact.CompactJsonFormatter())
     .WriteTo.Conditional(
-        ev => ev.Level >= Serilog.Events.LogEventLevel.Error,
+        ev => ev.Level >= Serilog.Events.LogEventLevel.Warning,
         cfg => cfg.Sink(new ErrorLogSink(services.GetRequiredService<IServiceScopeFactory>()))));
 
 // ---------- AuthN: JWT bearer (header OR cookie) ----------

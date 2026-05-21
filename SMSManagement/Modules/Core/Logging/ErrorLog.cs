@@ -1,9 +1,10 @@
 namespace SMSManagement.Modules.Core.Logging;
 
 /// <summary>
-/// Centralised error log row. Every Error/Fatal Serilog event is persisted
-/// here by <see cref="ErrorLogSink"/> so operators can search by user,
-/// correlation ID, request path, etc. without scraping the JSON log files.
+/// Centralised system-log row. Every Warning/Error/Fatal Serilog event is
+/// persisted here by <see cref="ErrorLogSink"/> so operators can inspect
+/// what each module did — by source (module), level, user, correlation ID,
+/// request path — without scraping the JSON log files.
 ///
 /// PII is masked upstream by the PiiMaskingEnricher before the event
 /// reaches the sink — Message / ExceptionMessage are safe to display in
@@ -14,7 +15,7 @@ public sealed class ErrorLog
     public long Id { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
-    /// <summary>Serilog level ("Error", "Fatal"). Lower levels are filtered out.</summary>
+    /// <summary>Serilog level ("Warning", "Error", "Fatal"). Info and below are filtered out.</summary>
     public string Level { get; set; } = string.Empty;
 
     /// <summary>Source context (typically a class FullName).</summary>

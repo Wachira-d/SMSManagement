@@ -5,9 +5,10 @@
 
 <h1 class="h3 mb-3">@Loc.Get("admin.errorlogs.title")</h1>
 <p class="text-muted small">
-    Persistent record of every <code>Error</code> / <code>Fatal</code> Serilog
-    event. Useful for triaging without scraping the JSON log files. Requires
-    <code>audit.read</code> permission. Click a row to see the full stack trace.
+    System log — every <code>Warning</code> / <code>Error</code> / <code>Fatal</code>
+    event from every module, so you can inspect what each part of the system did
+    without scraping the JSON log files. Filter by <strong>Module</strong> to see one
+    system's log. Requires <code>audit.read</code> permission. Click a row for detail.
 </p>
 
 <div class="row g-2 mb-3 align-items-end">
@@ -22,10 +23,16 @@
     <div class="col-auto">
         <label class="form-label small">Level</label>
         <select id="levelFilter" class="form-select form-select-sm">
-            <option value="">All (Error+Fatal)</option>
-            <option value="Error">Error only</option>
-            <option value="Fatal">Fatal only</option>
+            <option value="">All levels</option>
+            <option value="Warning">Warning</option>
+            <option value="Error">Error</option>
+            <option value="Fatal">Fatal</option>
         </select>
+    </div>
+    <div class="col-auto">
+        <label class="form-label small">Module (source)</label>
+        <input type="text" id="moduleFilter" class="form-control form-control-sm"
+               placeholder="e.g. Etracker, Sftp, Ingestion, Workflow" />
     </div>
     <div class="col-auto">
         <label class="form-label small">Search (message/path/exception)</label>
@@ -69,18 +76,20 @@ async function load() {
     const from   = document.getElementById('fromDate').value;
     const to     = document.getElementById('toDate').value;
     const level  = document.getElementById('levelFilter').value;
+    const module = document.getElementById('moduleFilter').value;
     const search = document.getElementById('search').value;
     const qs = new URLSearchParams({
         from: from + 'T00:00:00Z', to: to + 'T23:59:59Z', take: 200
     });
     if (level)  qs.set('level', level);
+    if (module) qs.set('module', module);
     if (search) qs.set('search', search);
 
     try {
         const rows = await api.get('/api/admin/error-logs?' + qs);
         const body = document.getElementById('errBody');
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="7" class="text-muted">No errors in this range.</td></tr>';
+            body.innerHTML = '<tr><td colspan="7" class="text-muted">No log entries in this range.</td></tr>';
             return;
         }
         // Cache for detail modal
@@ -88,7 +97,7 @@ async function load() {
         body.innerHTML = rows.map(r => `
             <tr style="cursor:pointer" onclick="showErr(${r.id})">
                 <td class="small">${fmtDate(r.createdAt)}</td>
-                <td><span class="badge bg-${r.level==='Fatal' ? 'dark' : 'danger'}">${esc(r.level)}</span></td>
+                <td><span class="badge bg-${r.level==='Fatal' ? 'dark' : r.level==='Warning' ? 'warning text-dark' : 'danger'}">${esc(r.level)}</span></td>
                 <td class="small text-truncate" style="max-width:220px">${esc(r.sourceContext||'')}</td>
                 <td class="small">${esc(r.message||'')}
                     ${r.exceptionType ? `<br/><code class="text-danger small">${esc(r.exceptionType)}: ${esc(r.exceptionMessage||'')}</code>` : ''}
