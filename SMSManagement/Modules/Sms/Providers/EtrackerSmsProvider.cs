@@ -71,6 +71,14 @@ public sealed class EtrackerSmsProvider : ISmsProvider
             .ConfigureAwait(false);
         var raw = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
+        // etracker's mesapi returns HTTP 200 even for logical failures and
+        // carries the real outcome in the body — log it verbatim so a
+        // rejection (and its code) is visible instead of being mistaken for
+        // a message id.
+        _log.LogInformation(
+            "Etracker response project={ProjectId} http={Http} body={Body}",
+            request.ProjectId, (int)resp.StatusCode, raw);
+
         if (!resp.IsSuccessStatusCode)
         {
             // Surface HTTP-level failures so the Polly pipeline can retry/break.
