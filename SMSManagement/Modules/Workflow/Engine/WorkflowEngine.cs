@@ -484,6 +484,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
         if (matches.Count == 0) return body;
 
         var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
+        var shortened = 0;
         foreach (System.Text.RegularExpressions.Match m in matches)
         {
             var token = m.Value;
@@ -509,7 +510,12 @@ public sealed class WorkflowEngine : IWorkflowEngine
             var slug = await _shortlinks.CreateAsync(
                 projectId, url, instance.Id, TimeSpan.FromDays(60), null, ct);
             replacements[token] = $"{baseUrl}/{slug}{trail}";
+            shortened++;
         }
+
+        _log.LogInformation(
+            "Shortlink: workflow instance {InstanceId} — {Shortened} URL(s) shortened of "
+            + "{Found} found in the SMS body.", instance.Id, shortened, matches.Count);
 
         return UrlPatternCache.Replace(body,
             m => replacements.TryGetValue(m.Value, out var r) ? r : m.Value);

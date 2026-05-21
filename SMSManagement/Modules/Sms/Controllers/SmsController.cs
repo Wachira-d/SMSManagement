@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SMSManagement.Infrastructure.Persistence;
+using SMSManagement.Modules.Core.Security;
 using SMSManagement.Modules.Identity.Domain;
 using SMSManagement.Modules.Identity.Services;
 using SMSManagement.Modules.Sms.Domain;
@@ -18,14 +19,16 @@ public sealed class SmsController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IProjectAccessService _access;
     private readonly IProjectFeatureGuard _features;
+    private readonly FieldEncryptor _crypto;
 
     public SmsController(ISmsDispatcher dispatcher, AppDbContext db,
-        IProjectAccessService access, IProjectFeatureGuard features)
+        IProjectAccessService access, IProjectFeatureGuard features, FieldEncryptor crypto)
     {
         _dispatcher = dispatcher;
         _db = db;
         _access = access;
         _features = features;
+        _crypto = crypto;
     }
 
     public sealed record SendRequest(
@@ -124,10 +127,24 @@ public sealed class SmsController : ControllerBase
             {
                 x.Id, x.Provider, x.SenderId, x.Status, x.MaskedTo, x.Attempts,
                 x.CreatedAt, x.ScheduledFor, x.SentAt, x.DeliveredAt,
-                x.ProviderMessageId, x.ErrorCode, x.RawProviderResponse
+                x.ProviderMessageId, x.ErrorCode, x.RawProviderResponse, x.EncryptedBody
             })
             .FirstOrDefaultAsync(ct);
-        return m is null ? NotFound() : Ok(m);
+        if (m is null) return NotFound();
+
+        // Decrypt the body so the operator can see the exact message that was
+        // sent — incl. whether a URL became a shortlink.
+        string body;
+        try { body = _crypto.Decrypt(m.EncryptedBody); }
+        catch { body = "(decrypt failed)"; }
+
+        return Ok(new
+        {
+            m.Id, m.Provider, m.SenderId, m.Status, m.MaskedTo, m.Attempts,
+            m.CreatedAt, m.ScheduledFor, m.SentAt, m.DeliveredAt,
+            m.ProviderMessageId, m.ErrorCode, m.RawProviderResponse,
+            Body = body
+        });
     }
 
     /// <summary>Recent SMS dispatched for this project — used by the SMS tab
