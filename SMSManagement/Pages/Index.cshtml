@@ -102,11 +102,96 @@
         </div>
     </div>
 
+    <div class="card shadow-sm mt-4" id="pdpa">
+        <div class="card-body">
+            <h5 class="mb-3"><i class="bi bi-shield-check me-1"></i>
+                ประกาศความเป็นส่วนตัว (PDPA)</h5>
+            <p class="small text-muted">
+                ประกาศนี้อธิบายการเก็บรวบรวม ใช้ และเปิดเผยข้อมูลส่วนบุคคล
+                ตามพระราชบัญญัติคุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562 (PDPA)
+            </p>
+            <div class="row small">
+                <div class="col-md-6">
+                    <h6 class="mt-2">ข้อมูลที่เก็บรวบรวม</h6>
+                    <ul>
+                        <li>หมายเลขโทรศัพท์ และชื่อ (จากรายชื่อที่องค์กรเจ้าของแคมเปญจัดเตรียม)</li>
+                        <li>สถานะการส่ง/รับ SMS และข้อมูลการคลิกลิงก์</li>
+                        <li>ที่อยู่ IP และข้อมูลอุปกรณ์ (สำหรับความปลอดภัยและการวัดผล)</li>
+                    </ul>
+                    <h6 class="mt-2">วัตถุประสงค์</h6>
+                    <ul>
+                        <li>ส่งข้อความของแคมเปญที่ท่านเกี่ยวข้อง</li>
+                        <li>วัดผลและปรับปรุงคุณภาพแคมเปญ</li>
+                        <li>ป้องกันการใช้งานผิดวัตถุประสงค์และรักษาความปลอดภัยของระบบ</li>
+                    </ul>
+                </div>
+                <div class="col-md-6">
+                    <h6 class="mt-2">การจัดเก็บและความปลอดภัย</h6>
+                    <ul>
+                        <li>หมายเลขโทรศัพท์และเนื้อหาข้อความถูกจัดเก็บแบบเข้ารหัส</li>
+                        <li>เก็บข้อมูลเท่าที่จำเป็นและลบเมื่อพ้นระยะเวลาที่กำหนด</li>
+                        <li>ไม่จำหน่ายหรือเปิดเผยข้อมูลต่อบุคคลภายนอกนอกเหนือจากที่จำเป็นต่อการให้บริการ</li>
+                    </ul>
+                    <h6 class="mt-2">สิทธิของเจ้าของข้อมูล</h6>
+                    <ul>
+                        <li>สิทธิขอเข้าถึง แก้ไข ลบ คัดค้าน หรือระงับการใช้ข้อมูลของท่าน</li>
+                        <li>สิทธิเพิกถอนความยินยอม และสิทธิร้องเรียนต่อหน่วยงานกำกับดูแล</li>
+                    </ul>
+                </div>
+            </div>
+            <p class="small mb-0">
+                <strong>การติดต่อ:</strong> หากต้องการใช้สิทธิข้างต้น หรือสอบถามเรื่องข้อมูลส่วนบุคคล
+                โปรดติดต่อองค์กรเจ้าของแคมเปญที่ระบุไว้ในข้อความที่ท่านได้รับ
+                หรือผู้ควบคุมข้อมูลส่วนบุคคล: <em>[ชื่อองค์กร / อีเมล / เบอร์ติดต่อ — ปรับตามองค์กร]</em>
+            </p>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mt-4">
+        <div class="card-body">
+            <h5 class="mb-2"><i class="bi bi-cookie me-1"></i>การใช้คุกกี้</h5>
+            <p class="small mb-0">
+                เว็บไซต์นี้ใช้ <strong>เฉพาะคุกกี้ที่จำเป็น</strong> ต่อการเข้าสู่ระบบของเจ้าหน้าที่
+                และการรักษาความปลอดภัยเท่านั้น (เช่น คุกกี้ยืนยันตัวตน) —
+                ไม่มีคุกกี้เพื่อการติดตามหรือโฆษณา คุกกี้ที่จำเป็นไม่ต้องขอความยินยอม
+                หน้าข้อมูลสาธารณะนี้ไม่ตั้งคุกกี้ใด ๆ
+            </p>
+        </div>
+    </div>
+
     <div class="text-center text-muted small mt-5">
         <a href="/campaign" class="text-decoration-none">
             <i class="bi bi-box-arrow-in-right me-1"></i>เข้าสู่ระบบสำหรับเจ้าหน้าที่
         </a>
     </div>
 </div>
+
+<div id="cookieNotice" class="position-fixed bottom-0 start-0 end-0 bg-dark text-white p-3"
+     style="display:none;z-index:1050">
+    <div class="container d-flex flex-wrap align-items-center justify-content-between gap-2">
+        <span class="small mb-0">
+            เว็บไซต์นี้ใช้เฉพาะคุกกี้ที่จำเป็นต่อการเข้าสู่ระบบและความปลอดภัยเท่านั้น
+            ไม่มีคุกกี้เพื่อการติดตามโฆษณา — ดูรายละเอียดใน
+            <a href="#pdpa" class="text-white">ประกาศความเป็นส่วนตัว</a>
+        </span>
+        <button id="cookieOk" class="btn btn-light btn-sm">รับทราบ</button>
+    </div>
+</div>
+
+<script>
+    // Essential-cookies-only notice. Dismissal is remembered in localStorage —
+    // no cookie is set by this page itself.
+    (function () {
+        var bar = document.getElementById('cookieNotice');
+        try {
+            if (localStorage.getItem('cookieNoticeAck') === '1') return;
+        } catch (e) { /* storage blocked — just show it */ }
+        bar.style.display = '';
+        document.getElementById('cookieOk').addEventListener('click', function () {
+            bar.style.display = 'none';
+            try { localStorage.setItem('cookieNoticeAck', '1'); } catch (e) {}
+        });
+    })();
+</script>
 </body>
 </html>
