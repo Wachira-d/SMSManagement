@@ -144,6 +144,26 @@ public sealed class IngestionSettingsController : ControllerBase
         return Ok(new { result.Ok, result.Message });
     }
 
+    /// <summary>
+    /// Same as <see cref="TestConnection"/> but for an already-saved binding:
+    /// the stored (encrypted) config is decrypted server-side and tested, so
+    /// operators can re-test without re-pasting secrets.
+    /// </summary>
+    [HttpPost("{settingsId:guid}/test-connection")]
+    public async Task<IActionResult> TestSavedConnection(
+        Guid projectId, Guid settingsId, CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Admin, ct);
+
+        var row = await _db.IngestionSourceSettings
+            .FirstOrDefaultAsync(s => s.Id == settingsId && s.ProjectId == projectId, ct);
+        if (row is null) return NotFound();
+
+        var configJson = _crypto.Decrypt(row.EncryptedConfig);
+        var result = await SourceConnectionTester.TestAsync(row.SourceType, configJson, ct);
+        return Ok(new { result.Ok, result.Message });
+    }
+
     [HttpDelete("{settingsId:guid}")]
     public async Task<IActionResult> Delete(
         Guid projectId, Guid settingsId, CancellationToken ct)

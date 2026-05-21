@@ -761,22 +761,34 @@ document.getElementById('btnSrcTest').addEventListener('click', async () => {
     const btn = document.getElementById('btnSrcTest');
     const out = document.getElementById('srcTestResult');
     const sourceType = document.getElementById('srcType').value;
-
-    let config;
-    try {
-        config = JSON.parse(document.getElementById('srcConfig').value || '{}');
-    } catch (e) {
-        out.textContent = 'Config is not valid JSON: ' + e.message;
-        out.className = 'small ms-2 text-danger';
-        return;
-    }
+    const srcId = document.getElementById('srcId').value;
+    const rawConfig = (document.getElementById('srcConfig').value || '').trim();
 
     btn.disabled = true;
     out.textContent = 'Testing…';
     out.className = 'small ms-2 text-muted';
     try {
-        const res = await api.post(`${api_proj}/ingestion-sources/test-connection`,
-            { sourceType, config });
+        let res;
+        if (rawConfig) {
+            let config;
+            try {
+                config = JSON.parse(rawConfig);
+            } catch (e) {
+                out.textContent = 'Config is not valid JSON: ' + e.message;
+                out.className = 'small ms-2 text-danger';
+                return;
+            }
+            res = await api.post(`${api_proj}/ingestion-sources/test-connection`,
+                { sourceType, config });
+        } else if (srcId) {
+            // Editing a saved binding with no new config pasted — test the
+            // stored (encrypted) config server-side.
+            res = await api.post(`${api_proj}/ingestion-sources/${srcId}/test-connection`, {});
+        } else {
+            out.textContent = 'Paste config JSON to test, or save the binding first.';
+            out.className = 'small ms-2 text-danger';
+            return;
+        }
         out.textContent = res.message;
         out.className = 'small ms-2 ' + (res.ok ? 'text-success' : 'text-danger');
     } catch (e) {
