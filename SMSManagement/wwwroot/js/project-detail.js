@@ -991,7 +991,23 @@ document.getElementById('formMap').addEventListener('submit', async (ev) => {
 })();
 
 // ==================== SOURCES ====================
+// Populates the "Workflow to start" picker in the source editor with the
+// project's distinct workflow names.
+async function loadSrcWorkflows() {
+    const sel = document.getElementById('srcWorkflow');
+    if (!sel) return;
+    try {
+        const defs = await api.get(`${api_proj}/workflows`);
+        const names = [...new Set((defs || []).map(d => d.name).filter(Boolean))].sort();
+        const current = sel.value;
+        sel.innerHTML = '<option value="">— use the active workflow (default) —</option>'
+            + names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+        sel.value = current;
+    } catch { /* keep the default option only */ }
+}
+
 async function loadSources() {
+    loadSrcWorkflows();
     try {
         const rows = await api.get(`${api_proj}/ingestion-sources`);
         const body = document.getElementById('srcBody');
@@ -1044,6 +1060,7 @@ function showSrcEditor(reset) {
         document.getElementById('srcRejected').value = '';
         document.getElementById('srcAction').value = '0';
         document.getElementById('srcDup').value = '0';
+        document.getElementById('srcWorkflow').value = '';
         document.getElementById('srcEnabled').checked = true;
         document.getElementById('srcConfig').value = JSON.stringify({
             host: 'sftp.example.com', port: 22, username: 'campaign',
@@ -1243,6 +1260,12 @@ window.editSrc = function (s) {
     srcSet('srcRejected', s.rejectedDirectory || '');
     srcSet('srcAction', String(s.action));
     srcSet('srcDup', String(s.duplicatePolicy));
+    // Make sure the bound workflow shows even if the picker list is stale.
+    const wfSel = document.getElementById('srcWorkflow');
+    const wfName = s.workflowName || '';
+    if (wfSel && wfName && !Array.from(wfSel.options).some(o => o.value === wfName))
+        wfSel.add(new Option(wfName, wfName));
+    srcSet('srcWorkflow', wfName);
     srcSet('srcEnabled', !!s.enabled);
     srcSet('srcConfig', '');
     const cfg = document.getElementById('srcConfig');
@@ -1268,7 +1291,8 @@ document.getElementById('formSrc').addEventListener('submit', async (ev) => {
             action:            parseInt(document.getElementById('srcAction').value, 10),
             duplicatePolicy:   parseInt(document.getElementById('srcDup').value, 10),
             enabled:           document.getElementById('srcEnabled').checked,
-            pollingSchedule:   window.scheduleToCron()
+            pollingSchedule:   window.scheduleToCron(),
+            workflowName:      document.getElementById('srcWorkflow').value || null
         };
         await api.post(`${api_proj}/ingestion-sources`, body);
         toast('Saved.');

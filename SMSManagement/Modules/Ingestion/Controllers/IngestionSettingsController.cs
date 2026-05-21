@@ -46,7 +46,8 @@ public sealed class IngestionSettingsController : ControllerBase
         PostProcessAction Action,
         DuplicatePolicy DuplicatePolicy,
         bool Enabled,
-        string PollingSchedule);
+        string PollingSchedule,
+        string? WorkflowName = null);
 
     public sealed record TestConnectionRequest(string SourceType, JsonElement Config);
 
@@ -61,7 +62,7 @@ public sealed class IngestionSettingsController : ControllerBase
             .Select(s => new
             {
                 s.Id, s.SourceType, s.ArchiveDirectory, s.RejectedDirectory,
-                s.Action, s.DuplicatePolicy, s.Enabled, s.PollingSchedule
+                s.Action, s.DuplicatePolicy, s.Enabled, s.PollingSchedule, s.WorkflowName
                 // EncryptedConfig is NOT projected — secrets stay server-side.
             })
             .ToListAsync(ct);
@@ -99,6 +100,8 @@ public sealed class IngestionSettingsController : ControllerBase
         row.Enabled = req.Enabled;
         row.PollingSchedule = string.IsNullOrWhiteSpace(req.PollingSchedule)
             ? "*/5 * * * *" : req.PollingSchedule;
+        row.WorkflowName = string.IsNullOrWhiteSpace(req.WorkflowName)
+            ? null : req.WorkflowName.Trim();
 
         await _db.SaveChangesAsync(ct);
         return Ok(new { row.Id, row.SourceType, row.Enabled });

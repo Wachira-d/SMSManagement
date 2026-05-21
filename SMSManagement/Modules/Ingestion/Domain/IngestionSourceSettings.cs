@@ -48,4 +48,13 @@ public sealed class IngestionSourceSettings
     public bool Enabled { get; set; } = true;
     /// <summary>Cron expression for polled sources.</summary>
     public string PollingSchedule { get; set; } = "*/5 * * * *";
+
+    /// <summary>
+    /// Name of the workflow this source starts for each accepted row. A
+    /// project may run several workflows; this binds one source to one of
+    /// them. Null = use whichever workflow is active (legacy single-workflow
+    /// behaviour). The active version of the named workflow is resolved at
+    /// ingestion time, so publishing a new version takes effect automatically.
+    /// </summary>
+    public string? WorkflowName { get; set; }
 }

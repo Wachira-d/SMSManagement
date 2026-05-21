@@ -108,7 +108,7 @@ public sealed class IngestionPipeline : IIngestionPipeline
         try
         {
             (accepted, rejected, rejectionsJson) =
-                await ProcessRowsAsync(projectId, batch.Id, filePath, ct);
+                await ProcessRowsAsync(projectId, batch.Id, filePath, settings.WorkflowName, ct);
         }
         catch (Exception ex)
         {
@@ -188,7 +188,7 @@ public sealed class IngestionPipeline : IIngestionPipeline
     // ---------------- helpers ----------------
 
     private async Task<(int accepted, int rejected, string? rejectionsJson)> ProcessRowsAsync(
-        Guid projectId, Guid batchId, string filePath, CancellationToken ct)
+        Guid projectId, Guid batchId, string filePath, string? workflowName, CancellationToken ct)
     {
         var mappings = await _db.ColumnMappings
             .Where(m => m.ProjectId == projectId)
@@ -200,15 +200,24 @@ public sealed class IngestionPipeline : IIngestionPipeline
                 StringComparer.OrdinalIgnoreCase);
         var mapper = new ColumnMapper(mappings, rules);
 
-        var defaultDefinition = await _db.WorkflowDefinitions
-            .Where(d => d.ProjectId == projectId && d.Active)
+        // Resolve the workflow this source starts. A source may be bound to a
+        // specific workflow by name (a project can run several); otherwise the
+        // single active workflow is used. Either way we take the active
+        // version, so a newly-published version applies automatically.
+        var defQuery = _db.WorkflowDefinitions
+            .Where(d => d.ProjectId == projectId && d.Active);
+        if (!string.IsNullOrWhiteSpace(workflowName))
+            defQuery = defQuery.Where(d => d.Name == workflowName);
+
+        var defaultDefinition = await defQuery
             .OrderByDescending(d => d.Version)
             .Select(d => (Guid?)d.Id)
             .FirstOrDefaultAsync(ct);
 
         if (defaultDefinition is null)
-            throw new InvalidOperationException(
-                $"Project {projectId} has no active workflow definition.");
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(workflowName)
+                ? $"Project {projectId} has no active workflow definition."
+                : $"Project {projectId} has no active workflow named '{workflowName}'.");
 
         // Pick the parser by extension — controller already whitelists .csv/.xlsx.
         IIngestionSource source = Path.GetExtension(filePath).ToLowerInvariant() switch

@@ -768,6 +768,17 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
                                         <option value="1">Fail</option>
                                         <option value="2">Reprocess</option>
                                     </select></div>
+                                <div class="col-12">
+                                    <label class="form-label small">Workflow to start
+                                        <i class="bi bi-info-circle text-muted" tabindex="0"
+                                           data-bs-toggle="popover" data-bs-trigger="hover focus"
+                                           title="Workflow to start"
+                                           data-bs-content="A project can run several workflows. Choose which one this source starts for each accepted row. Leave as the default to use whichever workflow is active.">
+                                        </i></label>
+                                    <select id="srcWorkflow" class="form-select form-select-sm">
+                                        <option value="">— use the active workflow (default) —</option>
+                                    </select>
+                                </div>
                                 <div class="col-12 form-check ms-1 mt-2">
                                     <input id="srcEnabled" type="checkbox" class="form-check-input" checked />
                                     <label class="form-check-label small" for="srcEnabled">Enabled</label>
