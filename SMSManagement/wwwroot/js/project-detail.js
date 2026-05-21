@@ -1316,8 +1316,18 @@ document.getElementById('btnSrcTest').addEventListener('click', async () => {
     };
 
     function showMode(m) {
-        for (const [k, el] of Object.entries(panes))
-            el.style.display = (k === m) ? '' : 'none';
+        for (const [k, el] of Object.entries(panes)) {
+            if (!el) continue;
+            const active = (k === m);
+            el.style.display = active ? '' : 'none';
+            // Disable inputs in hidden panes: a hidden <input min="1"> left at
+            // an out-of-range value (e.g. "every N minutes" while you're on
+            // "Weekly") otherwise fails HTML5 validation and silently blocks
+            // the Save — even though that field isn't part of the chosen
+            // schedule. Disabled inputs are exempt from validation.
+            el.querySelectorAll('input,select')
+              .forEach(i => { i.disabled = !active; });
+        }
         modeEl.value = m;
     }
 
