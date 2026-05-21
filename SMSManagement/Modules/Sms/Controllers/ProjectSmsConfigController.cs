@@ -54,6 +54,7 @@ public sealed class ProjectSmsConfigController : ControllerBase
         string? Username,
         string? Password,
         string? DefaultSenderId,
+        string? ServiceId,
         string? DefaultType);
 
     public sealed record InfobipConfigDto(
@@ -127,6 +128,7 @@ public sealed class ProjectSmsConfigController : ControllerBase
                 Username = opts?.Username,
                 PasswordSet = !string.IsNullOrEmpty(opts?.Password),
                 DefaultSenderId = opts?.DefaultSenderId,
+                ServiceId = opts?.ServiceId,
                 DefaultType = opts?.DefaultType
             });
         }
@@ -162,6 +164,7 @@ public sealed class ProjectSmsConfigController : ControllerBase
             Username        = Coalesce(dto.Username, existing?.Username, ""),
             Password        = Coalesce(dto.Password, existing?.Password, ""),
             DefaultSenderId = Coalesce(dto.DefaultSenderId, existing?.DefaultSenderId, ""),
+            ServiceId       = Coalesce(dto.ServiceId, existing?.ServiceId, ""),
             DefaultType     = Coalesce(dto.DefaultType, existing?.DefaultType, "")
         };
 

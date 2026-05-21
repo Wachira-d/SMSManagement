@@ -73,6 +73,7 @@ public sealed class ProviderConfigResolver : IProviderConfigResolver
         Username        = Pick(p.Username,        g.Username),
         Password        = Pick(p.Password,        g.Password),
         DefaultSenderId = Pick(p.DefaultSenderId, g.DefaultSenderId),
+        ServiceId       = Pick(p.ServiceId,       g.ServiceId),
         DefaultType     = Pick(p.DefaultType,     g.DefaultType)
     };
 
