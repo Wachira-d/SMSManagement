@@ -195,11 +195,12 @@
             integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <script>
-        // Expose the current-culture dictionary so JS can do window.t(key) for
+        // Expose the current-culture dictionary so JS can do t(key) for
         // user-facing strings without round-tripping. Keys match Localizer.cs.
+        // The t() helper itself lives in site.js with the other shared helpers;
+        // this block only emits the data it reads.
         window.__culture = '@CultureInfo.CurrentUICulture.Name';
         window.__i18n = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Loc.All()));
-        window.t = function (key) { return (window.__i18n && window.__i18n[key]) || key; };
     </script>
     <script src="https://cdn.jsdelivr.net/npm/@@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>

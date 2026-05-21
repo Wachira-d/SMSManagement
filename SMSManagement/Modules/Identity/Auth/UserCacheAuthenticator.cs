@@ -174,8 +174,13 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
             "Authentication service temporarily unavailable.");
     }
 
+    // The cache row is keyed by the upstream samAccountName (see UpsertCacheAsync),
+    // but users typically sign in with their email. Match on either so a login by
+    // email still resolves the row the API created under the samAccountName —
+    // otherwise every login is a cache miss and re-hits the upstream API.
     private async Task<UserCache?> LoadCacheAsync(string username, CancellationToken ct) =>
-        await _db.Set<UserCache>().FirstOrDefaultAsync(u => u.Username == username, ct);
+        await _db.Set<UserCache>()
+            .FirstOrDefaultAsync(u => u.Username == username || u.Email == username, ct);
 
     private bool IsFresh(UserCache c) => c.CacheExpires > _clock.GetUtcNow();
 
@@ -228,7 +233,9 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
         row.PasswordHash = hash;
         row.Salt = salt;
         row.DisplayName = api.DisplayName;
-        row.Email = api.Email;
+        // Normalised so the email-based cache lookup matches regardless of the
+        // casing the upstream API returns.
+        row.Email = api.Email?.Trim().ToLowerInvariant();
         row.Department = api.Department;
         row.Title = api.Title;
         row.EmployeeId = api.EmployeeId;

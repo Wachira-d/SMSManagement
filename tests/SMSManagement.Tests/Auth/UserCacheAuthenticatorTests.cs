@@ -119,6 +119,32 @@ public sealed class UserCacheAuthenticatorTests
     }
 
     [Fact]
+    public async Task Login_by_email_hits_cache_when_API_keys_row_by_samAccountName()
+    {
+        using var db = NewDb();
+        // Upstream keys the identity by samAccountName, but the user signs in
+        // with their email — the two must still resolve to one cache row.
+        var api = new StubApi
+        {
+            OnAuth = (_, _) => Task.FromResult(new AuthenApiResult(
+                true, "alice.smith", "Alice", "Alice@Ipsos.com",
+                "Dept", "Title", "EMP1", new[] { "CampaignAdmin" }, true, null))
+        };
+        var auth = Build(db, api);
+
+        var first = await auth.AuthenticateAsync("alice@ipsos.com", "pwd", default);
+        first.Success.Should().BeTrue();
+        first.Source.Should().Be(AuthSource.AuthenApi);
+
+        // Second login by the same email must be served from cache, not the API.
+        api.OnAuth = (_, _) => throw new InvalidOperationException("API must NOT be called");
+        var second = await auth.AuthenticateAsync("alice@ipsos.com", "pwd", default);
+        second.Success.Should().BeTrue();
+        second.Source.Should().Be(AuthSource.Cache);
+        (await db.UserCaches.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
     public async Task Hash_mismatch_falls_back_to_API()
     {
         using var db = NewDb();

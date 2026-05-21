@@ -71,6 +71,13 @@ window.esc = function (s) {
         .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 };
 
+// Localized-string lookup for JS-rendered markup. _Layout emits the current
+// culture's dictionary as window.__i18n; an unknown key returns the key itself
+// so a missing translation is visible rather than blank.
+window.t = function (key) {
+    return (window.__i18n && window.__i18n[key]) || key;
+};
+
 // ============ UNIFIED CONFIRM MODAL ============
 // Single Bootstrap modal reused for every destructive op so behaviour and
 // styling stay consistent. Caller picks the friction level:
