@@ -11,12 +11,13 @@ using SMSManagement.Modules.Sms.Domain;
 namespace SMSManagement.Modules.Sms.Webhooks;
 
 /// <summary>
-/// Delivery-Receipt (DLR) ingress. Providers POST here when carrier
+/// Delivery-Receipt (DLR/DN) ingress. Providers call here when the carrier
 /// confirms (or rejects) a previously-dispatched message. Updates
 /// SmsMessage.{Status, DeliveredAt, ErrorCode}.
 ///
-/// Wire format differs per provider; both endpoints HMAC-verify the
-/// raw body and then translate into the common SmsStatus enum.
+/// Wire format differs per provider (etracker = query/form params, Infobip =
+/// JSON body); both are authenticated by a shared-secret token in the URL,
+/// then translated into the common SmsStatus enum.
 /// </summary>
 [ApiController]
 [Route("api/sms/dlr")]
@@ -79,20 +80,33 @@ public sealed class DlrController : ControllerBase
         return Ok();
     }
 
+    /// <summary>
+    /// Infobip delivery report. Infobip POSTs an unsigned JSON body
+    /// (<c>{ "results": [ { "messageId", "status": { "groupName" } } ] }</c>)
+    /// to the configured notify URL — authenticated, like the etracker DN, by
+    /// a shared-secret token in the URL: …/api/sms/dlr/infobip?token=THE_SECRET
+    /// </summary>
     [HttpPost("infobip")]
     public async Task<IActionResult> Infobip(CancellationToken ct)
     {
-        if (!await VerifyAsync(_secrets.InfobipSecretBase64, ct)) return Unauthorized();
-        Request.Body.Position = 0;
-        using var doc = await JsonDocument.ParseAsync(Request.Body, cancellationToken: ct);
+        if (!TokenValid(_secrets.InfobipDnToken))
+        {
+            _log.LogWarning("Infobip DN rejected — missing or wrong token.");
+            return Unauthorized();
+        }
 
-        // Infobip DLR shape: { "results":[ { "messageId":"...", "status":{ "groupName":"DELIVERED" } } ] }
-        if (!doc.RootElement.TryGetProperty("results", out var results)) return BadRequest("results array required.");
+        using var doc = await JsonDocument.ParseAsync(Request.Body, cancellationToken: ct);
+        if (!doc.RootElement.TryGetProperty("results", out var results)
+            || results.ValueKind != JsonValueKind.Array)
+            return BadRequest("results array required.");
+
         foreach (var r in results.EnumerateArray())
         {
-            var id = r.GetProperty("messageId").GetString();
-            var group = r.GetProperty("status").GetProperty("groupName").GetString();
+            var id = r.TryGetProperty("messageId", out var mid) ? mid.GetString() : null;
+            var group = r.TryGetProperty("status", out var st)
+                        && st.TryGetProperty("groupName", out var gn) ? gn.GetString() : null;
             if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(group)) continue;
+            _log.LogInformation("Infobip DN messageId={MsgId} group={Group}", id, group);
             await ApplyAsync("infobip", id, MapStatus(group), null, ct);
         }
         return Ok();
@@ -101,7 +115,7 @@ public sealed class DlrController : ControllerBase
     // ---- helpers ----
 
     /// <summary>Constant-time comparison of the URL <c>token</c> param against
-    /// the configured etracker DN secret.</summary>
+    /// the configured DN secret for the provider.</summary>
     private bool TokenValid(string? configured)
     {
         if (string.IsNullOrWhiteSpace(configured)) return false;
@@ -121,28 +135,6 @@ public sealed class DlrController : ControllerBase
             && Request.Form.TryGetValue(name, out var f) && !string.IsNullOrEmpty(f))
             return f.ToString();
         return null;
-    }
-
-    private async Task<bool> VerifyAsync(string? secret, CancellationToken ct)
-    {
-        // Buffer the body so we can both verify it and re-read it as JSON.
-        Request.EnableBuffering();
-        using var ms = new MemoryStream();
-        await Request.Body.CopyToAsync(ms, ct);
-        Request.Body.Position = 0;
-
-        var sig = Request.Headers["X-Signature"].ToString();
-        var tsHeader = Request.Headers["X-Timestamp"].ToString();
-
-        if (string.IsNullOrWhiteSpace(secret))
-        {
-            // Dev mode — secret not configured. Refuse unsigned requests anyway.
-            _log.LogWarning("DLR HMAC secret missing; request rejected.");
-            return false;
-        }
-        var ok = WebhookHmac.Verify(ms.ToArray(), secret, sig, tsHeader, _clock);
-        if (!ok) _log.LogWarning("DLR HMAC verification failed.");
-        return ok;
     }
 
     private async Task ApplyAsync(
