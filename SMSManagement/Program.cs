@@ -359,11 +359,22 @@ if (!testingEnabled)
         engine => engine.TickAsync(CancellationToken.None),
         "* * * * *");
 
-    // Poll every active ingestion source binding every 5 minutes.
-    RecurringJob.AddOrUpdate<IIngestionPoller>(
-        "ingestion-poll",
-        poller => poller.PollAllAsync(CancellationToken.None),
-        "*/5 * * * *");
+    // Per-source ingestion polling. Each enabled source binding gets its own
+    // recurring job on its OWN cron (IngestionSourceSettings.PollingSchedule).
+    // The old single "ingestion-poll" job polled every source every 5 minutes
+    // and ignored each source's schedule — remove it and sync per-source jobs.
+    RecurringJob.RemoveIfExists("ingestion-poll");
+    using (var ingestScope = app.Services.CreateScope())
+    {
+        var ingestDb = ingestScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var ingestLog = ingestScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        var sources = await ingestDb.IngestionSourceSettings
+            .AsNoTracking().ToListAsync();
+        foreach (var src in sources)
+            IngestionScheduleSync.Apply(src, ingestLog);
+        ingestLog.LogInformation(
+            "Ingestion polling: synced {Count} per-source recurring job(s).", sources.Count);
+    }
 
     // Drain Queued / Scheduled / Batch SMS every minute. Without this,
     // anything with a future ScheduledFor (or anything enqueued by the

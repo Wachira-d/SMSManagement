@@ -114,6 +114,11 @@ public sealed class IngestionSettingsController : ControllerBase
             ? null : req.WorkflowName.Trim();
 
         await _db.SaveChangesAsync(ct);
+
+        // Sync this source's recurring poll job to its (new) schedule / enabled
+        // state so the configured cron actually drives polling.
+        IngestionScheduleSync.Apply(row);
+
         return Ok(new { row.Id, row.SourceType, row.Enabled });
     }
 
@@ -187,6 +192,10 @@ public sealed class IngestionSettingsController : ControllerBase
         if (row is null) return NotFound();
         _db.IngestionSourceSettings.Remove(row);
         await _db.SaveChangesAsync(ct);
+
+        // Drop the source's recurring poll job — nothing left to poll.
+        IngestionScheduleSync.Remove(settingsId);
+
         return NoContent();
     }
 }

@@ -36,6 +36,22 @@ public sealed class ShortlinkService : IShortlinkService
     public const string DefaultSlugAlphabet =
         "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
+    /// <summary>
+    /// Top-level route segments owned by the app. A slug must never equal one
+    /// of these (case-insensitively): shortlinks resolve at "/{slug}", and a
+    /// slug colliding with e.g. "campaign" or "blocked" would be permanently
+    /// shadowed by that literal route and never resolve. Random generation
+    /// makes a hit astronomically unlikely, but we re-roll to be certain.
+    /// </summary>
+    public static readonly IReadOnlySet<string> ReservedSlugs =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "campaign", "blocked", "s", "api", "health", "jobs", "metrics",
+            "hubs", "redeem", "r", "account", "admin", "projects", "index",
+            "error", "css", "js", "lib", "img", "fonts", "favicon.ico",
+            "robots.txt", "sitemap.xml",
+        };
+
     private readonly AppDbContext _db;
     private readonly FieldEncryptor _crypto;
     private readonly ShortlinkOptions _opts;
@@ -115,7 +131,9 @@ public sealed class ShortlinkService : IShortlinkService
         // re-roll with a +1 length budget.
         for (var attempt = 0; attempt < 4; attempt++)
         {
-            var slug = GenerateSlug(baseLen + attempt, alphabet);
+            string slug;
+            do { slug = GenerateSlug(baseLen + attempt, alphabet); }
+            while (ReservedSlugs.Contains(slug));
             var link = new ShortlinkEntity
             {
                 ProjectId = projectId,
