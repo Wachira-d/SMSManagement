@@ -80,3 +80,18 @@
     }
     </tbody>
 </table>
+
+@if (Model.TotalPages > 1)
+{
+    <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+        @if (Model.PageNumber > 1)
+        {
+            <a href="?includeExpired=@(Model.IncludeExpired)&page=@(Model.PageNumber - 1)">&laquo; Prev</a>
+        }
+        <span style="color:#666">Page @Model.PageNumber of @Model.TotalPages — @Model.Total blocked IP(s)</span>
+        @if (Model.PageNumber < Model.TotalPages)
+        {
+            <a href="?includeExpired=@(Model.IncludeExpired)&page=@(Model.PageNumber + 1)">Next &raquo;</a>
+        }
+    </div>
+}

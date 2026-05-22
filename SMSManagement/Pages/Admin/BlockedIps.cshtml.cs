@@ -27,13 +27,19 @@ public sealed class BlockedIpsModel : PageModel
         _me = me;
     }
 
+    private const int PageSize = 50;
+
     public bool IncludeExpired { get; private set; }
+    public int PageNumber { get; private set; } = 1;
+    public int TotalPages { get; private set; }
+    public int Total { get; private set; }
     public List<Row> Rows { get; private set; } = new();
     [TempData] public string? Message { get; set; }
 
-    public async Task OnGetAsync(bool includeExpired = false)
+    public async Task OnGetAsync(bool includeExpired = false, int page = 1)
     {
         IncludeExpired = includeExpired;
+        PageNumber = page < 1 ? 1 : page;
         await LoadRowsAsync();
     }
 
@@ -57,9 +63,14 @@ public sealed class BlockedIpsModel : PageModel
         if (!IncludeExpired)
             q = q.Where(b => b.UnblockedAt == null && b.BlockedUntil > now);
 
+        Total = await q.CountAsync(HttpContext.RequestAborted);
+        TotalPages = Total == 0 ? 0 : (Total + PageSize - 1) / PageSize;
+        if (TotalPages > 0 && PageNumber > TotalPages) PageNumber = TotalPages;
+
         var raw = await q
             .OrderByDescending(b => b.BlockedAt)
-            .Take(200)
+            .Skip((PageNumber - 1) * PageSize)
+            .Take(PageSize)
             .Select(b => new
             {
                 b.Id, b.IpHash, b.IpAddress, b.Reason, b.FailureCount,
