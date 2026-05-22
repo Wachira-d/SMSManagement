@@ -49,6 +49,7 @@ public sealed class ProjectsController : ControllerBase
         bool? WorkflowEnabled = null,
         bool? IngestionEnabled = null,
         bool? EmailAlertsEnabled = null,
+        bool? CouponCheckEnabled = null,
         string? CouponRedeemDomain = null,
         string? ShortlinkBaseUrl = null);
 
@@ -159,7 +160,8 @@ public sealed class ProjectsController : ControllerBase
                 Shortlink = p.ShortlinkEnabled,
                 Workflow = p.WorkflowEnabled,
                 Ingestion = p.IngestionEnabled,
-                EmailAlerts = p.EmailAlertsEnabled
+                EmailAlerts = p.EmailAlertsEnabled,
+                CouponCheck = p.CouponCheckEnabled
             },
             Notifications = new
             {
@@ -324,6 +326,7 @@ public sealed class ProjectsController : ControllerBase
         if (req.WorkflowEnabled   is { } w)  project.WorkflowEnabled   = w;
         if (req.IngestionEnabled  is { } i)  project.IngestionEnabled  = i;
         if (req.EmailAlertsEnabled is { } e) project.EmailAlertsEnabled = e;
+        if (req.CouponCheckEnabled is { } cc) project.CouponCheckEnabled = cc;
 
         if (req.CouponRedeemDomain is not null)
         {

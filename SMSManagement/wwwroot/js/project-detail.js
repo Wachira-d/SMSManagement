@@ -127,6 +127,7 @@ function fillSettings(p) {
     document.getElementById('featWorkflow').checked  = p.features.workflow;
     document.getElementById('featIngestion').checked = p.features.ingestion;
     document.getElementById('featEmail').checked     = p.features.emailAlerts;
+    document.getElementById('featCouponCheck').checked = p.features.couponCheck !== false;
 
     document.getElementById('slLength').value  = p.shortlink.shortlinkSlugLength ?? '';
     document.getElementById('slAlpha').value   = p.shortlink.shortlinkAlphabet ?? '';
@@ -163,7 +164,8 @@ document.getElementById('formFeatures').addEventListener('submit', (ev) => {
         shortlinkEnabled:  document.getElementById('featShortlink').checked,
         workflowEnabled:   document.getElementById('featWorkflow').checked,
         ingestionEnabled:  document.getElementById('featIngestion').checked,
-        emailAlertsEnabled:document.getElementById('featEmail').checked
+        emailAlertsEnabled:document.getElementById('featEmail').checked,
+        couponCheckEnabled:document.getElementById('featCouponCheck').checked
     }, 'Features saved.');
 });
 document.getElementById('formShortlink').addEventListener('submit', (ev) => {

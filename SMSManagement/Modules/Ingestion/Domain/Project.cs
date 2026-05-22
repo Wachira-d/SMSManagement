@@ -79,6 +79,14 @@ public sealed class Project
     public bool EmailAlertsEnabled { get; set; } = true;
 
     /// <summary>
+    /// When true (default), an ingestion run whose workflow issues coupons is
+    /// checked up-front: if the coupon batch has fewer Available coupons than
+    /// the run has recipients, the WHOLE run is blocked (nothing is sent) and
+    /// an email alert goes out. Turn off to allow partial coupon coverage.
+    /// </summary>
+    public bool CouponCheckEnabled { get; set; } = true;
+
+    /// <summary>
     /// Short sequential per-project number (1, 2, 3, …) assigned at creation.
     /// Used in the shared-domain coupon redeem URL — /r/{RunningNumber}/{token}
     /// — keeping the link far shorter than the human-readable Code.

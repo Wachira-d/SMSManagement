@@ -3,10 +3,12 @@ using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Core.Logging;
+using SMSManagement.Modules.Coupon.Domain;
 using SMSManagement.Modules.Ingestion.Domain;
 using SMSManagement.Modules.Ingestion.Processors;
 using SMSManagement.Modules.Ingestion.Sources;
 using SMSManagement.Modules.Notifications;
+using SMSManagement.Modules.Workflow.Domain;
 using SMSManagement.Modules.Workflow.Engine;
 
 namespace SMSManagement.Modules.Ingestion.Services;
@@ -28,19 +30,22 @@ public sealed class IngestionPipeline : IIngestionPipeline
     private readonly ILogger<IngestionPipeline> _log;
 
     private readonly Modules.Core.Notifications.IUserNotifier _notify;
+    private readonly IEmailSender _email;
 
     public IngestionPipeline(
         AppDbContext db,
         IWorkflowEngine workflow,
         IAuditLogger audit,
         ILogger<IngestionPipeline> log,
-        Modules.Core.Notifications.IUserNotifier notify)
+        Modules.Core.Notifications.IUserNotifier notify,
+        IEmailSender email)
     {
         _db = db;
         _workflow = workflow;
         _audit = audit;
         _log = log;
         _notify = notify;
+        _email = email;
     }
 
     public async Task<IngestionOutcome> IngestFileAsync(
@@ -216,21 +221,24 @@ public sealed class IngestionPipeline : IIngestionPipeline
         // Resolve the workflow this source starts. A source may be bound to a
         // specific workflow by name (a project can run several); otherwise the
         // single active workflow is used. Either way we take the active
-        // version, so a newly-published version applies automatically.
+        // version, so a newly-published version applies automatically. The
+        // JSON is fetched too so we can see whether the workflow issues coupons.
         var defQuery = _db.WorkflowDefinitions
             .Where(d => d.ProjectId == projectId && d.Active);
         if (!string.IsNullOrWhiteSpace(workflowName))
             defQuery = defQuery.Where(d => d.Name == workflowName);
 
-        var defaultDefinition = await defQuery
+        var def = await defQuery
             .OrderByDescending(d => d.Version)
-            .Select(d => (Guid?)d.Id)
+            .Select(d => new { d.Id, d.DefinitionJson })
             .FirstOrDefaultAsync(ct);
 
-        if (defaultDefinition is null)
+        if (def is null)
             throw new InvalidOperationException(string.IsNullOrWhiteSpace(workflowName)
                 ? $"Project {projectId} has no active workflow definition."
                 : $"Project {projectId} has no active workflow named '{workflowName}'.");
+
+        var couponBatchIds = ExtractCouponBatchIds(def.DefinitionJson);
 
         // Pick the parser by extension — controller already whitelists .csv/.xlsx.
         IIngestionSource source = Path.GetExtension(filePath).ToLowerInvariant() switch
@@ -243,7 +251,11 @@ public sealed class IngestionPipeline : IIngestionPipeline
 
         const int rejectionSampleCap = 50;
         var rejectionSamples = new List<object>(rejectionSampleCap);
-        var accepted = 0; var rejected = 0; var rowIndex = 0;
+        // Valid rows are buffered so the coupon sufficiency check can run
+        // BEFORE any workflow instance is started — a shortage must block the
+        // whole run, not leave it half-sent.
+        var validRows = new List<IReadOnlyDictionary<string, string>>();
+        var rejected = 0; var rowIndex = 0;
 
         await foreach (var raw in source.ReadAsync(context, ct))
         {
@@ -267,10 +279,17 @@ public sealed class IngestionPipeline : IIngestionPipeline
                     });
                 continue;
             }
-
-            await _workflow.StartAsync(defaultDefinition.Value, mapped.Row, batchId, ct);
-            accepted++;
+            validRows.Add(mapped.Row);
         }
+
+        // Coupon sufficiency pre-check. Throws (failing the whole batch) when a
+        // coupon batch can't cover every recipient — nothing is sent.
+        if (couponBatchIds.Count > 0 && validRows.Count > 0)
+            await EnsureCouponSufficiencyAsync(projectId, couponBatchIds, validRows.Count, ct);
+
+        foreach (var row in validRows)
+            await _workflow.StartAsync(def.Id, row, batchId, ct);
+        var accepted = validRows.Count;
 
         var rejectionsJson = rejected == 0
             ? null
@@ -283,6 +302,85 @@ public sealed class IngestionPipeline : IIngestionPipeline
             });
 
         return (accepted, rejected, rejectionsJson);
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions SpecJsonOpts =
+        new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>Coupon batch ids drawn from any <c>issue_coupon</c> step of the
+    /// workflow spec. Empty when the workflow issues no coupons.</summary>
+    private static List<Guid> ExtractCouponBatchIds(string definitionJson)
+    {
+        try
+        {
+            var spec = System.Text.Json.JsonSerializer
+                .Deserialize<WorkflowSpec>(definitionJson, SpecJsonOpts);
+            if (spec?.Steps is null) return new();
+            return spec.Steps.Values
+                .Where(s => string.Equals(s.Type, "issue_coupon", StringComparison.OrdinalIgnoreCase)
+                            && s.CouponBatchId is not null)
+                .Select(s => s.CouponBatchId!.Value)
+                .Distinct()
+                .ToList();
+        }
+        catch { return new(); }
+    }
+
+    /// <summary>
+    /// Blocks the run when a coupon batch has fewer Available coupons than the
+    /// run has recipients (one coupon per recipient per issue_coupon step).
+    /// Sends an email alert and throws so the whole batch fails — unless the
+    /// project has turned the check off.
+    /// </summary>
+    private async Task EnsureCouponSufficiencyAsync(
+        Guid projectId, List<Guid> couponBatchIds, int recipientCount, CancellationToken ct)
+    {
+        var project = await _db.Projects
+            .Where(p => p.Id == projectId)
+            .Select(p => new { p.Name, p.NotificationEmails, p.CouponCheckEnabled, p.EmailAlertsEnabled })
+            .FirstOrDefaultAsync(ct);
+        if (project is null || !project.CouponCheckEnabled) return;   // check disabled — allow
+
+        var shortfalls = new List<string>();
+        foreach (var bid in couponBatchIds)
+        {
+            var available = await _db.Coupons
+                .CountAsync(c => c.BatchId == bid && c.Status == CouponStatus.Available, ct);
+            if (available < recipientCount)
+            {
+                var name = await _db.CouponBatches
+                    .Where(b => b.Id == bid).Select(b => b.Name)
+                    .FirstOrDefaultAsync(ct) ?? bid.ToString();
+                shortfalls.Add($"ชุดคูปอง '{name}' มีคงเหลือ {available} ใบ "
+                             + $"แต่ต้องการ {recipientCount} ใบ (ขาด {recipientCount - available})");
+            }
+        }
+        if (shortfalls.Count == 0) return;
+
+        var detail = string.Join("; ", shortfalls);
+        _log.LogError(
+            "Coupon shortage blocked an ingestion run for project {ProjectId}: {Detail}",
+            projectId, detail);
+
+        var recipients = IngestionBatchNotifier.ParseRecipients(project.NotificationEmails);
+        if (project.EmailAlertsEnabled && recipients.Length > 0)
+        {
+            string Enc(string s) => System.Net.WebUtility.HtmlEncode(s);
+            var subject = $"[{project.Name}] คูปองไม่พอ — แคมเปญถูกระงับ";
+            var html =
+                "<h3>แคมเปญถูกระงับ: คูปองไม่เพียงพอ</h3>"
+                + $"<p>โปรเจ็ค <strong>{Enc(project.Name)}</strong> มีผู้รับ "
+                + $"<strong>{recipientCount}</strong> ราย แต่คูปองคงเหลือไม่พอ — "
+                + "ระบบ<strong>ไม่ส่งข้อความทั้งรอบ</strong> เพื่อไม่ให้บางคนไม่ได้คูปอง</p>"
+                + "<ul>" + string.Join("", shortfalls.Select(s => $"<li>{Enc(s)}</li>")) + "</ul>"
+                + "<p>โปรดเติมคูปองในชุดที่เกี่ยวข้อง แล้วนำเข้าไฟล์อีกครั้ง</p>";
+            var text = $"แคมเปญถูกระงับ: คูปองไม่พอ\nผู้รับ {recipientCount} ราย\n{detail}";
+            try { await _email.SendAsync(new EmailMessage(recipients, subject, html, text), ct); }
+            catch (Exception ex) { _log.LogWarning(ex, "Coupon-shortage alert email failed."); }
+        }
+
+        throw new InvalidOperationException(
+            $"คูปองไม่พอกับจำนวนผู้รับ ({recipientCount} ราย) — ระงับการส่งทั้งรอบ. {detail}");
     }
 
     private async Task ApplyPostProcessAsync(
