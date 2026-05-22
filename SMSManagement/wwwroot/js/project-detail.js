@@ -377,7 +377,9 @@ document.getElementById('formShare').addEventListener('submit', async (ev) => {
     try {
         await api.post(`${api_proj}/members`, {
             userId: uid,
-            level:  document.getElementById('shareLevel').value
+            // ProjectAccessLevel is serialised as a number — send an int, not
+            // the option's string, or model binding rejects it.
+            level:  parseInt(document.getElementById('shareLevel').value, 10)
         });
         toast('Shared.');
         document.getElementById('shareQuery').value = '';
@@ -668,7 +670,11 @@ window.showRunDetail = async function (batchId) {
                 ? ` · <a href="#" onclick="showRejections('${esc(d.id)}');return false;"
                        class="text-danger text-decoration-none">ตก ${ing.rejectedRows} (ดูเหตุผล)</a>`
                 : '')
-            + `</div></div></div>`;
+            + `</div>
+            <div class="mt-2"><a href="${api_proj}/ingestion-batches/${esc(batchId)}/report.csv"
+                 target="_blank" class="btn btn-sm btn-outline-secondary">
+                 <i class="bi bi-download"></i> ดาวน์โหลดรายงานรอบนี้ (CSV)</a></div>
+            </div></div>`;
 
         const insts = d.instances || [];
         if (!insts.length) {

@@ -291,4 +291,26 @@ public sealed class IngestionBatchesController : ControllerBase
         // so we don't deserialize-then-reserialize the bounded sample.
         return Content(json, "application/json");
     }
+
+    /// <summary>
+    /// On-demand per-recipient CSV report for one round — the same report
+    /// attached to the round-summary email (mapped source columns + send /
+    /// delivery status + shortlink click activity).
+    /// </summary>
+    [HttpGet("{batchId:guid}/report.csv")]
+    public async Task<IActionResult> Report(
+        Guid projectId, Guid batchId,
+        [FromServices] Modules.Notifications.IRoundReportService reports,
+        CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
+        var exists = await _db.IngestionBatches
+            .AnyAsync(b => b.Id == batchId && b.ProjectId == projectId, ct);
+        if (!exists) return NotFound();
+
+        var report = await reports.BuildAsync(batchId, ct);
+        if (report is null)
+            return NotFound(new { Message = "This round produced no recipients to report." });
+        return File(report.Csv, "text/csv", $"sms-round-{batchId:N}.csv");
+    }
 }
