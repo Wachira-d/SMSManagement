@@ -114,10 +114,14 @@ public sealed class ProjectsController : ControllerBase
             .Select(g => new { ProjectId = g.Key, Count = g.Count() })
             .ToListAsync(ct);
 
+        // A "failed batch" is one whose Status is Failed — i.e. the run could
+        // not complete (fatal error, coupon shortage, zero rows accepted). A
+        // batch that merely had SOME rejected rows still completed, so
+        // RejectedRows > 0 is NOT the failure criterion.
         var failedBatches = await _db.Set<IngestionBatch>()
             .Where(b => visible.Contains(b.ProjectId)
                      && b.IngestedAt >= since7d
-                     && b.RejectedRows > 0)
+                     && b.Status == "Failed")
             .GroupBy(b => b.ProjectId)
             .Select(g => new { ProjectId = g.Key, Count = g.Count() })
             .ToListAsync(ct);

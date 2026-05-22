@@ -37,11 +37,12 @@
         const statMap = new Map(stats.map(s => [s.projectId, s]));
         list.innerHTML = rows.map(p => {
             const s = statMap.get(p.id) || { smsLast24h: 0, activeInstances: 0, failedBatchesWeek: 0 };
-            // Health pill — red if anything failed in the last week, amber if
-            // there's nothing happening, green if instances are alive.
+            // Health pill — red if a batch failed in the last week, green if
+            // there's recent activity (live instances or SMS in the last 24h),
+            // amber "Idle" only when genuinely nothing is happening.
             const health = s.failedBatchesWeek > 0
                 ? '<span class="badge bg-danger" title="Failed batches this week">⚠ ' + s.failedBatchesWeek + ' failed</span>'
-                : s.activeInstances > 0
+                : (s.activeInstances > 0 || s.smsLast24h > 0)
                     ? '<span class="badge bg-success">Active</span>'
                     : '<span class="badge bg-secondary">Idle</span>';
             return `<div class="col-md-6 col-lg-4">
