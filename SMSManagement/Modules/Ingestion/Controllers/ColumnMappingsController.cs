@@ -28,7 +28,7 @@ public sealed class ColumnMappingsController : ControllerBase
         new(StringComparer.OrdinalIgnoreCase) { ".csv", ".xlsx", ".xls" };
 
     private static readonly HashSet<string> AllowedFields = new(StringComparer.OrdinalIgnoreCase)
-        { "phone", "message", "url", "name", "email", "custom" };
+        { "phone", "message", "url", "name", "email", "id", "custom" };
 
     private static readonly HashSet<string> AllowedTransforms = new(StringComparer.OrdinalIgnoreCase)
         { "trim", "upper", "lower", "digits", "prefix_66", "th_mobile", "hex" };

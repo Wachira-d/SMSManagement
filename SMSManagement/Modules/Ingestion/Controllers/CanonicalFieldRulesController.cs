@@ -22,7 +22,7 @@ public sealed class CanonicalFieldRulesController : ControllerBase
 {
     private static readonly HashSet<string> AllowedFields =
         new(StringComparer.OrdinalIgnoreCase)
-            { "phone", "message", "url", "name", "email", "custom" };
+            { "phone", "message", "url", "name", "email", "id", "custom" };
 
     private readonly AppDbContext _db;
     private readonly IProjectAccessService _access;
