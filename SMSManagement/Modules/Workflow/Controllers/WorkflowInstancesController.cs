@@ -62,18 +62,20 @@ public sealed class WorkflowInstancesController : ControllerBase
         return Ok(rows);
     }
 
-    /// <summary>Paged list of recent instances for one definition. The
-    /// encrypted payload is intentionally omitted — PII stays server-side.</summary>
+    /// <summary>Server-side paged list of instances for one definition/state.
+    /// The encrypted payload is intentionally omitted — PII stays server-side.</summary>
     [HttpGet]
     public async Task<IActionResult> List(
         Guid projectId,
         [FromQuery] Guid? definitionId,
         [FromQuery] WorkflowState? state,
-        [FromQuery] int take = 50,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
-        var cap = Math.Clamp(take, 1, 200);
+        if (page < 1) page = 1;
+        pageSize = Math.Clamp(pageSize, 10, 200);
 
         var q = _db.WorkflowInstances
             .AsNoTracking()
@@ -82,9 +84,11 @@ public sealed class WorkflowInstancesController : ControllerBase
         if (definitionId is Guid did) q = q.Where(i => i.DefinitionId == did);
         if (state is WorkflowState s) q = q.Where(i => i.State == s);
 
+        var total = await q.CountAsync(ct);
         var rows = await q
             .OrderByDescending(i => i.CreatedAt)
-            .Take(cap)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(i => new
             {
                 i.Id, i.DefinitionId, i.IngestionBatchId,
@@ -94,7 +98,14 @@ public sealed class WorkflowInstancesController : ControllerBase
             })
             .ToListAsync(ct);
 
-        return Ok(rows);
+        return Ok(new
+        {
+            page,
+            pageSize,
+            total,
+            totalPages = total == 0 ? 0 : (total + pageSize - 1) / pageSize,
+            items = rows
+        });
     }
 
     /// <summary>Manually move an instance to the Expired terminal state.

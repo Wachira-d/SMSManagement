@@ -1785,7 +1785,8 @@ document.getElementById('btnWfInstRefresh')?.addEventListener('click', loadWfIns
 // Drill-down — opens a modal listing instances in the chosen state, with
 // abort buttons for non-terminal states. Reuses the same backend list
 // endpoint as the API, filtered by (definitionId, state).
-window.showWfInstances = async function (definitionId, definitionName, stateIdx) {
+window.showWfInstances = async function (definitionId, definitionName, stateIdx, page) {
+    page = page || 1;
     const modalEl = document.getElementById('wfInstModal') || buildWfInstModal();
     document.getElementById('wfInstTitle').textContent =
         `${definitionName} — ${WF_STATE_LABEL[stateIdx]} instances`;
@@ -1793,8 +1794,10 @@ window.showWfInstances = async function (definitionId, definitionName, stateIdx)
     body.innerHTML = '<div class="text-muted small">Loading…</div>';
     new bootstrap.Modal(modalEl).show();
     try {
-        const rows = await api.get(
-            `${api_proj}/workflow-instances?definitionId=${encodeURIComponent(definitionId)}&state=${stateIdx}&take=100`);
+        const data = await api.get(
+            `${api_proj}/workflow-instances?definitionId=${encodeURIComponent(definitionId)}`
+            + `&state=${stateIdx}&page=${page}&pageSize=50`);
+        const rows = data.items || [];
         const isTerminal = stateIdx === 5 || stateIdx === 6 || stateIdx === 7;
         if (!rows.length) {
             body.innerHTML = '<div class="text-muted small">No instances in this state.</div>';
@@ -1802,10 +1805,10 @@ window.showWfInstances = async function (definitionId, definitionName, stateIdx)
         }
         const bulkBar = isTerminal ? '' :
             `<div class="d-flex justify-content-between align-items-center mb-2">
-               <span class="small text-muted">${rows.length} รายการที่ยังค้าง — แต่ละรายการคือ 1 ผู้รับ</span>
+               <span class="small text-muted">${data.total} รายการที่ยังค้าง — แต่ละรายการคือ 1 ผู้รับ</span>
                <button class="btn btn-sm btn-outline-danger"
                   onclick="abortAllWfInstances('${esc(definitionId)}',${stateIdx},'${esc(definitionName)}')">
-                  หยุด/เคลียร์ทั้งหมด (${rows.length})</button>
+                  หยุด/เคลียร์ทั้งหมด (${data.total})</button>
              </div>`;
         body.innerHTML = bulkBar + `<table class="table table-sm align-middle">
             <thead><tr>
@@ -1826,7 +1829,10 @@ window.showWfInstances = async function (definitionId, definitionName, stateIdx)
                        onclick="abortWfInstance('${esc(i.id)}', '${esc(definitionId)}', ${stateIdx}, '${esc(definitionName)}')"
                        title="Force this instance to Expired">Abort</button>`}</td>
             </tr>
-            <tr id="wfInstDetail${n}" style="display:none"><td colspan="6" class="bg-light"></td></tr>`).join('')}</tbody></table>`;
+            <tr id="wfInstDetail${n}" style="display:none"><td colspan="6" class="bg-light"></td></tr>`).join('')}</tbody></table>
+            <div id="wfInstPager" class="d-flex align-items-center gap-2"></div>`;
+        renderPager(document.getElementById('wfInstPager'), data,
+            p => showWfInstances(definitionId, definitionName, stateIdx, p));
     } catch (e) {
         body.innerHTML = `<div class="text-danger">${esc(e.message)}</div>`;
     }
