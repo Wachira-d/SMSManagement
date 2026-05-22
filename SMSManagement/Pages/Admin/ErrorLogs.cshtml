@@ -53,6 +53,18 @@
     </table>
 </div>
 
+<div class="d-flex align-items-center gap-2 mb-4">
+    <button id="btnPrev" class="btn btn-outline-secondary btn-sm" disabled>&laquo; Prev</button>
+    <button id="btnNext" class="btn btn-outline-secondary btn-sm" disabled>Next &raquo;</button>
+    <span id="pageInfo" class="small text-muted"></span>
+    <span class="ms-auto small text-muted">
+        Rows / page
+        <select id="pageSize" class="form-select form-select-sm d-inline-block w-auto ms-1">
+            <option>25</option><option selected>50</option><option>100</option><option>200</option>
+        </select>
+    </span>
+</div>
+
 <div class="modal fade" id="errModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-xl">
         <div class="modal-content">
@@ -72,22 +84,36 @@
     document.getElementById('toDate').value   = to.toISOString().slice(0,10);
 })();
 
+let errPage = 1;
+
 async function load() {
     const from   = document.getElementById('fromDate').value;
     const to     = document.getElementById('toDate').value;
     const level  = document.getElementById('levelFilter').value;
     const module = document.getElementById('moduleFilter').value;
     const search = document.getElementById('search').value;
+    const pageSize = document.getElementById('pageSize').value;
     const qs = new URLSearchParams({
-        from: from + 'T00:00:00Z', to: to + 'T23:59:59Z', take: 200
+        from: from + 'T00:00:00Z', to: to + 'T23:59:59Z',
+        page: errPage, pageSize: pageSize
     });
     if (level)  qs.set('level', level);
     if (module) qs.set('module', module);
     if (search) qs.set('search', search);
 
     try {
-        const rows = await api.get('/api/admin/error-logs?' + qs);
+        const data = await api.get('/api/admin/error-logs?' + qs);
+        const rows = data.items || [];
         const body = document.getElementById('errBody');
+
+        // Pager state.
+        const info = document.getElementById('pageInfo');
+        info.textContent = data.total === 0
+            ? 'No entries'
+            : `Page ${data.page} of ${data.totalPages} — ${data.total} entr${data.total === 1 ? 'y' : 'ies'}`;
+        document.getElementById('btnPrev').disabled = data.page <= 1;
+        document.getElementById('btnNext').disabled = data.page >= data.totalPages;
+
         if (!rows.length) {
             body.innerHTML = '<tr><td colspan="7" class="text-muted">No log entries in this range.</td></tr>';
             return;
@@ -116,7 +142,11 @@ window.showErr = function (id) {
     new bootstrap.Modal(document.getElementById('errModal')).show();
 };
 
-document.getElementById('btnSearch').addEventListener('click', load);
+// Any filter change resets to the first page.
+document.getElementById('btnSearch').addEventListener('click', () => { errPage = 1; load(); });
+document.getElementById('pageSize').addEventListener('change', () => { errPage = 1; load(); });
+document.getElementById('btnPrev').addEventListener('click', () => { if (errPage > 1) { errPage--; load(); } });
+document.getElementById('btnNext').addEventListener('click', () => { errPage++; load(); });
 load();
 </script>
 }

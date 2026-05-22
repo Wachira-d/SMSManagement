@@ -25,14 +25,18 @@ public sealed class ErrorLogsController : ControllerBase
         [FromQuery] string? level = null,
         [FromQuery] string? module = null,
         [FromQuery] string? search = null,
-        [FromQuery] int take = 200,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
     {
-        var cap = Math.Clamp(take, 1, 1000);
+        if (page < 1) page = 1;
+        pageSize = Math.Clamp(pageSize, 10, 200);
+        var skip = (page - 1) * pageSize;
 
         // SQL-Server-first path; SQLite test path uses a bounded fetch + in-
         // memory filter for the same reason as AuditTrailAsync (combined
         // DateTimeOffset / nullable predicates don't translate cleanly).
+        int total;
         List<ErrorLog> rows;
         if (_db.Database.IsSqlServer())
         {
@@ -56,13 +60,17 @@ public sealed class ErrorLogsController : ControllerBase
                     || EF.Functions.Like(e.RequestPath      ?? string.Empty, needle));
             }
 
-            rows = await q.OrderByDescending(e => e.CreatedAt).Take(cap).ToListAsync(ct);
+            total = await q.CountAsync(ct);
+            rows = await q
+                .OrderByDescending(e => e.CreatedAt)
+                .Skip(skip).Take(pageSize)
+                .ToListAsync(ct);
         }
         else
         {
             var raw = await _db.ErrorLogs.AsNoTracking()
-                .Take(cap * 8).ToListAsync(ct);
-            rows = raw
+                .Take(20000).ToListAsync(ct);
+            var filtered = raw
                 .Where(e => e.CreatedAt >= from && e.CreatedAt < to)
                 .Where(e => string.IsNullOrEmpty(level) || e.Level == level)
                 .Where(e => string.IsNullOrEmpty(module) ||
@@ -73,15 +81,23 @@ public sealed class ErrorLogsController : ControllerBase
                     (e.ExceptionType?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                     (e.RequestPath?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false))
                 .OrderByDescending(e => e.CreatedAt)
-                .Take(cap)
                 .ToList();
+            total = filtered.Count;
+            rows = filtered.Skip(skip).Take(pageSize).ToList();
         }
 
-        return Ok(rows.Select(e => new
+        return Ok(new
         {
-            e.Id, e.CreatedAt, e.Level, e.SourceContext, e.Message,
-            e.ExceptionType, e.ExceptionMessage, e.ExceptionStackTrace,
-            e.RequestPath, e.RequestMethod, e.CorrelationId, e.IpAddress, e.UserId
-        }));
+            page,
+            pageSize,
+            total,
+            totalPages = total == 0 ? 0 : (total + pageSize - 1) / pageSize,
+            items = rows.Select(e => new
+            {
+                e.Id, e.CreatedAt, e.Level, e.SourceContext, e.Message,
+                e.ExceptionType, e.ExceptionMessage, e.ExceptionStackTrace,
+                e.RequestPath, e.RequestMethod, e.CorrelationId, e.IpAddress, e.UserId
+            })
+        });
     }
 }
