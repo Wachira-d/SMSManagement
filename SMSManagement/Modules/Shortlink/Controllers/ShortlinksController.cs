@@ -55,17 +55,21 @@ public sealed class ShortlinksController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List(
         Guid projectId,
-        [FromQuery] int take = 50,
-        [FromQuery] int skip = 0,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
 
+        if (page < 1) page = 1;
+        pageSize = Math.Clamp(pageSize, 10, 200);
+
         var baseUrl = await BaseUrlAsync(projectId, ct);
-        var rows = await _db.Shortlinks
-            .Where(s => s.ProjectId == projectId)
+        var q = _db.Shortlinks.Where(s => s.ProjectId == projectId);
+        var total = await q.CountAsync(ct);
+        var rows = await q
             .OrderByDescending(s => s.CreatedAt)
-            .Skip(skip).Take(Math.Clamp(take, 1, 500))
+            .Skip((page - 1) * pageSize).Take(pageSize)
             .Select(s => new
             {
                 s.Id, s.Slug, s.CreatedAt, s.ExpiresAt,
@@ -74,15 +78,23 @@ public sealed class ShortlinksController : ControllerBase
                 HasTargetUrl = s.EncryptedTargetUrl.Length > 0
             })
             .ToListAsync(ct);
+
         // The ready-to-click shortlink URL ({base}/{slug}) is composed here so
         // the UI can render it without knowing the base.
-        var view = rows.Select(s => new
+        var items = rows.Select(s => new
         {
             s.Id, s.Slug, s.CreatedAt, s.ExpiresAt, s.MaxClicks, s.ClickCount,
             s.Disabled, s.HasTargetUrl,
             FullUrl = string.IsNullOrEmpty(baseUrl) ? null : $"{baseUrl}/{s.Slug}"
         });
-        return Ok(view);
+        return Ok(new
+        {
+            page,
+            pageSize,
+            total,
+            totalPages = total == 0 ? 0 : (total + pageSize - 1) / pageSize,
+            items
+        });
     }
 
     [HttpPost]

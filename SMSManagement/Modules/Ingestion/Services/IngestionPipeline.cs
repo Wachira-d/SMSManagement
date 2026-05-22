@@ -307,9 +307,11 @@ public sealed class IngestionPipeline : IIngestionPipeline
     private static readonly System.Text.Json.JsonSerializerOptions SpecJsonOpts =
         new() { PropertyNameCaseInsensitive = true };
 
-    /// <summary>Coupon batch ids drawn from any <c>issue_coupon</c> step of the
-    /// workflow spec. Empty when the workflow issues no coupons.</summary>
-    private static List<Guid> ExtractCouponBatchIds(string definitionJson)
+    /// <summary>Coupon batch ids drawn by the workflow, mapped to how many
+    /// <c>issue_coupon</c> steps use each — a workflow that issues from the
+    /// same batch twice needs two coupons per recipient. Empty when the
+    /// workflow issues no coupons.</summary>
+    private static Dictionary<Guid, int> ExtractCouponBatchIds(string definitionJson)
     {
         try
         {
@@ -319,21 +321,27 @@ public sealed class IngestionPipeline : IIngestionPipeline
             return spec.Steps.Values
                 .Where(s => string.Equals(s.Type, "issue_coupon", StringComparison.OrdinalIgnoreCase)
                             && s.CouponBatchId is not null)
-                .Select(s => s.CouponBatchId!.Value)
-                .Distinct()
-                .ToList();
+                .GroupBy(s => s.CouponBatchId!.Value)
+                .ToDictionary(g => g.Key, g => g.Count());
         }
         catch { return new(); }
     }
 
     /// <summary>
     /// Blocks the run when a coupon batch has fewer Available coupons than the
-    /// run has recipients (one coupon per recipient per issue_coupon step).
+    /// run needs (recipients x how many issue_coupon steps draw from it).
     /// Sends an email alert and throws so the whole batch fails — unless the
     /// project has turned the check off.
+    ///
+    /// Best-effort: the count is not taken inside a transaction with the
+    /// allocation, so two ingestion runs racing on the same batch could both
+    /// pass. The engine's allocator is the backstop — it sends without a
+    /// coupon (and logs) if the batch empties — but in practice ingestion
+    /// runs are serial per source.
     /// </summary>
     private async Task EnsureCouponSufficiencyAsync(
-        Guid projectId, List<Guid> couponBatchIds, int recipientCount, CancellationToken ct)
+        Guid projectId, Dictionary<Guid, int> couponBatchIds, int recipientCount,
+        CancellationToken ct)
     {
         var project = await _db.Projects
             .Where(p => p.Id == projectId)
@@ -342,17 +350,18 @@ public sealed class IngestionPipeline : IIngestionPipeline
         if (project is null || !project.CouponCheckEnabled) return;   // check disabled — allow
 
         var shortfalls = new List<string>();
-        foreach (var bid in couponBatchIds)
+        foreach (var (bid, stepCount) in couponBatchIds)
         {
+            var needed = recipientCount * stepCount;
             var available = await _db.Coupons
                 .CountAsync(c => c.BatchId == bid && c.Status == CouponStatus.Available, ct);
-            if (available < recipientCount)
+            if (available < needed)
             {
                 var name = await _db.CouponBatches
                     .Where(b => b.Id == bid).Select(b => b.Name)
                     .FirstOrDefaultAsync(ct) ?? bid.ToString();
                 shortfalls.Add($"ชุดคูปอง '{name}' มีคงเหลือ {available} ใบ "
-                             + $"แต่ต้องการ {recipientCount} ใบ (ขาด {recipientCount - available})");
+                             + $"แต่ต้องการ {needed} ใบ (ขาด {needed - available})");
             }
         }
         if (shortfalls.Count == 0) return;

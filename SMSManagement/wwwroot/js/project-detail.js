@@ -2881,10 +2881,14 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ==================== SHORTLINKS ====================
+let slPage = 1;
 async function loadShortlinks() {
     try {
-        const rows = await api.get(`${api_proj}/shortlinks`);
+        const data = await api.get(`${api_proj}/shortlinks?page=${slPage}&pageSize=50`);
+        const rows = data.items || [];
         const body = document.getElementById('slBody');
+        renderPager(document.getElementById('slPager'), data,
+            p => { slPage = p; loadShortlinks(); });
         if (!rows.length) {
             body.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-4"><i class="bi bi-link-45deg fs-3 d-block"></i>No shortlinks yet. They&rsquo;re created automatically when a workflow SMS template contains a long URL (or via the form on the right).</td></tr>';
             return;
