@@ -40,6 +40,8 @@
     </div>
     <div class="col-auto">
         <button id="btnSearch" class="btn btn-primary btn-sm">Search</button>
+        <button id="btnExport" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-download"></i> Export CSV</button>
     </div>
 </div>
 
@@ -142,8 +144,25 @@ window.showErr = function (id) {
     new bootstrap.Modal(document.getElementById('errModal')).show();
 };
 
+function filterQs() {
+    const qs = new URLSearchParams({
+        from: document.getElementById('fromDate').value + 'T00:00:00Z',
+        to:   document.getElementById('toDate').value + 'T23:59:59Z'
+    });
+    const level  = document.getElementById('levelFilter').value;
+    const module = document.getElementById('moduleFilter').value;
+    const search = document.getElementById('search').value;
+    if (level)  qs.set('level', level);
+    if (module) qs.set('module', module);
+    if (search) qs.set('search', search);
+    return qs;
+}
+
 // Any filter change resets to the first page.
 document.getElementById('btnSearch').addEventListener('click', () => { errPage = 1; load(); });
+document.getElementById('btnExport').addEventListener('click', () => {
+    window.open('/api/admin/error-logs/export.csv?' + filterQs(), '_blank');
+});
 document.getElementById('pageSize').addEventListener('change', () => { errPage = 1; load(); });
 document.getElementById('btnPrev').addEventListener('click', () => { if (errPage > 1) { errPage--; load(); } });
 document.getElementById('btnNext').addEventListener('click', () => { errPage++; load(); });

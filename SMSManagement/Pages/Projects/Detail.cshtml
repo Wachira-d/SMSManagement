@@ -1148,6 +1148,16 @@ Other SFTP keys: <code>host, port, username, remoteDirectory</code>, <code>retry
                                 <option>Queued</option><option>Sending</option><option>Sent</option>
                                 <option>Delivered</option><option>Failed</option><option>Rejected</option>
                             </select>
+                            <select id="smsPageSize" class="form-select form-select-sm" style="width:auto"
+                                    aria-label="Rows per page">
+                                <option value="25">25 / page</option>
+                                <option value="50" selected>50 / page</option>
+                                <option value="100">100 / page</option>
+                                <option value="200">200 / page</option>
+                            </select>
+                            <button id="btnSmsExport" class="btn btn-sm btn-outline-secondary"
+                                    aria-label="Export SMS history as CSV">
+                                <i class="bi bi-download"></i> Export CSV</button>
                             <button id="btnSmsRefresh" class="btn btn-sm btn-link p-0"
                                     aria-label="Refresh SMS list">Refresh now</button>
                         </div>
@@ -1162,6 +1172,7 @@ Other SFTP keys: <code>host, port, username, remoteDirectory</code>, <code>retry
                             <tbody id="smsListBody"><tr><td colspan="6" class="text-muted">Loading…</td></tr></tbody>
                         </table>
                     </div>
+                    <div id="smsPager" class="d-flex align-items-center gap-2 p-2 border-top"></div>
                 </div>
             </div>
 

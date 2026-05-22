@@ -574,12 +574,14 @@ async function loadPipeline() {
         el.innerHTML = `<span class="text-danger small">${esc(e.message)}</span>`;
     }
 }
+let pipelineRunsPage = 1;
 async function loadPipelineRuns() {
     const el = document.getElementById('pipelineRuns');
     if (!el) return;
     el.innerHTML = '<span class="text-muted small">กำลังโหลด…</span>';
     try {
-        const data = await api.get(`${api_proj}/ingestion-batches/runs`);
+        const data = await api.get(
+            `${api_proj}/ingestion-batches/runs?page=${pipelineRunsPage}&pageSize=20`);
         const runs = data.runs || [];
         if (!runs.length) {
             el.innerHTML = '<div class="text-muted small">ยังไม่มีการรัน — '
@@ -587,7 +589,7 @@ async function loadPipelineRuns() {
             return;
         }
         let html = `<div class="small mb-2">flow นี้ทำงานไปแล้ว `
-            + `<strong>${data.count}</strong> รอบ (แสดงล่าสุด ${runs.length})</div>`;
+            + `<strong>${data.total}</strong> รอบ</div>`;
         html += '<div class="table-responsive"><table class="table table-sm small align-middle">'
             + '<thead><tr><th>รอบ (เวลา)</th><th>แหล่ง</th><th>① นำเข้า</th>'
             + '<th>② Workflow</th><th>③ SMS</th><th>สถานะ</th></tr></thead><tbody>';
@@ -617,7 +619,10 @@ async function loadPipelineRuns() {
             </tr>`;
         });
         html += '</tbody></table></div>';
+        html += '<div id="pipelineRunsPager" class="d-flex align-items-center gap-2"></div>';
         el.innerHTML = html;
+        renderPager(document.getElementById('pipelineRunsPager'), data,
+            p => { pipelineRunsPage = p; loadPipelineRuns(); });
     } catch (e) {
         el.innerHTML = `<span class="text-danger small">${esc(e.message)}</span>`;
     }
@@ -2700,12 +2705,33 @@ document.getElementById('formSms').addEventListener('submit', async (ev) => {
     }
 });
 
+// Shared pager bar — renders Prev/Next + "page X of Y" into `el`.
+// data = { page, pageSize, total, totalPages }; onGo(page) reloads.
+window.renderPager = function (el, data, onGo) {
+    if (!el) return;
+    const tp = data.totalPages || 0;
+    if (!data.total) { el.innerHTML = '<span class="small text-muted">ไม่มีข้อมูล</span>'; return; }
+    el.innerHTML =
+        `<button class="btn btn-outline-secondary btn-sm" ${data.page<=1?'disabled':''} data-pg="prev">&laquo; ก่อนหน้า</button>
+         <button class="btn btn-outline-secondary btn-sm" ${data.page>=tp?'disabled':''} data-pg="next">ถัดไป &raquo;</button>
+         <span class="small text-muted">หน้า ${data.page} / ${tp} — ${data.total} รายการ</span>`;
+    const prev = el.querySelector('[data-pg=prev]'), next = el.querySelector('[data-pg=next]');
+    if (prev) prev.addEventListener('click', () => { if (data.page > 1)  onGo(data.page - 1); });
+    if (next) next.addEventListener('click', () => { if (data.page < tp) onGo(data.page + 1); });
+};
+
+let smsPage = 1;
 async function loadSmsList() {
     try {
-        const filter = document.getElementById('smsFilter').value;
-        const qs = filter ? `?take=50&status=${encodeURIComponent(filter)}` : '?take=50';
-        const rows = await api.get(`${api_proj}/sms${qs}`);
+        const filter   = document.getElementById('smsFilter').value;
+        const pageSize = document.getElementById('smsPageSize').value;
+        const qs = new URLSearchParams({ page: smsPage, pageSize: pageSize });
+        if (filter) qs.set('status', filter);
+        const data = await api.get(`${api_proj}/sms?` + qs);
+        const rows = data.items || [];
         const body = document.getElementById('smsListBody');
+        renderPager(document.getElementById('smsPager'), data,
+            p => { smsPage = p; loadSmsList(); });
         if (!rows.length) {
             body.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-4"><i class="bi bi-send fs-3 d-block"></i>No SMS sent yet. Workflow dispatches go here, plus manual sends from the form on the left.</td></tr>';
             return;
@@ -2805,7 +2831,14 @@ window.showSmsDetail = async function (id) {
     } catch (e) { body.textContent = 'Error: ' + e.message; }
 };
 document.getElementById('btnSmsRefresh').addEventListener('click', loadSmsList);
-document.getElementById('smsFilter').addEventListener('change', loadSmsList);
+// Filter / page-size change → back to page 1.
+document.getElementById('smsFilter').addEventListener('change', () => { smsPage = 1; loadSmsList(); });
+document.getElementById('smsPageSize').addEventListener('change', () => { smsPage = 1; loadSmsList(); });
+document.getElementById('btnSmsExport').addEventListener('click', () => {
+    const filter = document.getElementById('smsFilter').value;
+    const qs = filter ? '?status=' + encodeURIComponent(filter) : '';
+    window.open(`${api_proj}/sms/export.csv${qs}`, '_blank');
+});
 
 // ==================== AUTO-POLLING ====================
 // Light-touch real-time: poll the active list every 10s while:

@@ -69,16 +69,24 @@ public sealed class IngestionBatchesController : ControllerBase
     /// </summary>
     [HttpGet("runs")]
     public async Task<IActionResult> Runs(
-        Guid projectId, [FromQuery] int take = 20, CancellationToken ct = default)
+        Guid projectId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
-        take = Math.Clamp(take, 1, 100);
+        if (page < 1) page = 1;
+        pageSize = Math.Clamp(pageSize, 5, 100);
 
-        var batches = await _db.IngestionBatches
+        var baseQ = _db.IngestionBatches
             .AsNoTracking()
-            .Where(b => b.ProjectId == projectId)
+            .Where(b => b.ProjectId == projectId);
+        var total = await baseQ.CountAsync(ct);
+
+        var batches = await baseQ
             .OrderByDescending(b => b.IngestedAt)
-            .Take(take)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(b => new
             {
                 b.Id, b.SourceType, b.SourceRef, b.Status, b.IngestedAt,
@@ -140,7 +148,15 @@ public sealed class IngestionBatchesController : ControllerBase
                 : new { Total = 0, Delivered = 0, Sent = 0, Failed = 0, Pending = 0 }
         });
 
-        return Ok(new { count = batches.Count, runs });
+        return Ok(new
+        {
+            page,
+            pageSize,
+            total,
+            totalPages = total == 0 ? 0 : (total + pageSize - 1) / pageSize,
+            count = batches.Count,
+            runs
+        });
     }
 
     /// <summary>

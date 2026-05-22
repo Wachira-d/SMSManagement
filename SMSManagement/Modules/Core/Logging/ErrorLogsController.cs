@@ -31,13 +31,60 @@ public sealed class ErrorLogsController : ControllerBase
     {
         if (page < 1) page = 1;
         pageSize = Math.Clamp(pageSize, 10, 200);
-        var skip = (page - 1) * pageSize;
 
-        // SQL-Server-first path; SQLite test path uses a bounded fetch + in-
-        // memory filter for the same reason as AuditTrailAsync (combined
-        // DateTimeOffset / nullable predicates don't translate cleanly).
-        int total;
-        List<ErrorLog> rows;
+        var (total, rows) = await FetchAsync(
+            from, to, level, module, search, (page - 1) * pageSize, pageSize, ct);
+
+        return Ok(new
+        {
+            page,
+            pageSize,
+            total,
+            totalPages = total == 0 ? 0 : (total + pageSize - 1) / pageSize,
+            items = rows.Select(e => new
+            {
+                e.Id, e.CreatedAt, e.Level, e.SourceContext, e.Message,
+                e.ExceptionType, e.ExceptionMessage, e.ExceptionStackTrace,
+                e.RequestPath, e.RequestMethod, e.CorrelationId, e.IpAddress, e.UserId
+            })
+        });
+    }
+
+    /// <summary>Exports the filtered log as CSV (capped at 10,000 rows).</summary>
+    [HttpGet("export.csv")]
+    public async Task<IActionResult> Export(
+        [FromQuery] DateTimeOffset from,
+        [FromQuery] DateTimeOffset to,
+        [FromQuery] string? level = null,
+        [FromQuery] string? module = null,
+        [FromQuery] string? search = null,
+        CancellationToken ct = default)
+    {
+        var (_, rows) = await FetchAsync(from, to, level, module, search, 0, 10000, ct);
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append('﻿');   // UTF-8 BOM
+        sb.AppendLine("CreatedAt,Level,Source,Message,ExceptionType,ExceptionMessage,"
+                    + "RequestMethod,RequestPath,CorrelationId,UserId");
+        foreach (var e in rows)
+            sb.AppendLine(string.Join(',', new[]
+            {
+                Csv(e.CreatedAt.ToString("u")), Csv(e.Level), Csv(e.SourceContext),
+                Csv(e.Message), Csv(e.ExceptionType), Csv(e.ExceptionMessage),
+                Csv(e.RequestMethod), Csv(e.RequestPath), Csv(e.CorrelationId),
+                Csv(e.UserId?.ToString())
+            }));
+        return File(System.Text.Encoding.UTF8.GetBytes(sb.ToString()),
+            "text/csv", "error-logs.csv");
+    }
+
+    // SQL-Server-first path; SQLite test path uses a bounded fetch + in-memory
+    // filter (combined DateTimeOffset / nullable predicates don't translate
+    // cleanly). Returns the total matching count and the requested slice.
+    private async Task<(int total, List<ErrorLog> rows)> FetchAsync(
+        DateTimeOffset from, DateTimeOffset to, string? level, string? module,
+        string? search, int skip, int take, CancellationToken ct)
+    {
         if (_db.Database.IsSqlServer())
         {
             var q = _db.ErrorLogs
@@ -60,44 +107,35 @@ public sealed class ErrorLogsController : ControllerBase
                     || EF.Functions.Like(e.RequestPath      ?? string.Empty, needle));
             }
 
-            total = await q.CountAsync(ct);
-            rows = await q
+            var total = await q.CountAsync(ct);
+            var rows = await q
                 .OrderByDescending(e => e.CreatedAt)
-                .Skip(skip).Take(pageSize)
+                .Skip(skip).Take(take)
                 .ToListAsync(ct);
-        }
-        else
-        {
-            var raw = await _db.ErrorLogs.AsNoTracking()
-                .Take(20000).ToListAsync(ct);
-            var filtered = raw
-                .Where(e => e.CreatedAt >= from && e.CreatedAt < to)
-                .Where(e => string.IsNullOrEmpty(level) || e.Level == level)
-                .Where(e => string.IsNullOrEmpty(module) ||
-                    (e.SourceContext?.Contains(module, StringComparison.OrdinalIgnoreCase) ?? false))
-                .Where(e => string.IsNullOrEmpty(search) ||
-                    (e.Message?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (e.ExceptionMessage?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (e.ExceptionType?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (e.RequestPath?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false))
-                .OrderByDescending(e => e.CreatedAt)
-                .ToList();
-            total = filtered.Count;
-            rows = filtered.Skip(skip).Take(pageSize).ToList();
+            return (total, rows);
         }
 
-        return Ok(new
-        {
-            page,
-            pageSize,
-            total,
-            totalPages = total == 0 ? 0 : (total + pageSize - 1) / pageSize,
-            items = rows.Select(e => new
-            {
-                e.Id, e.CreatedAt, e.Level, e.SourceContext, e.Message,
-                e.ExceptionType, e.ExceptionMessage, e.ExceptionStackTrace,
-                e.RequestPath, e.RequestMethod, e.CorrelationId, e.IpAddress, e.UserId
-            })
-        });
+        var raw = await _db.ErrorLogs.AsNoTracking().Take(20000).ToListAsync(ct);
+        var filtered = raw
+            .Where(e => e.CreatedAt >= from && e.CreatedAt < to)
+            .Where(e => string.IsNullOrEmpty(level) || e.Level == level)
+            .Where(e => string.IsNullOrEmpty(module) ||
+                (e.SourceContext?.Contains(module, StringComparison.OrdinalIgnoreCase) ?? false))
+            .Where(e => string.IsNullOrEmpty(search) ||
+                (e.Message?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (e.ExceptionMessage?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (e.ExceptionType?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (e.RequestPath?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false))
+            .OrderByDescending(e => e.CreatedAt)
+            .ToList();
+        return (filtered.Count, filtered.Skip(skip).Take(take).ToList());
+    }
+
+    private static string Csv(string? v)
+    {
+        v ??= string.Empty;
+        return v.Contains(',') || v.Contains('"') || v.Contains('\n') || v.Contains('\r')
+            ? "\"" + v.Replace("\"", "\"\"") + "\""
+            : v;
     }
 }

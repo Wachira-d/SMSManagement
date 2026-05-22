@@ -147,28 +147,36 @@ public sealed class SmsController : ControllerBase
         });
     }
 
-    /// <summary>Recent SMS dispatched for this project — used by the SMS tab
-    /// history list. Latest first, capped at <paramref name="take"/>.</summary>
+    private IQueryable<SmsMessage> FilteredHistory(Guid projectId, string? status)
+    {
+        var q = _db.SmsMessages.AsNoTracking().Where(x => x.ProjectId == projectId);
+        if (!string.IsNullOrWhiteSpace(status)
+            && Enum.TryParse<SmsStatus>(status, ignoreCase: true, out var s))
+            q = q.Where(x => x.Status == s);
+        return q;
+    }
+
+    /// <summary>SMS dispatched for this project — the SMS tab history list,
+    /// latest first, server-side paged.</summary>
     [HttpGet]
     public async Task<IActionResult> List(
         Guid projectId,
-        [FromQuery] int take = 50,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
         [FromQuery] string? status = null,
         CancellationToken ct = default)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
 
-        var q = _db.SmsMessages
-            .AsNoTracking()
-            .Where(x => x.ProjectId == projectId);
+        if (page < 1) page = 1;
+        pageSize = Math.Clamp(pageSize, 10, 200);
 
-        if (!string.IsNullOrWhiteSpace(status)
-            && Enum.TryParse<SmsStatus>(status, ignoreCase: true, out var s))
-            q = q.Where(x => x.Status == s);
-
+        var q = FilteredHistory(projectId, status);
+        var total = await q.CountAsync(ct);
         var rows = await q
             .OrderByDescending(x => x.CreatedAt)
-            .Take(Math.Clamp(take, 1, 500))
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(x => new
             {
                 x.Id, x.Provider, x.Status, x.MaskedTo, x.Attempts,
@@ -177,6 +185,72 @@ public sealed class SmsController : ControllerBase
             })
             .ToListAsync(ct);
 
-        return Ok(rows);
+        return Ok(new
+        {
+            page,
+            pageSize,
+            total,
+            totalPages = total == 0 ? 0 : (total + pageSize - 1) / pageSize,
+            items = rows
+        });
+    }
+
+    /// <summary>Exports the (optionally status-filtered) SMS history as CSV —
+    /// the message body is decrypted so the export is a complete per-message
+    /// log. Capped at 10,000 rows.</summary>
+    [HttpGet("export.csv")]
+    public async Task<IActionResult> Export(
+        Guid projectId,
+        [FromQuery] string? status = null,
+        CancellationToken ct = default)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
+
+        var rows = await FilteredHistory(projectId, status)
+            .OrderByDescending(x => x.CreatedAt)
+            .Take(10000)
+            .Select(x => new
+            {
+                x.CreatedAt, x.MaskedTo, x.Provider, x.SenderId, x.Status,
+                x.Attempts, x.SentAt, x.DeliveredAt, x.ErrorCode,
+                x.ProviderMessageId, x.RawProviderResponse, x.EncryptedBody
+            })
+            .ToListAsync(ct);
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append('﻿');   // UTF-8 BOM so Excel opens it cleanly
+        sb.AppendLine("CreatedAt,Recipient,Provider,Sender,Status,Attempts,"
+                    + "SentAt,DeliveredAt,ErrorCode,ProviderMessageId,ProviderResponse,Body");
+        foreach (var r in rows)
+        {
+            string body;
+            try { body = _crypto.Decrypt(r.EncryptedBody); }
+            catch { body = "(decrypt failed)"; }
+            sb.AppendLine(string.Join(',', new[]
+            {
+                Csv(r.CreatedAt.ToString("u")),
+                Csv(r.MaskedTo),
+                Csv(r.Provider),
+                Csv(r.SenderId),
+                Csv(r.Status.ToString()),
+                Csv(r.Attempts.ToString()),
+                Csv(r.SentAt?.ToString("u")),
+                Csv(r.DeliveredAt?.ToString("u")),
+                Csv(r.ErrorCode),
+                Csv(r.ProviderMessageId),
+                Csv(r.RawProviderResponse),
+                Csv(body)
+            }));
+        }
+        return File(System.Text.Encoding.UTF8.GetBytes(sb.ToString()),
+            "text/csv", $"sms-history-{projectId:N}.csv");
+    }
+
+    private static string Csv(string? v)
+    {
+        v ??= string.Empty;
+        return v.Contains(',') || v.Contains('"') || v.Contains('\n') || v.Contains('\r')
+            ? "\"" + v.Replace("\"", "\"\"") + "\""
+            : v;
     }
 }
