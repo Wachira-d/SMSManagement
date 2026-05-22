@@ -3185,12 +3185,52 @@ async function loadCouponBrands() {
     } catch (e) { toast(e.message, 'danger'); }
 }
 
+// Reflects the brand's current logo into the preview + hidden field, and
+// enables/disables the uploader (upload needs a saved brand id).
+function setCpnLogo(url) {
+    document.getElementById('cpnBrandLogo').value = url || '';
+    const img  = document.getElementById('cpnBrandLogoPreview');
+    const none = document.getElementById('cpnBrandLogoNone');
+    if (url) { img.src = url; img.style.display = ''; none.style.display = 'none'; }
+    else     { img.removeAttribute('src'); img.style.display = 'none'; none.style.display = ''; }
+}
+function refreshCpnLogoUploader() {
+    const hasBrand = !!document.getElementById('cpnBrandId').value;
+    document.getElementById('cpnBrandLogoFile').disabled = !hasBrand;
+    document.getElementById('btnCpnBrandLogoUpload').disabled = !hasBrand;
+    document.getElementById('cpnBrandLogoHint').style.display = hasBrand ? 'none' : '';
+}
+
 document.getElementById('btnCpnBrandNew').addEventListener('click', () => {
     document.getElementById('cpnBrandEditor').style.display = '';
     document.getElementById('formCpnBrand').reset();
     document.getElementById('cpnBrandId').value = '';
     document.getElementById('cpnBrandColor').value = '#0066cc';
     document.getElementById('cpnBrandEnabled').checked = true;
+    setCpnLogo('');
+    refreshCpnLogoUploader();
+});
+
+document.getElementById('btnCpnBrandLogoUpload').addEventListener('click', async () => {
+    const id = document.getElementById('cpnBrandId').value;
+    if (!id) { toast('บันทึกแบรนด์ก่อนจึงจะอัปโหลดโลโก้ได้', 'warning'); return; }
+    const f = document.getElementById('cpnBrandLogoFile').files[0];
+    if (!f) { toast('เลือกไฟล์ก่อน', 'warning'); return; }
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+        // Raw fetch — api.post forces Content-Type: application/json, but
+        // FormData needs the browser to set its own multipart boundary.
+        const resp = await fetch(`${api_proj}/coupons/brands/${id}/logo`, {
+            method: 'POST', body: fd, credentials: 'include'
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) { toast(data?.message || 'อัปโหลดไม่สำเร็จ', 'danger'); return; }
+        setCpnLogo(data.logoUrl);
+        document.getElementById('cpnBrandLogoFile').value = '';
+        toast('อัปโหลดโลโก้แล้ว');
+        loadCouponBrands();
+    } catch (e) { toast(e.message, 'danger'); }
 });
 document.getElementById('btnCpnBrandCancel').addEventListener('click', () =>
     document.getElementById('cpnBrandEditor').style.display = 'none');
@@ -3200,7 +3240,8 @@ window.editCpnBrand = function (b) {
     document.getElementById('cpnBrandId').value      = b.id;
     document.getElementById('cpnBrandName').value    = b.name;
     document.getElementById('cpnBrandDisplay').value = b.displayName;
-    document.getElementById('cpnBrandLogo').value    = b.logoUrl || '';
+    setCpnLogo(b.logoUrl || '');
+    refreshCpnLogoUploader();
     document.getElementById('cpnBrandColor').value   = b.themeColor || '#0066cc';
     document.getElementById('cpnBrandBarcode').value = b.barcodeFormat || 'code128';
     document.getElementById('cpnBrandInstr').value   = b.redemptionInstructions || '';

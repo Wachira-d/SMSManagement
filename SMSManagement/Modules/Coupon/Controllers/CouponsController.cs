@@ -72,10 +72,13 @@ public sealed class CouponsController : ControllerBase
         var theme = string.IsNullOrWhiteSpace(req.ThemeColor) ? "#0066cc" : req.ThemeColor.Trim();
         if (!System.Text.RegularExpressions.Regex.IsMatch(theme, "^#[0-9A-Fa-f]{3,8}$"))
             return BadRequest(new { Message = "ThemeColor must be a hex colour, e.g. #0066cc." });
+        // Logo is either an uploaded file under /uploads/coupon-logos/ or an
+        // absolute http(s) URL.
         if (!string.IsNullOrWhiteSpace(req.LogoUrl)
+            && !req.LogoUrl.StartsWith("/uploads/coupon-logos/", StringComparison.Ordinal)
             && !(Uri.TryCreate(req.LogoUrl, UriKind.Absolute, out var logo)
                  && (logo.Scheme == Uri.UriSchemeHttp || logo.Scheme == Uri.UriSchemeHttps)))
-            return BadRequest(new { Message = "LogoUrl must be an absolute http(s) URL." });
+            return BadRequest(new { Message = "LogoUrl must be an uploaded logo or an absolute http(s) URL." });
 
         var name = req.Name.Trim().ToLowerInvariant();
         CouponBrand row;
@@ -106,6 +109,46 @@ public sealed class CouponsController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
         return Ok(new { row.Id, row.Name, row.DisplayName });
+    }
+
+    private static readonly HashSet<string> AllowedLogoExt =
+        new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".gif", ".webp" };
+
+    /// <summary>
+    /// Uploads a brand logo image. Stored under wwwroot/uploads/coupon-logos/
+    /// and served as a relative URL, so it works on any domain the redemption
+    /// page is reached through. SVG is intentionally rejected (script-in-SVG).
+    /// </summary>
+    [HttpPost("brands/{brandId:guid}/logo")]
+    [RequestSizeLimit(2 * 1024 * 1024)]
+    public async Task<IActionResult> UploadBrandLogo(
+        Guid projectId, Guid brandId, IFormFile file,
+        [FromServices] IWebHostEnvironment env, CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Admin, ct);
+
+        var row = await _db.CouponBrands
+            .FirstOrDefaultAsync(x => x.Id == brandId && x.ProjectId == projectId, ct);
+        if (row is null) return NotFound();
+
+        if (file is null || file.Length == 0)
+            return BadRequest(new { Message = "Empty file." });
+        if (file.Length > 2 * 1024 * 1024)
+            return BadRequest(new { Message = "File too large (max 2 MB)." });
+
+        var ext = Path.GetExtension(file.FileName);
+        if (!AllowedLogoExt.Contains(ext))
+            return BadRequest(new { Message = "Allowed image types: png, jpg, gif, webp." });
+
+        var dir = Path.Combine(env.WebRootPath, "uploads", "coupon-logos");
+        Directory.CreateDirectory(dir);
+        var fileName = $"{brandId:N}-{DateTimeOffset.UtcNow.Ticks}{ext.ToLowerInvariant()}";
+        await using (var fs = System.IO.File.Create(Path.Combine(dir, fileName)))
+            await file.CopyToAsync(fs, ct);
+
+        row.LogoUrl = $"/uploads/coupon-logos/{fileName}";
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { row.LogoUrl });
     }
 
     [HttpDelete("brands/{brandId:guid}")]

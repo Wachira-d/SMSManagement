@@ -369,3 +369,6 @@ dev-secrets.json
 
 # DataProtection key ring — must never be committed (encrypts auth cookies)
 dataprotection-keys/
+
+# Runtime file uploads (coupon logos etc.)
+SMSManagement/wwwroot/uploads/

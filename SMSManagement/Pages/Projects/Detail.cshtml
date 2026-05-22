@@ -1340,8 +1340,21 @@ Other SFTP keys: <code>host, port, username, remoteDirectory</code>, <code>retry
                                 <input id="cpnBrandName" class="form-control form-control-sm" placeholder="lotus" required /></div>
                             <div class="col-6"><label class="form-label small">Display name</label>
                                 <input id="cpnBrandDisplay" class="form-control form-control-sm" placeholder="Lotus's" required /></div>
-                            <div class="col-12"><label class="form-label small">Logo URL</label>
-                                <input id="cpnBrandLogo" class="form-control form-control-sm" /></div>
+                            <div class="col-12"><label class="form-label small">Logo</label>
+                                <div class="d-flex align-items-center gap-2">
+                                    <img id="cpnBrandLogoPreview" alt="logo"
+                                         style="height:40px;max-width:120px;object-fit:contain;display:none;border:1px solid #eee" />
+                                    <span id="cpnBrandLogoNone" class="small text-muted">ยังไม่มีโลโก้</span>
+                                    <input id="cpnBrandLogoFile" type="file"
+                                           accept="image/png,image/jpeg,image/gif,image/webp"
+                                           class="form-control form-control-sm" style="max-width:280px" />
+                                    <button id="btnCpnBrandLogoUpload" type="button"
+                                            class="btn btn-sm btn-outline-secondary">อัปโหลด</button>
+                                </div>
+                                <input id="cpnBrandLogo" type="hidden" />
+                                <div class="form-text" id="cpnBrandLogoHint">
+                                    บันทึกแบรนด์ก่อน จึงจะอัปโหลดโลโก้ได้ (png/jpg/gif/webp, ≤2 MB)
+                                </div></div>
                             <div class="col-4"><label class="form-label small">Theme colour</label>
                                 <input id="cpnBrandColor" type="color" class="form-control form-control-sm form-control-color" value="#0066cc" /></div>
                             <div class="col-8"><label class="form-label small">Barcode format</label>
