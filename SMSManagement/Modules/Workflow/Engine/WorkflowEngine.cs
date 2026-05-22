@@ -102,7 +102,11 @@ public sealed class WorkflowEngine : IWorkflowEngine
         var instance = await _db.WorkflowInstances.FindAsync([instanceId], ct);
         if (instance is null)
         {
-            _log.LogWarning("Signal {Signal} for unknown instance {Id}", signal, instanceId);
+            // A public shortlink can outlive its workflow instance (old link,
+            // cleared/reseeded data). The click simply has nothing to advance —
+            // expected, not a fault. Info-level so it doesn't fill ErrorLogs.
+            _log.LogInformation("Signal {Signal} for unknown instance {Id} — ignored.",
+                signal, instanceId);
             return;
         }
         if (IsTerminal(instance.State)) return;

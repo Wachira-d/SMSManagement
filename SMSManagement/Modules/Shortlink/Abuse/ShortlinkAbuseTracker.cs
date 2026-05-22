@@ -74,8 +74,12 @@ public sealed class ShortlinkAbuseTracker : IShortlinkAbuseTracker
         // byte[] equality with nullable DateTime + DateTimeOffset predicates.
         // Fetch up to 50 rows for this IP via the IpHash index, then sort
         // and filter client-side. Per-IP volume is tiny in practice.
+        // Order by Id (not BlockedAt) — SQLite can't ORDER BY a DateTimeOffset,
+        // and an explicit order is still needed to satisfy the Skip/Take rule.
+        // Per-IP volume is tiny, so the active row is picked client-side below.
         var rows = await _db.BlockedIps
             .Where(b => b.IpHash == ipHash)
+            .OrderByDescending(b => b.Id)
             .Take(50)
             .ToListAsync(ct);
 
@@ -103,8 +107,11 @@ public sealed class ShortlinkAbuseTracker : IShortlinkAbuseTracker
         // fetch up to 200 recent failures for this IP via the IpHash index,
         // then filter by window in memory. Threshold caps the loop short.
         var windowStart = now.AddMinutes(-_opts.WindowMinutes);
+        // Order by the autoincrement Id (newest-first, SQLite-safe — it can't
+        // ORDER BY a DateTimeOffset); the window filter is applied in memory.
         var recentForIp = await _db.IpAccessFailures
             .Where(f => f.IpHash == ipHash)
+            .OrderByDescending(f => f.Id)
             .Take(_opts.FailureThreshold * 10 + 50)
             .ToListAsync(ct);
         var count = recentForIp.Count(f => f.OccurredAt >= windowStart);
