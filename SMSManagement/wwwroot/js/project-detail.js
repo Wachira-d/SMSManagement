@@ -762,6 +762,7 @@ const EASY_TYPES = [
     { v: 'name',    t: '👤 ชื่อ' },
     { v: 'email',   t: '✉️ อีเมล' },
     { v: 'url',     t: '🔗 ลิงก์' },
+    { v: 'id',      t: '🆔 ไอดี/รหัสรายการ' },
     { v: 'other',   t: '📋 ข้อมูลอื่น' },
     { v: 'ignore',  t: '🚫 ไม่ใช้คอลัมน์นี้' },
 ];
@@ -1062,7 +1063,7 @@ document.getElementById('formMap').addEventListener('submit', async (ev) => {
     const btnApply = document.getElementById('btnMapApplyAll');
     if (!drop) return;
 
-    const CANONICALS = ['phone', 'message', 'url', 'name', 'email', 'custom'];
+    const CANONICALS = ['phone', 'message', 'url', 'name', 'email', 'id', 'custom'];
 
     pickLink.addEventListener('click', (e) => { e.preventDefault(); fileInp.click(); });
     drop.addEventListener('click', (e) => {

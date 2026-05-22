@@ -45,7 +45,7 @@ public sealed record PresetExpansion(
 public static class FieldPresetExpander
 {
     public static readonly IReadOnlyList<string> FieldTypes =
-        new[] { "phone", "message", "name", "email", "url", "other", "ignore" };
+        new[] { "phone", "message", "name", "email", "url", "id", "other", "ignore" };
 
     public static bool IsKnownType(string? fieldType) =>
         fieldType is not null && FieldTypes.Contains(fieldType, StringComparer.OrdinalIgnoreCase);
@@ -58,6 +58,7 @@ public static class FieldPresetExpander
         "name"    => "name",
         "email"   => "email",
         "url"     => "url",
+        "id"      => "id",
         _         => "custom",
     };
 
