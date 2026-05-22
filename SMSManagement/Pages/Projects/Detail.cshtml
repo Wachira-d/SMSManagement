@@ -1249,13 +1249,23 @@ Other SFTP keys: <code>host, port, username, remoteDirectory</code>, <code>retry
         <div class="row g-3">
             <div class="col-md-7">
                 <div class="card">
-                    <div class="card-header">Shortlinks</div>
+                    <div class="card-header d-flex align-items-center justify-content-between">
+                        <span>Shortlinks</span>
+                        <span class="d-flex gap-2">
+                            <button id="btnSlExport" class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-download"></i> Export CSV</button>
+                            <input id="slImportFile" type="file" accept=".csv,.txt" class="d-none" />
+                            <button id="btnSlImport" class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-upload"></i> Import</button>
+                        </span>
+                    </div>
                     <div class="table-responsive">
                         <table class="table table-sm mb-0">
-                            <thead><tr><th>Slug</th><th>Clicks</th><th>Expires</th><th>Disabled</th><th></th></tr></thead>
+                            <thead><tr><th>Shortlink</th><th>Clicks</th><th>Expires</th><th>Disabled</th><th></th></tr></thead>
                             <tbody id="slBody"><tr><td colspan="5" class="text-muted">Loading…</td></tr></tbody>
                         </table>
                     </div>
+                    <div id="slImportResult" class="small p-2"></div>
                 </div>
             </div>
             <div class="col-md-5">

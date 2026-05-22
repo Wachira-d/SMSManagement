@@ -2889,7 +2889,10 @@ async function loadShortlinks() {
         }
         body.innerHTML = rows.map(s => `
             <tr>
-                <td><code>${esc(s.slug)}</code></td>
+                <td>${s.fullUrl
+                    ? `<a href="${esc(s.fullUrl)}" target="_blank" rel="noopener"
+                          class="text-decoration-none">${esc(s.fullUrl)}</a>`
+                    : `<code>${esc(s.slug)}</code>`}</td>
                 <td>
                     ${s.clickCount}${s.maxClicks ? ' / ' + s.maxClicks : ''}
                     ${s.clickCount > 0
@@ -2905,6 +2908,36 @@ async function loadShortlinks() {
             </tr>`).join('');
     } catch (e) { toast(e.message, 'danger'); }
 }
+document.getElementById('btnSlExport').addEventListener('click', () => {
+    window.open(`${api_proj}/shortlinks/export.csv`, '_blank');
+});
+document.getElementById('btnSlImport').addEventListener('click', () =>
+    document.getElementById('slImportFile').click());
+document.getElementById('slImportFile').addEventListener('change', async (ev) => {
+    const f = ev.target.files[0];
+    if (!f) return;
+    const out = document.getElementById('slImportResult');
+    out.textContent = 'กำลังนำเข้า…';
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+        // Raw fetch — api.post forces application/json; FormData needs the
+        // browser to set the multipart boundary.
+        const resp = await fetch(`${api_proj}/shortlinks/import`, {
+            method: 'POST', body: fd, credentials: 'include'
+        });
+        const d = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+            out.innerHTML = `<span class="text-danger">${esc(d.message || 'นำเข้าไม่สำเร็จ')}</span>`;
+            return;
+        }
+        out.innerHTML = `<span class="text-success">นำเข้าสำเร็จ ${d.created} ลิงก์</span>`
+            + (d.failed ? ` <span class="text-danger">ล้มเหลว ${d.failed} (ดูสาเหตุในไฟล์)</span>` : '');
+        loadShortlinks();
+    } catch (e) { out.innerHTML = `<span class="text-danger">${esc(e.message)}</span>`; }
+    finally { ev.target.value = ''; }
+});
+
 window.disableSl = async function (id) {
     if (!confirm('Disable this shortlink?')) return;
     try {
