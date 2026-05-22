@@ -3375,7 +3375,7 @@ async function loadCouponInventory() {
         const rows = await api.get(`${api_proj}/coupons${qs}`);
         const body = document.getElementById('cpnInvBody');
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-3">No coupons.</td></tr>';
+            body.innerHTML = '<tr><td colspan="8" class="text-muted text-center py-3">No coupons.</td></tr>';
             return;
         }
         body.innerHTML = rows.map(c => {
@@ -3383,9 +3383,12 @@ async function loadCouponInventory() {
             const voidable = si === 0 || si === 1; // Available / Allocated
             return `<tr>
                 <td><code class="small">${esc(c.token)}</code></td>
+                <td class="small">${esc(c.recipient || '—')}</td>
                 <td><span class="badge bg-${CPN_STATUS_BG[si]||'secondary'}">${esc(CPN_STATUS[si]||c.status)}</span></td>
                 <td class="text-end">${Number(c.value).toLocaleString()}</td>
                 <td class="small">${c.allocatedAt ? fmtDate(c.allocatedAt) : '—'}</td>
+                <td class="small">${c.firstViewedAt
+                    ? '<span class="text-success">' + fmtDate(c.firstViewedAt) + '</span>' : '—'}</td>
                 <td class="small">${c.redeemedAt ? fmtDate(c.redeemedAt) : '—'}</td>
                 <td class="text-end">${voidable
                     ? `<button class="btn btn-link btn-sm p-0 text-danger" onclick="voidCoupon('${esc(c.id)}')">Void</button>`
@@ -3395,6 +3398,13 @@ async function loadCouponInventory() {
     } catch (e) { toast(e.message, 'danger'); }
 }
 document.getElementById('cpnInvStatus')?.addEventListener('change', loadCouponInventory);
+document.getElementById('btnCpnLogExport')?.addEventListener('click', () => {
+    if (!_cpnInvBatchId) { toast('เลือกชุดคูปองก่อน', 'warning'); return; }
+    const status = document.getElementById('cpnInvStatus').value;
+    const qs = `?batchId=${encodeURIComponent(_cpnInvBatchId)}`
+        + (status !== '' ? `&status=${status}` : '');
+    window.open(`${api_proj}/coupons/log/export.csv${qs}`, '_blank');
+});
 
 window.voidCoupon = async function (id) {
     if (!confirm('Void this coupon? It can no longer be allocated or redeemed.')) return;

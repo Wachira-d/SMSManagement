@@ -124,6 +124,19 @@ public sealed class CouponRedeemer : ICouponRedeemer
         // Case-sensitive guard (Token column may be on a CI collation).
         if (!string.Equals(row.c.Token, token, StringComparison.Ordinal)) return null;
 
+        // Stamp the "clicked" signal once — opening the redeem link is the
+        // recipient engaging with the coupon. Only the FIRST open is recorded.
+        if (row.c.FirstViewedAt is null)
+        {
+            var tracked = await _db.Coupons.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(c => c.Id == row.c.Id, ct);
+            if (tracked is { FirstViewedAt: null })
+            {
+                tracked.FirstViewedAt = DateTimeOffset.UtcNow;
+                await _db.SaveChangesAsync(ct);
+            }
+        }
+
         return ToView(row.c, row.br,
             includeRealCode: row.c.Status == CouponStatus.Redeemed);
     }

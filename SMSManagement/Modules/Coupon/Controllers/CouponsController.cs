@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -256,13 +257,19 @@ public sealed class CouponsController : ControllerBase
         if (status is CouponStatus s) q = q.Where(c => c.Status == s);
 
         // Token + status only — the real code stays encrypted server-side.
+        // Recipient (masked phone) is pulled from the coupon's workflow
+        // instance so the report shows who each coupon went to.
         var rows = await q
             .OrderByDescending(c => c.CreatedAt)
             .Take(cap)
             .Select(c => new
             {
                 c.Id, c.Token, c.Value, c.Status, c.ExpiresAt,
-                c.AllocatedAt, c.RedeemedAt, c.WorkflowInstanceId
+                c.AllocatedAt, c.FirstViewedAt, c.RedeemedAt, c.WorkflowInstanceId,
+                Recipient = _db.Set<SMSManagement.Modules.Workflow.Domain.WorkflowInstance>()
+                    .Where(w => w.Id == c.WorkflowInstanceId)
+                    .Select(w => w.MaskedPhone)
+                    .FirstOrDefault()
             })
             .ToListAsync(ct);
         return Ok(rows);
@@ -329,6 +336,64 @@ public sealed class CouponsController : ControllerBase
             },
             Batches = batchReports
         });
+    }
+
+    /// <summary>
+    /// Per-coupon activity log as CSV — for each coupon: when it was sent
+    /// (allocated to a recipient), when the redeem link was first clicked, and
+    /// whether/when it was redeemed. Capped at 10,000 rows.
+    /// </summary>
+    [HttpGet("log/export.csv")]
+    public async Task<IActionResult> ExportLog(
+        Guid projectId,
+        [FromQuery] Guid? batchId,
+        [FromQuery] CouponStatus? status,
+        CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
+
+        var q = _db.Coupons.AsNoTracking().Where(c => c.ProjectId == projectId);
+        if (batchId is Guid bid) q = q.Where(c => c.BatchId == bid);
+        if (status is CouponStatus s) q = q.Where(c => c.Status == s);
+
+        var rows = await q
+            .OrderByDescending(c => c.CreatedAt)
+            .Take(10000)
+            .Select(c => new
+            {
+                c.Token, c.Value, c.Status, c.ExpiresAt,
+                c.AllocatedAt, c.FirstViewedAt, c.RedeemedAt,
+                BatchName = _db.CouponBatches.Where(b => b.Id == c.BatchId)
+                    .Select(b => b.Name).FirstOrDefault(),
+                BrandName = _db.CouponBrands.Where(b => b.Id == c.BrandId)
+                    .Select(b => b.DisplayName).FirstOrDefault(),
+                Recipient = _db.Set<SMSManagement.Modules.Workflow.Domain.WorkflowInstance>()
+                    .Where(w => w.Id == c.WorkflowInstanceId)
+                    .Select(w => w.MaskedPhone).FirstOrDefault()
+            })
+            .ToListAsync(ct);
+
+        var sb = new StringBuilder();
+        sb.Append('﻿');   // UTF-8 BOM
+        sb.AppendLine("Token,Batch,Brand,Value,Recipient,Status,SentAt,ClickedAt,RedeemedAt,ExpiresAt");
+        foreach (var c in rows)
+            sb.AppendLine(string.Join(',', new[]
+            {
+                Csv(c.Token), Csv(c.BatchName), Csv(c.BrandName),
+                Csv(c.Value.ToString("0.##")), Csv(c.Recipient), Csv(c.Status.ToString()),
+                Csv(c.AllocatedAt?.ToString("u")), Csv(c.FirstViewedAt?.ToString("u")),
+                Csv(c.RedeemedAt?.ToString("u")), Csv(c.ExpiresAt?.ToString("u"))
+            }));
+        return File(Encoding.UTF8.GetBytes(sb.ToString()),
+            "text/csv", $"coupon-log-{projectId:N}.csv");
+    }
+
+    private static string Csv(string? v)
+    {
+        v ??= string.Empty;
+        return v.Contains(',') || v.Contains('"') || v.Contains('\n') || v.Contains('\r')
+            ? "\"" + v.Replace("\"", "\"\"") + "\""
+            : v;
     }
 
     /// <summary>Void an unredeemed coupon — terminal, can't be allocated/redeemed.</summary>

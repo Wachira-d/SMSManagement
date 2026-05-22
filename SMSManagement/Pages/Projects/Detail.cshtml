@@ -1437,19 +1437,24 @@ Other SFTP keys: <code>host, port, username, remoteDirectory</code>, <code>retry
                 <div id="cpnInventoryCard" class="card mt-2" style="display:none">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>Coupons — <span id="cpnInvBatchName"></span></span>
-                        <select id="cpnInvStatus" class="form-select form-select-sm" style="width:auto">
-                            <option value="">All statuses</option>
-                            <option value="0">Available</option>
-                            <option value="1">Allocated</option>
-                            <option value="2">Redeemed</option>
-                            <option value="3">Expired</option>
-                            <option value="4">Void</option>
-                        </select>
+                        <span class="d-flex gap-2">
+                            <select id="cpnInvStatus" class="form-select form-select-sm" style="width:auto">
+                                <option value="">All statuses</option>
+                                <option value="0">Available</option>
+                                <option value="1">Allocated</option>
+                                <option value="2">Redeemed</option>
+                                <option value="3">Expired</option>
+                                <option value="4">Void</option>
+                            </select>
+                            <button id="btnCpnLogExport" class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-download"></i> Export log</button>
+                        </span>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-sm mb-0">
-                            <thead><tr><th>Token</th><th>Status</th><th class="text-end">Value</th>
-                                <th>Allocated</th><th>Redeemed</th><th></th></tr></thead>
+                            <thead><tr><th>Token</th><th>Recipient</th><th>Status</th>
+                                <th class="text-end">Value</th>
+                                <th>Sent</th><th>Clicked</th><th>Redeemed</th><th></th></tr></thead>
                             <tbody id="cpnInvBody"></tbody>
                         </table>
                     </div>

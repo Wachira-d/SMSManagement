@@ -108,6 +108,11 @@ public sealed class Coupon
     public Guid? WorkflowInstanceId { get; set; }
 
     public DateTimeOffset? AllocatedAt { get; set; }
+
+    /// <summary>When the recipient first opened the coupon redeem link — the
+    /// "clicked" signal. Null = the link was never opened.</summary>
+    public DateTimeOffset? FirstViewedAt { get; set; }
+
     public DateTimeOffset? RedeemedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
