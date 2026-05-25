@@ -22,13 +22,16 @@ public sealed class IngestionBatchNotifier : IIngestionBatchNotifier
 {
     private readonly AppDbContext _db;
     private readonly IEmailSender _email;
+    private readonly IRoundReportService _report;
     private readonly ILogger<IngestionBatchNotifier> _log;
 
     public IngestionBatchNotifier(AppDbContext db, IEmailSender email,
+        IRoundReportService report,
         ILogger<IngestionBatchNotifier> log)
     {
         _db = db;
         _email = email;
+        _report = report;
         _log = log;
     }
 
@@ -75,7 +78,27 @@ public sealed class IngestionBatchNotifier : IIngestionBatchNotifier
 
         var (subject, html, text) = Render(prefix, project.Name, batch, category);
 
-        await _email.SendAsync(new EmailMessage(recipients, subject, html, text), ct);
+        // Attach the per-recipient round report so operators can see who got
+        // enqueued without leaving their inbox. At this point SMS may still
+        // be Queued/Sending — the later round-summary email re-sends the same
+        // report once every SMS has settled (Delivered/Failed/...).
+        EmailAttachment[]? attachments = null;
+        try
+        {
+            var report = await _report.BuildAsync(batch.Id, ct);
+            if (report is not null && report.Recipients > 0)
+                attachments = new[] { new EmailAttachment(
+                    $"ingestion-{batch.Id:N}.csv", "text/csv", report.Csv) };
+        }
+        catch (Exception ex)
+        {
+            // Reports must never block the alert — log and send without it.
+            _log.LogWarning(ex,
+                "Could not attach ingestion report for batch {BatchId}.", batchId);
+        }
+
+        await _email.SendAsync(
+            new EmailMessage(recipients, subject, html, text, attachments), ct);
     }
 
     public static string[] ParseRecipients(string? csv) =>

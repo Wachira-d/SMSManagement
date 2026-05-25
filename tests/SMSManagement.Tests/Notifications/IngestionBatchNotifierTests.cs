@@ -70,8 +70,14 @@ public sealed class IngestionBatchNotifierTests
         return (project.Id, batch.Id);
     }
 
+    private sealed class StubReport : IRoundReportService
+    {
+        public Task<RoundReport?> BuildAsync(Guid batchId, CancellationToken ct = default)
+            => Task.FromResult<RoundReport?>(null);
+    }
+
     private static IngestionBatchNotifier Build(AppDbContext db, StubEmail email)
-        => new(db, email, NullLogger<IngestionBatchNotifier>.Instance);
+        => new(db, email, new StubReport(), NullLogger<IngestionBatchNotifier>.Instance);
 
     [Fact]
     public async Task Success_batch_sent_when_notify_on_success_is_true()
