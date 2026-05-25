@@ -343,7 +343,8 @@ public sealed class WorkflowEngine : IWorkflowEngine
                 var body = Render(step.Template ?? "{{message}}", contextual);
 
                 // Auto-substitute long URLs with shortlinks
-                body = await ReplaceUrlsWithShortlinksAsync(body, instance, ct);
+                var recipientPhone = payload.GetValueOrDefault("phone");
+                body = await ReplaceUrlsWithShortlinksAsync(body, instance, recipientPhone, ct);
 
                 await _sms.EnqueueAsync(new SmsRequest(
                     ProjectId: await ProjectIdForAsync(instance.DefinitionId, ct),
@@ -457,7 +458,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
     }
 
     private async Task<string> ReplaceUrlsWithShortlinksAsync(
-        string body, WorkflowInstance instance, CancellationToken ct)
+        string body, WorkflowInstance instance, string? recipientPhone, CancellationToken ct)
     {
         // Project-level toggle + per-project shortlink base URL. When
         // ShortlinkEnabled = false, leave URLs as their original form
@@ -520,11 +521,13 @@ public sealed class WorkflowEngine : IWorkflowEngine
                 continue;
             }
 
-            // Reuse the instance's existing shortlink for this URL if there is
-            // one — a 2nd/3rd reminder pointing at the same URL must carry the
-            // SAME shortlink, not a freshly-minted slug each round.
+            // Reuse the existing shortlink for this URL if there is one — a
+            // 2nd/3rd reminder pointing at the same URL must carry the SAME
+            // slug, whether the reminder is a self-loop inside one workflow
+            // run or a fresh ingestion of the same phone (new instance, same
+            // recipient — looked up via the salted phone hash).
             var slug = await _shortlinks.GetOrCreateForInstanceAsync(
-                projectId, url, instance.Id, TimeSpan.FromDays(60), ct);
+                projectId, url, instance.Id, recipientPhone, TimeSpan.FromDays(60), ct);
             replacements[token] = $"{baseUrl}/{slug}{trail}";
             shortened++;
         }

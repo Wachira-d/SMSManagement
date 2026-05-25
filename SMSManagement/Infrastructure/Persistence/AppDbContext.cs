@@ -301,6 +301,11 @@ public sealed class AppDbContext : DbContext
             //   with "no such collation sequence" at runtime.
             e.Property(x => x.Slug).HasMaxLength(64);
             e.HasIndex(x => x.ProjectId);
+            // Cross-instance reuse lookup: when a reminder file re-sends to a
+            // phone the project already minted a shortlink for, look it up by
+            // (ProjectId, RecipientPhoneHash) and reuse the slug.
+            e.HasIndex(x => new { x.ProjectId, x.RecipientPhoneHash });
+            e.Property(x => x.RecipientPhoneHash).HasMaxLength(32);
             e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
                 .OnDelete(DeleteBehavior.Restrict);
             e.HasOne<WorkflowInstance>().WithMany().HasForeignKey(x => x.WorkflowInstanceId)

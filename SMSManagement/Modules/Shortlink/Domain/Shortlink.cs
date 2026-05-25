@@ -17,6 +17,13 @@ public sealed class Shortlink
     public int? MaxClicks { get; set; }
     public int ClickCount { get; set; }
     public bool Disabled { get; set; }
+
+    /// <summary>HMAC-SHA256 of the recipient phone, salted with the shortlink
+    /// IP-hash salt. Lets a reminder send to the same phone+URL — even when
+    /// the operator uploads a fresh file (new WorkflowInstance) — reuse the
+    /// original slug instead of minting a new one. Null on shortlinks created
+    /// outside a workflow (operator API, bulk import).</summary>
+    public byte[]? RecipientPhoneHash { get; set; }
 }
 
 public sealed class ShortlinkClick

@@ -105,7 +105,7 @@ public sealed class ShortlinksController : ControllerBase
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Member, ct);
         await _features.EnsureAsync(projectId, ProjectFeature.Shortlink, ct);
         var slug = await _svc.CreateAsync(projectId, req.TargetUrl,
-            workflowInstanceId: null, req.Lifetime, req.MaxClicks, ct);
+            workflowInstanceId: null, req.Lifetime, req.MaxClicks, ct: ct);
         return Ok(new { Slug = slug });
     }
 
@@ -198,7 +198,7 @@ public sealed class ShortlinksController : ControllerBase
 
             try
             {
-                var slug = await _svc.CreateAsync(projectId, url, null, lifetime, maxClicks, ct);
+                var slug = await _svc.CreateAsync(projectId, url, null, lifetime, maxClicks, ct: ct);
                 created++;
                 items.Add(new ImportItem(lineNo, url, slug, null, true));
             }

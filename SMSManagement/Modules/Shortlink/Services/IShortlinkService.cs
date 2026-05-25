@@ -8,19 +8,26 @@ public interface IShortlinkService
         Guid? workflowInstanceId,
         TimeSpan? lifetime,
         int? maxClicks,
+        string? recipientPhone = null,
         CancellationToken ct = default);
 
     /// <summary>
-    /// Returns the slug of an existing, still-usable shortlink for the same
-    /// (<paramref name="workflowInstanceId"/>, <paramref name="targetUrl"/>)
-    /// pair, or creates one. A reminder re-send pointing at the same URL
-    /// therefore carries the SAME shortlink every round instead of minting a
-    /// new slug each time.
+    /// Returns the slug of an existing, still-usable shortlink for this
+    /// recipient + target URL, or creates one. Reuse happens at two levels so
+    /// every reminder for the same (recipient, URL) carries the SAME slug:
+    /// (1) same <paramref name="workflowInstanceId"/> — covers self-loop
+    ///     reminders inside a single workflow run;
+    /// (2) same project + <paramref name="recipientPhone"/> — covers
+    ///     cross-instance reminders where the operator uploads a fresh file
+    ///     and a brand-new WorkflowInstance is created for the same phone.
+    /// On a cross-instance reuse the existing row's WorkflowInstanceId is
+    /// updated to the new instance so a click signals the active reminder.
     /// </summary>
     Task<string> GetOrCreateForInstanceAsync(
         Guid projectId,
         string targetUrl,
         Guid workflowInstanceId,
+        string? recipientPhone,
         TimeSpan? lifetime,
         CancellationToken ct = default);
 

@@ -96,6 +96,7 @@ public sealed class ShortlinkService : IShortlinkService
         Guid? workflowInstanceId,
         TimeSpan? lifetime,
         int? maxClicks,
+        string? recipientPhone = null,
         CancellationToken ct = default)
     {
         if (!Uri.TryCreate(targetUrl, UriKind.Absolute, out var uri)
@@ -125,6 +126,8 @@ public sealed class ShortlinkService : IShortlinkService
             ? DefaultSlugAlphabet
             : pcfg.ShortlinkAlphabet;
 
+        var phoneHash = HashPhoneOrNull(recipientPhone);
+
         // Collision-resistant slug with a small retry budget. Per-project
         // alphabet means two projects could in theory mint the same slug;
         // the UNIQUE index on Slug is the absolute guarantee — collisions
@@ -141,7 +144,8 @@ public sealed class ShortlinkService : IShortlinkService
                 Slug = slug,
                 EncryptedTargetUrl = _crypto.Encrypt(targetUrl),
                 ExpiresAt = lifetime is { } ttl ? _clock.GetUtcNow().Add(ttl) : null,
-                MaxClicks = maxClicks
+                MaxClicks = maxClicks,
+                RecipientPhoneHash = phoneHash
             };
             _db.Shortlinks.Add(link);
             try
@@ -159,32 +163,80 @@ public sealed class ShortlinkService : IShortlinkService
 
     public async Task<string> GetOrCreateForInstanceAsync(
         Guid projectId, string targetUrl, Guid workflowInstanceId,
-        TimeSpan? lifetime, CancellationToken ct = default)
+        string? recipientPhone, TimeSpan? lifetime, CancellationToken ct = default)
     {
         var now = _clock.GetUtcNow();
 
-        // Reuse a shortlink already minted for this instance that targets the
-        // same URL and is still usable, so a reminder re-send carries the same
-        // link every round. IgnoreQueryFilters: the engine runs system-context
-        // with no project membership.
-        var existing = await _db.Shortlinks
+        // (1) In-instance reuse — covers self-loop reminders within a single
+        // workflow run. IgnoreQueryFilters: the engine runs system-context with
+        // no project membership.
+        var sameInstance = await _db.Shortlinks
             .IgnoreQueryFilters()
             .Where(s => s.WorkflowInstanceId == workflowInstanceId && !s.Disabled)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        foreach (var s in existing)
+        foreach (var s in sameInstance)
         {
             if (s.ExpiresAt is { } exp && exp <= now) continue;
-            string stored;
-            try { stored = _crypto.Decrypt(s.EncryptedTargetUrl); }
-            catch { continue; }
-            if (string.Equals(stored, targetUrl, StringComparison.Ordinal))
+            if (TargetMatches(s.EncryptedTargetUrl, targetUrl))
                 return s.Slug;
         }
 
-        return await CreateAsync(projectId, targetUrl, workflowInstanceId, lifetime, null, ct)
-            .ConfigureAwait(false);
+        // (2) Cross-instance reuse by (project, phone). When the operator
+        // uploads a reminder file the row gets a fresh WorkflowInstance, but
+        // the same recipient + same URL must still resolve to the SAME slug.
+        // Repoint the row at the new instance so a click signals the active
+        // reminder rather than the stale prior run.
+        var phoneHash = HashPhoneOrNull(recipientPhone);
+        if (phoneHash is not null)
+        {
+            var candidates = await _db.Shortlinks
+                .IgnoreQueryFilters()
+                .Where(s => s.ProjectId == projectId
+                         && s.RecipientPhoneHash == phoneHash
+                         && !s.Disabled)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            foreach (var s in candidates)
+            {
+                if (s.ExpiresAt is { } exp && exp <= now) continue;
+                if (!TargetMatches(s.EncryptedTargetUrl, targetUrl)) continue;
+                if (s.WorkflowInstanceId != workflowInstanceId)
+                {
+                    s.WorkflowInstanceId = workflowInstanceId;
+                    await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+                }
+                return s.Slug;
+            }
+        }
+
+        return await CreateAsync(projectId, targetUrl, workflowInstanceId,
+            lifetime, null, recipientPhone, ct).ConfigureAwait(false);
+    }
+
+    private bool TargetMatches(byte[] encrypted, string targetUrl)
+    {
+        try
+        {
+            return string.Equals(_crypto.Decrypt(encrypted), targetUrl, StringComparison.Ordinal);
+        }
+        catch { return false; }
+    }
+
+    /// <summary>HMAC-SHA256 of the digit-only phone using <see cref="IpSalt"/>.
+    /// Returns null when no phone is given so manual / API shortlinks stay
+    /// unlinked from any recipient.</summary>
+    private byte[]? HashPhoneOrNull(string? phone)
+    {
+        if (string.IsNullOrWhiteSpace(phone)) return null;
+        Span<char> digits = stackalloc char[phone.Length];
+        var n = 0;
+        foreach (var c in phone) if (c >= '0' && c <= '9') digits[n++] = c;
+        if (n == 0) return null;
+        var bytes = Encoding.UTF8.GetBytes(digits[..n].ToString());
+        return HMACSHA256.HashData(IpSalt, bytes);
     }
 
     public async Task<ResolveResult?> ResolveAndRecordAsync(
