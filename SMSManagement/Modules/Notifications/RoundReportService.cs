@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Core.Security;
+using SMSManagement.Modules.Core.Time;
 using SMSManagement.Modules.Shortlink.Services;
 using SMSManagement.Modules.Sms.Domain;
 using SMSManagement.Modules.Workflow.Domain;
@@ -189,13 +190,13 @@ public sealed class RoundReportService : IRoundReportService
             cells.Add(Csv(r.State.ToString()));
             cells.Add(Csv(r.SmsCount.ToString()));
             cells.Add(Csv(r.SmsStatus?.ToString()));
-            // SentAt is the original UTC combined timestamp; SentDate/SentTime
-            // are split from the same value (UTC, no timezone shift) for
-            // spreadsheet pivots that need them as separate columns.
-            cells.Add(Csv(r.SentAt?.ToString("u")));
-            cells.Add(Csv(r.SentAt?.ToString("yyyy-MM-dd")));
-            cells.Add(Csv(r.SentAt?.ToString("HH:mm:ss")));
-            cells.Add(Csv(r.DeliveredAt?.ToString("u")));
+            // All timestamps are formatted in the operator's local timezone
+            // (Asia/Bangkok). SentDate/SentTime are split from the same local
+            // value for spreadsheet pivots that need them as separate columns.
+            cells.Add(Csv(LocalTime.Format(r.SentAt)));
+            cells.Add(Csv(LocalTime.Format(r.SentAt, "yyyy-MM-dd")));
+            cells.Add(Csv(LocalTime.Format(r.SentAt, "HH:mm:ss")));
+            cells.Add(Csv(LocalTime.Format(r.DeliveredAt)));
             cells.Add(Csv(r.Attempts.ToString()));
             cells.Add(Csv(r.Provider));
             cells.Add(Csv(r.SenderId));
@@ -207,7 +208,7 @@ public sealed class RoundReportService : IRoundReportService
             cells.Add(Csv(r.ShortlinkTarget));
             cells.Add(Csv(r.ClickCount > 0 ? "yes" : "no"));
             cells.Add(Csv(r.ClickCount.ToString()));
-            cells.Add(Csv(r.FirstClickedAt?.ToString("u")));
+            cells.Add(Csv(LocalTime.Format(r.FirstClickedAt)));
             sb.AppendLine(string.Join(',', cells));
         }
         return Encoding.UTF8.GetBytes(sb.ToString());

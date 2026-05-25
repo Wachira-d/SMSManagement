@@ -6,6 +6,7 @@ using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Core.Logging;
 using SMSManagement.Modules.Coupon.Domain;
 using SMSManagement.Modules.Coupon.Services;
+using SMSManagement.Modules.Core.Time;
 using SMSManagement.Modules.Identity.Domain;
 using SMSManagement.Modules.Identity.Services;
 
@@ -381,8 +382,8 @@ public sealed class CouponsController : ControllerBase
             {
                 Csv(c.Token), Csv(c.BatchName), Csv(c.BrandName),
                 Csv(c.Value.ToString("0.##")), Csv(c.Recipient), Csv(c.Status.ToString()),
-                Csv(c.AllocatedAt?.ToString("u")), Csv(c.FirstViewedAt?.ToString("u")),
-                Csv(c.RedeemedAt?.ToString("u")), Csv(c.ExpiresAt?.ToString("u"))
+                Csv(LocalTime.Format(c.AllocatedAt)), Csv(LocalTime.Format(c.FirstViewedAt)),
+                Csv(LocalTime.Format(c.RedeemedAt)),  Csv(LocalTime.Format(c.ExpiresAt))
             }));
         return File(Encoding.UTF8.GetBytes(sb.ToString()),
             "text/csv", $"coupon-log-{projectId:N}.csv");

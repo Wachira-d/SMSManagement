@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Core.Security;
+using SMSManagement.Modules.Core.Time;
 using SMSManagement.Modules.Identity.Domain;
 using SMSManagement.Modules.Identity.Services;
 using SMSManagement.Modules.Shortlink.Services;
@@ -142,7 +143,7 @@ public sealed class ShortlinksController : ControllerBase
             sb.AppendLine(string.Join(',', new[]
             {
                 Csv(s.Slug), Csv(full), Csv(target),
-                Csv(s.CreatedAt.ToString("u")), Csv(s.ExpiresAt?.ToString("u")),
+                Csv(LocalTime.Format(s.CreatedAt)), Csv(LocalTime.Format(s.ExpiresAt)),
                 Csv(s.MaxClicks?.ToString()), Csv(s.ClickCount.ToString()),
                 Csv(s.Disabled ? "yes" : "no")
             }));

@@ -2,6 +2,7 @@
 @model SMSManagement.Pages.RedeemModel
 @using SMSManagement.Modules.Coupon.Domain
 @using SMSManagement.Modules.Coupon.Services
+@using SMSManagement.Modules.Core.Time
 @{
     Layout = null;
     var c = Model.Coupon;
@@ -77,7 +78,7 @@
             @* Available / Allocated — show the redeem button. *@
             @if (c.ExpiresAt is { } exp)
             {
-                <p class="text-muted small mt-2">ใช้ได้ถึง @exp.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</p>
+                <p class="text-muted small mt-2">ใช้ได้ถึง @LocalTime.Format(exp, "dd/MM/yyyy HH:mm")</p>
             }
             @if (!string.IsNullOrWhiteSpace(c.BrandInstructions))
             {

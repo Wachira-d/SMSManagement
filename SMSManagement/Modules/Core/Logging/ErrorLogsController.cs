@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SMSManagement.Infrastructure.Persistence;
+using SMSManagement.Modules.Core.Time;
 
 namespace SMSManagement.Modules.Core.Logging;
 
@@ -69,7 +70,7 @@ public sealed class ErrorLogsController : ControllerBase
         foreach (var e in rows)
             sb.AppendLine(string.Join(',', new[]
             {
-                Csv(e.CreatedAt.ToString("u")), Csv(e.Level), Csv(e.SourceContext),
+                Csv(LocalTime.Format(e.CreatedAt)), Csv(e.Level), Csv(e.SourceContext),
                 Csv(e.Message), Csv(e.ExceptionType), Csv(e.ExceptionMessage),
                 Csv(e.RequestMethod), Csv(e.RequestPath), Csv(e.CorrelationId),
                 Csv(e.UserId?.ToString())

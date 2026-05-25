@@ -1,4 +1,5 @@
 @page "/admin/blocked-ips"
+@using SMSManagement.Modules.Core.Time
 @model SMSManagement.Pages.Admin.BlockedIpsModel
 @inject SMSManagement.Modules.Core.Localization.Localizer Loc
 @{ ViewData["Title"] = Loc.Get("admin.blockedips.title"); }
@@ -57,9 +58,9 @@
             <td><code>@row.FingerprintHex</code></td>
             <td>@row.Reason</td>
             <td style="text-align:right">@row.FailureCount</td>
-            <td>@row.FirstFailureAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
-            <td>@row.LastFailureAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
-            <td>@row.BlockedUntil.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+            <td>@LocalTime.Format(row.FirstFailureAt, "yyyy-MM-dd HH:mm")</td>
+            <td>@LocalTime.Format(row.LastFailureAt, "yyyy-MM-dd HH:mm")</td>
+            <td>@LocalTime.Format(row.BlockedUntil, "yyyy-MM-dd HH:mm")</td>
             <td>@(active ? "Active" : (row.UnblockedAt.HasValue ? "Unblocked" : "Expired"))</td>
             <td>
                 @if (active)

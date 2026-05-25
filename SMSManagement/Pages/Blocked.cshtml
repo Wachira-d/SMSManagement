@@ -1,4 +1,5 @@
 @page "/blocked"
+@using SMSManagement.Modules.Core.Time
 @model SMSManagement.Pages.BlockedModel
 @{ ViewData["Title"] = "Access blocked"; }
 <div style="max-width:560px;margin:64px auto;font-family:system-ui,sans-serif;line-height:1.5">
@@ -8,7 +9,7 @@
     @if (Model.BlockedUntil.HasValue)
     {
         <p>The block will lift automatically at
-           <strong>@Model.BlockedUntil.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz")</strong>.</p>
+           <strong>@LocalTime.Format(Model.BlockedUntil.Value, "yyyy-MM-dd HH:mm:ss")</strong> (Bangkok).</p>
     }
     else
     {
