@@ -35,6 +35,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<ColumnMapping> ColumnMappings => Set<ColumnMapping>();
     public DbSet<IngestionBatch> IngestionBatches => Set<IngestionBatch>();
+    public DbSet<SourcePollLog> SourcePollLogs => Set<SourcePollLog>();
     public DbSet<IngestionSourceSettings> IngestionSourceSettings => Set<IngestionSourceSettings>();
     public DbSet<CanonicalFieldRule> CanonicalFieldRules => Set<CanonicalFieldRule>();
 
@@ -130,6 +131,17 @@ public sealed class AppDbContext : DbContext
             e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
                 .OnDelete(DeleteBehavior.Restrict);
             e.HasQueryFilter(x => Projects.Any(p => p.Id == x.ProjectId));
+        });
+
+        b.Entity<SourcePollLog>(e =>
+        {
+            e.HasIndex(x => new { x.ProjectId, x.PolledAt });
+            e.HasIndex(x => x.SourceId);
+            e.Property(x => x.Outcome).HasMaxLength(32);
+            e.Property(x => x.FileName).HasMaxLength(256);
+            e.Property(x => x.Message).HasMaxLength(1024);
+            // Anonymous Hangfire job context writes these — no project query
+            // filter, the controller scopes by projectId itself.
         });
 
         b.Entity<IngestionSourceSettings>(e =>

@@ -293,6 +293,40 @@ public sealed class IngestionBatchesController : ControllerBase
     }
 
     /// <summary>
+    /// Recent source-poll outcomes for this project — every scheduled or
+    /// manual poll writes one row per file (or one "NoFiles" row when nothing
+    /// matched, or a "ConnectError" when the source was unreachable). Lets an
+    /// operator see in the Pipeline tab that a poll actually ran, instead of
+    /// trawling logs.
+    /// </summary>
+    [HttpGet("polls")]
+    public async Task<IActionResult> Polls(
+        Guid projectId,
+        [FromQuery] int take = 100,
+        CancellationToken ct = default)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
+        take = Math.Clamp(take, 1, 500);
+
+        var rows = await (
+            from p in _db.SourcePollLogs.AsNoTracking()
+            where p.ProjectId == projectId
+            join s in _db.IngestionSourceSettings.AsNoTracking().IgnoreQueryFilters()
+                on p.SourceId equals s.Id into sg
+            from s in sg.DefaultIfEmpty()
+            orderby p.Id descending
+            select new
+            {
+                p.Id, p.SourceId, p.PolledAt, p.Outcome,
+                p.FileName, p.BatchId, p.Message,
+                SourceType = s != null ? s.SourceType : null
+            })
+            .Take(take)
+            .ToListAsync(ct);
+        return Ok(rows);
+    }
+
+    /// <summary>
     /// On-demand per-recipient CSV report for one round — the same report
     /// attached to the round-summary email (mapped source columns + send /
     /// delivery status + shortlink click activity).

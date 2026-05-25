@@ -105,7 +105,7 @@ document.querySelectorAll('[data-bs-toggle="tab"]').forEach(el => {
     el.addEventListener('shown.bs.tab', (ev) => {
         const target = ev.target.getAttribute('href');
         switch (target) {
-            case '#tab-pipeline':   loadPipeline(); loadPipelineRuns(); break;
+            case '#tab-pipeline':   loadPipeline(); loadPipelineRuns(); loadPipelinePolls(); break;
             case '#tab-members':    if (!loaded.members)    { loaded.members    = true; loadMembers();    } break;
             case '#tab-mappings':   if (!loaded.mappings)   { loaded.mappings   = true; loadMapScope(); loadMappings(); loadRules(); } break;
             case '#tab-sources':    if (!loaded.sources)    { loaded.sources    = true; loadSources(); loadBatches(); } break;
@@ -634,7 +634,51 @@ async function loadPipelineRuns() {
 document.getElementById('btnPipelineRefresh')?.addEventListener('click', () => {
     loadPipeline();
     loadPipelineRuns();
+    loadPipelinePolls();
 });
+
+// "Source polls" timeline — every scheduled / manual poll writes one row per
+// outcome (NoFiles / Ingested / SkippedDuplicate / ConnectError / IngestFailed
+// / MoveFailed), so an operator can confirm the schedule actually ran.
+const POLL_OUTCOME_COLOR = {
+    Ingested: 'success', SkippedDuplicate: 'secondary',
+    NoFiles: 'info', ConnectError: 'danger',
+    IngestFailed: 'danger', MoveFailed: 'warning'
+};
+async function loadPipelinePolls() {
+    const el = document.getElementById('pipelinePolls');
+    if (!el) return;
+    el.innerHTML = '<span class="text-muted small">กำลังโหลด…</span>';
+    try {
+        const rows = await api.get(`${api_proj}/ingestion-batches/polls?take=100`);
+        if (!rows.length) {
+            el.innerHTML = '<div class="text-muted small">ยังไม่มี poll log — '
+                + 'รอ poll รอบแรก หรือกด "Run now" ที่หน้า Sources</div>';
+            return;
+        }
+        let html = '<div class="table-responsive"><table class="table table-sm small align-middle">'
+            + '<thead><tr><th>เวลา</th><th>แหล่ง</th><th>ไฟล์</th><th>ผล</th><th>หมายเหตุ</th></tr></thead><tbody>';
+        rows.forEach(r => {
+            const c = POLL_OUTCOME_COLOR[r.outcome] || 'secondary';
+            const sourceLabel = r.sourceType
+                ? `${esc(r.sourceType)} <span class="text-muted">${esc(r.sourceId.slice(0,8))}</span>`
+                : `<code class="small">${esc(r.sourceId.slice(0,8))}</code>`;
+            html += `<tr>
+                <td class="text-nowrap">${fmtDate(r.polledAt)}</td>
+                <td>${sourceLabel}</td>
+                <td>${esc(r.fileName || '—')}</td>
+                <td><span class="badge bg-${c}">${esc(r.outcome)}</span>${r.batchId
+                    ? ` <a href="#" onclick="showRunDetail('${esc(r.batchId)}');return false;"
+                          class="small ms-1">ดู run</a>` : ''}</td>
+                <td class="small text-muted">${esc(r.message || '')}</td>
+            </tr>`;
+        });
+        html += '</tbody></table></div>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = `<span class="text-danger small">${esc(e.message)}</span>`;
+    }
+}
 
 // ---- Run detail drill-down: ingestion → workflow timeline → SMS ----
 const WF_STATE_COLOR = {

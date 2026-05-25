@@ -146,6 +146,8 @@ public sealed class IngestionPoller : IIngestionPoller
                     _log.LogError(ex,
                         "SFTP connect failed for source {SourceId} after {Attempts} attempt(s).",
                         s.Id, attempts);
+                    await LogPollAsync(s.ProjectId, s.Id, "ConnectError", null, null,
+                        $"{ex.GetType().Name}: {ex.Message}", ct);
                     return;
                 }
                 var delaySec = 3 * attempt;
@@ -161,6 +163,9 @@ public sealed class IngestionPoller : IIngestionPoller
             var files = client.ListDirectory(cfg.RemoteDirectory)
                 .Where(f => !f.IsDirectory && Utilities.GlobMatcher.IsMatch(f.Name, cfg.FilePattern))
                 .ToList();
+
+            if (files.Count == 0)
+                await LogPollAsync(s.ProjectId, s.Id, "NoFiles", null, null, null, ct);
 
             foreach (var file in files)
             {
@@ -178,10 +183,12 @@ public sealed class IngestionPoller : IIngestionPoller
                 // /error instead of seeing them re-polled endlessly.
                 var ingestOk = false;
                 string? failureReason = null;
+                IngestionOutcome? successOutcome = null;
                 try
                 {
                     var outcome = await _pipeline.IngestFileAsync(
                         s.ProjectId, s.Id, temp, forceReingest: false, ct);
+                    successOutcome = outcome;
                     ingestOk = true;
                     _log.LogInformation(
                         "SFTP poll {Source} processed {File} batch={Batch} result={Result}",
@@ -210,9 +217,11 @@ public sealed class IngestionPoller : IIngestionPoller
                 var stem  = Path.GetFileNameWithoutExtension(file.Name);
                 var ext   = Path.GetExtension(file.Name);
                 var dest  = $"{destDir}/{stem}.{stamp}{ext}";
+                var moveOk = false;
                 try
                 {
                     client.RenameFile(file.FullName, dest);
+                    moveOk = true;
                     _log.LogInformation("SFTP poll {Source}: moved {File} → {Dest}",
                         s.Id, file.Name, dest);
 
@@ -250,12 +259,49 @@ public sealed class IngestionPoller : IIngestionPoller
                         + "check SFTP write/rename permissions.",
                         s.Id, file.Name, dest);
                 }
+
+                // One SourcePollLog row per file with its FINAL outcome — what
+                // the operator sees in the Pipeline "Recent polls" timeline.
+                var finalOutcome = !ingestOk ? "IngestFailed"
+                                 : !moveOk  ? "MoveFailed"
+                                 : successOutcome?.Result == IngestionResult.SkippedDuplicate
+                                     ? "SkippedDuplicate" : "Ingested";
+                var msg = failureReason ?? (moveOk ? null : "Ingest OK but archive move failed.");
+                await LogPollAsync(s.ProjectId, s.Id, finalOutcome, file.Name,
+                    successOutcome?.BatchId, msg, ct);
             }
         }
         finally
         {
             client.Disconnect();
         }
+        }
+    }
+
+    /// <summary>Write one SourcePollLog row. Best-effort — a logging failure
+    /// must never crash the poller.</summary>
+    private async Task LogPollAsync(
+        Guid projectId, Guid sourceId, string outcome,
+        string? fileName, Guid? batchId, string? message, CancellationToken ct)
+    {
+        try
+        {
+            _db.SourcePollLogs.Add(new SourcePollLog
+            {
+                ProjectId = projectId,
+                SourceId = sourceId,
+                PolledAt = _clock.GetUtcNow(),
+                Outcome = outcome,
+                FileName = fileName is { Length: > 256 } f ? f[..256] : fileName,
+                BatchId = batchId,
+                Message = message is { Length: > 1024 } m ? m[..1024] : message
+            });
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Could not write SourcePollLog entry for source {SourceId}.",
+                sourceId);
         }
     }
 
