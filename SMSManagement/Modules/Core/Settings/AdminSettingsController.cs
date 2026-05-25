@@ -14,6 +14,7 @@ using SMSManagement.Modules.Notifications;
 using SMSManagement.Modules.Shortlink.Abuse;
 using SMSManagement.Modules.Shortlink.Services;
 using SMSManagement.Modules.Sms.Providers;
+using SMSManagement.Modules.Sms.Webhooks;
 
 namespace SMSManagement.Modules.Core.Settings;
 
@@ -46,6 +47,7 @@ public sealed class AdminSettingsController : ControllerBase
     private readonly IOptionsSnapshot<ShortlinkAbuseOptions> _abuse;
     private readonly IOptionsSnapshot<EtrackerOptions> _etracker;
     private readonly IOptionsSnapshot<InfobipOptions> _infobip;
+    private readonly IOptionsSnapshot<DlrWebhookOptions> _dlr;
     private readonly IOptionsSnapshot<PrivacyOptions> _privacy;
 
     private readonly IHttpClientFactory _httpFactory;
@@ -63,6 +65,7 @@ public sealed class AdminSettingsController : ControllerBase
         IOptionsSnapshot<ShortlinkAbuseOptions> abuse,
         IOptionsSnapshot<EtrackerOptions> etracker,
         IOptionsSnapshot<InfobipOptions> infobip,
+        IOptionsSnapshot<DlrWebhookOptions> dlr,
         IOptionsSnapshot<PrivacyOptions> privacy,
         IHttpClientFactory httpFactory,
         IEmailSender emailSender,
@@ -71,7 +74,7 @@ public sealed class AdminSettingsController : ControllerBase
         _db = db; _me = me; _audit = audit; _config = config;
         _admin = admin; _session = session; _authenApi = authenApi;
         _smtp = smtp; _shortlink = shortlink; _abuse = abuse;
-        _etracker = etracker; _infobip = infobip; _privacy = privacy;
+        _etracker = etracker; _infobip = infobip; _dlr = dlr; _privacy = privacy;
         _httpFactory = httpFactory; _emailSender = emailSender; _log = log;
     }
 
@@ -105,7 +108,16 @@ public sealed class AdminSettingsController : ControllerBase
                     _infobip.Value.BaseUrl,
                     _infobip.Value.ApiKey,
                     _infobip.Value.DefaultSenderId
-                })
+                }),
+                // Delivery-receipt webhooks. The provider posts back to one of
+                // these URLs with the configured token — exposing the URL +
+                // token-set status lets an operator wire it without code.
+                Webhooks = MaskSecrets(new
+                {
+                    _dlr.Value.EtrackerDnToken,
+                    _dlr.Value.InfobipDnToken
+                }),
+                WebhookBaseUrl = $"{Request.Scheme}://{Request.Host}/api/sms/dlr"
             },
             Smtp = MaskSecrets(new
             {
@@ -360,6 +372,7 @@ public sealed class AdminSettingsController : ControllerBase
                 name.EndsWith("Password", StringComparison.Ordinal)
              || name.EndsWith("ApiKey", StringComparison.Ordinal)
              || name.EndsWith("Key", StringComparison.Ordinal)
+             || name.EndsWith("Token", StringComparison.Ordinal)
              || name.Contains("Secret", StringComparison.Ordinal)
              || name.Contains("Salt", StringComparison.Ordinal)
              || name.EndsWith("Base64", StringComparison.Ordinal);

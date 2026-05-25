@@ -41,6 +41,17 @@
                                 <input id="setEtSender" class="form-control form-control-sm" /></div>
                             <div class="col-4"><label class="form-label small">Default type</label>
                                 <input id="setEtType" class="form-control form-control-sm" /></div>
+                            <div class="col-12"><hr class="my-1" />
+                                <label class="form-label small">Delivery notification (DN) token
+                                    <span id="setEtDnMark" class="badge text-bg-secondary d-none">stored</span></label>
+                                <input id="setEtDn" type="password" class="form-control form-control-sm"
+                                       placeholder="paste a long random secret (leave blank to keep current)"
+                                       autocomplete="new-password" />
+                                <div class="form-text">
+                                    Set this token, then on the MacroKiosk portal point the
+                                    Delivery Notification URL at:
+                                    <code id="setEtDnUrl">…</code>
+                                </div></div>
                             <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
                         </form>
                     </div>
@@ -59,6 +70,16 @@
                                        placeholder="leave blank to keep current" autocomplete="new-password" /></div>
                             <div class="col-12"><label class="form-label small">Default sender ID</label>
                                 <input id="setIbSender" class="form-control form-control-sm" /></div>
+                            <div class="col-12"><hr class="my-1" />
+                                <label class="form-label small">Delivery report (DN) token
+                                    <span id="setIbDnMark" class="badge text-bg-secondary d-none">stored</span></label>
+                                <input id="setIbDn" type="password" class="form-control form-control-sm"
+                                       placeholder="paste a long random secret (leave blank to keep current)"
+                                       autocomplete="new-password" />
+                                <div class="form-text">
+                                    Point the Infobip delivery-report URL at:
+                                    <code id="setIbDnUrl">…</code>
+                                </div></div>
                             <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
                         </form>
                     </div>
@@ -242,6 +263,16 @@
         document.getElementById('setIbBase').value   = s.infobip.BaseUrl || '';
         document.getElementById('setIbSender').value = s.infobip.DefaultSenderId || '';
         document.getElementById('setIbKeyMark').classList.toggle('d-none', !isStored(s.infobip.ApiKey));
+
+        // Delivery-notification tokens (secret — only the "stored" badge is
+        // shown). The webhook URLs are public templates; the operator pastes
+        // the token they just set into the provider's portal.
+        const wh = s.webhooks || {};
+        const base = s.webhookBaseUrl || '';
+        document.getElementById('setEtDnMark').classList.toggle('d-none', !isStored(wh.EtrackerDnToken));
+        document.getElementById('setIbDnMark').classList.toggle('d-none', !isStored(wh.InfobipDnToken));
+        document.getElementById('setEtDnUrl').textContent = base ? `${base}/etracker?token=<YOUR_TOKEN>` : '';
+        document.getElementById('setIbDnUrl').textContent = base ? `${base}/infobip?token=<YOUR_TOKEN>`  : '';
     }
     function fillSmtp(s) {
         document.getElementById('smtpHost').value     = s.Host || '';
@@ -309,8 +340,12 @@
         if (nonBlank(document.getElementById('setEtPwd').value))
             items.push({ key: 'Sms:Providers:Etracker:Password', category: 'Sms',
                          value: document.getElementById('setEtPwd').value });
+        if (nonBlank(document.getElementById('setEtDn').value))
+            items.push({ key: 'Sms:Webhooks:EtrackerDnToken', category: 'Sms',
+                         value: document.getElementById('setEtDn').value });
         await save(items);
         document.getElementById('setEtPwd').value = '';
+        document.getElementById('setEtDn').value = '';
         load();
     });
 
@@ -323,8 +358,12 @@
         if (nonBlank(document.getElementById('setIbKey').value))
             items.push({ key: 'Sms:Providers:Infobip:ApiKey', category: 'Sms',
                          value: document.getElementById('setIbKey').value });
+        if (nonBlank(document.getElementById('setIbDn').value))
+            items.push({ key: 'Sms:Webhooks:InfobipDnToken', category: 'Sms',
+                         value: document.getElementById('setIbDn').value });
         await save(items);
         document.getElementById('setIbKey').value = '';
+        document.getElementById('setIbDn').value = '';
         load();
     });
 
