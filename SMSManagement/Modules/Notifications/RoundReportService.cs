@@ -173,7 +173,8 @@ public sealed class RoundReportService : IRoundReportService
             .Concat(new[]
             {
                 "Recipient", "WorkflowState", "SmsCount", "SmsStatus",
-                "SentAt", "DeliveredAt", "Attempts", "Provider", "Sender",
+                "SentAt", "SentDate", "SentTime",
+                "DeliveredAt", "Attempts", "Provider", "Sender",
                 "ErrorCode", "ProviderMessageId", "ProviderResponse", "MessageBody",
                 "ShortlinkUrl", "ShortlinkTarget", "Clicked", "ClickCount", "FirstClickedAt"
             });
@@ -181,14 +182,19 @@ public sealed class RoundReportService : IRoundReportService
 
         foreach (var r in rows)
         {
-            var cells = new List<string>(sourceCols.Count + 18);
+            var cells = new List<string>(sourceCols.Count + 20);
             foreach (var c in sourceCols)
                 cells.Add(Csv(r.Source.TryGetValue(c, out var v) ? v : string.Empty));
             cells.Add(Csv(r.MaskedPhone));
             cells.Add(Csv(r.State.ToString()));
             cells.Add(Csv(r.SmsCount.ToString()));
             cells.Add(Csv(r.SmsStatus?.ToString()));
+            // SentAt is the original UTC combined timestamp; SentDate/SentTime
+            // are split from the same value (UTC, no timezone shift) for
+            // spreadsheet pivots that need them as separate columns.
             cells.Add(Csv(r.SentAt?.ToString("u")));
+            cells.Add(Csv(r.SentAt?.ToString("yyyy-MM-dd")));
+            cells.Add(Csv(r.SentAt?.ToString("HH:mm:ss")));
             cells.Add(Csv(r.DeliveredAt?.ToString("u")));
             cells.Add(Csv(r.Attempts.ToString()));
             cells.Add(Csv(r.Provider));
