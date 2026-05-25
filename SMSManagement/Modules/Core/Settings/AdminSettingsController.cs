@@ -266,6 +266,79 @@ public sealed class AdminSettingsController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Test that the DLR webhook URL for a provider is reachable with the
+    /// configured token. Posts a dummy callback to the public endpoint — the
+    /// dummy msgID won't match any real SMS (the DLR handler logs and
+    /// returns 200), so a 200 here proves only that the URL and token are
+    /// correct, which is what we want to verify.
+    /// </summary>
+    [HttpPost("test/dlr/{provider}")]
+    public async Task<IActionResult> TestDlr(string provider, CancellationToken ct)
+    {
+        provider = (provider ?? string.Empty).ToLowerInvariant();
+        if (provider != "etracker" && provider != "infobip")
+            return BadRequest(new { Message = "provider must be 'etracker' or 'infobip'." });
+
+        var token = provider == "etracker" ? _dlr.Value.EtrackerDnToken : _dlr.Value.InfobipDnToken;
+        if (string.IsNullOrWhiteSpace(token))
+            return Ok(new
+            {
+                Ok = false,
+                Error = "Save a DN token for this provider first."
+            });
+
+        var baseUrl = $"{Request.Scheme}://{Request.Host}/api/sms/dlr/{provider}";
+        var http = _httpFactory.CreateClient();
+        http.Timeout = TimeSpan.FromSeconds(10);
+
+        try
+        {
+            HttpResponseMessage resp;
+            if (provider == "etracker")
+            {
+                var url = baseUrl + "?token=" + Uri.EscapeDataString(token)
+                        + "&msgID=admin-test&status=DELIVERED&statusDetail=admin+test";
+                resp = await http.GetAsync(url, ct);
+            }
+            else
+            {
+                var url = baseUrl + "?token=" + Uri.EscapeDataString(token);
+                var payload = """{"results":[{"messageId":"admin-test","status":{"groupName":"DELIVERED"}}]}""";
+                using var body = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+                resp = await http.PostAsync(url, body, ct);
+            }
+            var status = (int)resp.StatusCode;
+            var note = status switch
+            {
+                200 => "DN endpoint accepted the test callback. The dummy msgID intentionally "
+                     + "doesn't match any real SMS — this proves the URL and token are correct.",
+                401 => "Token rejected. The DN URL on the provider portal must carry the "
+                     + "SAME token saved here.",
+                _   => $"Endpoint responded with HTTP {status} (expected 200)."
+            };
+            return Ok(new
+            {
+                Ok = status == 200,
+                Status = status,
+                Url = baseUrl + "?token=••••",
+                Note = note
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "DLR test failed for {Provider}", provider);
+            return Ok(new
+            {
+                Ok = false,
+                Url = baseUrl,
+                Error = ex.Message,
+                Note = "Could not reach the DN URL — check that the app's public host "
+                     + "answers on HTTPS."
+            });
+        }
+    }
+
     public sealed record TestSmtpBody(string To);
 
     [HttpPost("test/smtp")]

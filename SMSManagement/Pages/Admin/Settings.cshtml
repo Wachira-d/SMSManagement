@@ -51,6 +51,13 @@
                                     Set this token, then on the MacroKiosk portal point the
                                     Delivery Notification URL at:
                                     <code id="setEtDnUrl">…</code>
+                                </div>
+                                <div class="mt-1">
+                                    <button id="btnEtDnTest" type="button"
+                                            class="btn btn-outline-secondary btn-sm">
+                                        <i class="bi bi-plug"></i> Test DN endpoint
+                                    </button>
+                                    <pre id="etDnTestResult" class="small mt-2 d-none"></pre>
                                 </div></div>
                             <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
                         </form>
@@ -79,6 +86,13 @@
                                 <div class="form-text">
                                     Point the Infobip delivery-report URL at:
                                     <code id="setIbDnUrl">…</code>
+                                </div>
+                                <div class="mt-1">
+                                    <button id="btnIbDnTest" type="button"
+                                            class="btn btn-outline-secondary btn-sm">
+                                        <i class="bi bi-plug"></i> Test DN endpoint
+                                    </button>
+                                    <pre id="ibDnTestResult" class="small mt-2 d-none"></pre>
                                 </div></div>
                             <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
                         </form>
@@ -454,6 +468,18 @@
             out.textContent = JSON.stringify(r, null, 2);
         } catch (e) { out.textContent = e.message; }
     });
+
+    async function testDlr(provider, outEl) {
+        outEl.classList.remove('d-none'); outEl.textContent = 'Testing…';
+        try {
+            const r = await api.post(`/api/admin/settings/test/dlr/${provider}`);
+            outEl.textContent = JSON.stringify(r, null, 2);
+        } catch (e) { outEl.textContent = e.message; }
+    }
+    document.getElementById('btnEtDnTest').addEventListener('click', () =>
+        testDlr('etracker', document.getElementById('etDnTestResult')));
+    document.getElementById('btnIbDnTest').addEventListener('click', () =>
+        testDlr('infobip', document.getElementById('ibDnTestResult')));
 
     load();
 })();
