@@ -36,12 +36,12 @@ public sealed class ShortlinkAbuseTrackerTests
         var db = new AppDbContext(opts, new TestUser());
 
         var clock = new FakeClock();
-        var shortlinkOpts = Options.Create(new ShortlinkOptions
+        var shortlinkOpts = TestOptionsMonitor.Of(new ShortlinkOptions
         {
             // Provide a non-empty salt; tests don't care about the value.
             IpHashSaltBase64 = Convert.ToBase64String(new byte[32])
         });
-        var abuseOpts = Options.Create(new ShortlinkAbuseOptions
+        var abuseOpts = TestOptionsMonitor.Of(new ShortlinkAbuseOptions
         {
             FailureThreshold = threshold,
             WindowMinutes = windowMin,

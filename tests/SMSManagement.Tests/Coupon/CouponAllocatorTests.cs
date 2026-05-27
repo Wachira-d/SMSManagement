@@ -11,7 +11,7 @@ public sealed class CouponAllocatorTests
 {
     private static CouponAllocator Build(CouponFixture f, string? baseUrl = "https://platform")
         => new(f.Db, f.Clock,
-               Options.Create(new CouponOptions { PublicBaseUrl = baseUrl ?? "" }),
+               TestOptionsMonitor.Of(new CouponOptions { PublicBaseUrl = baseUrl ?? "" }),
                NullLogger<CouponAllocator>.Instance);
 
     [Fact]

@@ -74,7 +74,7 @@ public sealed class UserCacheAuthenticatorTests
         return new UserCacheAuthenticator(
             db, api,
             new Sha256PasswordHasher(Options.Create(opts)),
-            Options.Create(opts),
+            TestOptionsMonitor.Of(opts),
             TimeProvider.System,
             new StubAudit(),
             NullLogger<UserCacheAuthenticator>.Instance);
