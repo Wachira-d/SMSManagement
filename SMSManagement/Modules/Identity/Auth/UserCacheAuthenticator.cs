@@ -29,7 +29,7 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
     private readonly AppDbContext _db;
     private readonly IAuthenApiClient _api;
     private readonly IPasswordHasher _hasher;
-    private readonly UserCacheAuthOptions _opts;
+    private readonly IOptionsMonitor<UserCacheAuthOptions> _opts;
     private readonly TimeProvider _clock;
     private readonly IAuditLogger _audit;
     private readonly ILogger<UserCacheAuthenticator> _log;
@@ -38,7 +38,7 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
         AppDbContext db,
         IAuthenApiClient api,
         IPasswordHasher hasher,
-        IOptions<UserCacheAuthOptions> opts,
+        IOptionsMonitor<UserCacheAuthOptions> opts,
         TimeProvider clock,
         IAuditLogger audit,
         ILogger<UserCacheAuthenticator> log)
@@ -46,7 +46,7 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
         _db = db;
         _api = api;
         _hasher = hasher;
-        _opts = opts.Value;
+        _opts = opts;
         _clock = clock;
         _audit = audit;
         _log = log;
@@ -74,7 +74,7 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
         {
             await Audit(username, "auth.locked", cached, ct);
             return Reject(AuthOutcome.AccountLocked,
-                $"Account temporarily locked. Try again in {_opts.LockoutDurationMinutes} minutes.");
+                $"Account temporarily locked. Try again in {_opts.CurrentValue.LockoutDurationMinutes} minutes.");
         }
         if (cached is { IsLocked: true })
         {
@@ -149,7 +149,7 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
     private async Task<AuthResult> HandleApiFailureAsync(
         string username, string password, UserCache? cached, string error, CancellationToken ct)
     {
-        if (!_opts.AllowOfflineFallback)
+        if (!_opts.CurrentValue.AllowOfflineFallback)
         {
             _log.LogWarning("AuthenAPI unavailable and offline fallback is disabled.");
             return Reject(AuthOutcome.ApiUnavailable,
@@ -186,7 +186,7 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
 
     private bool StillLocked(UserCache c) =>
         c.LastFailedLogin is { } last
-        && (_clock.GetUtcNow() - last).TotalMinutes < _opts.LockoutDurationMinutes;
+        && (_clock.GetUtcNow() - last).TotalMinutes < _opts.CurrentValue.LockoutDurationMinutes;
 
     private async Task MarkSuccessAsync(UserCache cached, CancellationToken ct)
     {
@@ -201,7 +201,7 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
     {
         cached.FailedAttempts++;
         cached.LastFailedLogin = _clock.GetUtcNow();
-        if (cached.FailedAttempts >= _opts.MaxFailedAttempts)
+        if (cached.FailedAttempts >= _opts.CurrentValue.MaxFailedAttempts)
             cached.IsLocked = true;
         cached.UpdatedAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
@@ -244,7 +244,7 @@ public sealed class UserCacheAuthenticator : IUserCacheAuthenticator
         row.IsLocked = false;
         row.FailedAttempts = 0;
         row.LastAdSync = now;
-        row.CacheExpires = now.AddDays(_opts.CacheDurationDays);
+        row.CacheExpires = now.AddDays(_opts.CurrentValue.CacheDurationDays);
         row.LastLogin = now;
         row.UpdatedAt = now;
 

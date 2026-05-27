@@ -19,22 +19,22 @@ public interface IErrorLogPurger
 public sealed class ErrorLogPurger : IErrorLogPurger
 {
     private readonly AppDbContext _db;
-    private readonly ErrorLogRetentionOptions _opts;
+    private readonly IOptionsMonitor<ErrorLogRetentionOptions> _opts;
     private readonly ILogger<ErrorLogPurger> _log;
 
-    public int RetentionDays => Math.Max(1, _opts.RetentionDays);
+    public int RetentionDays => Math.Max(1, _opts.CurrentValue.RetentionDays);
 
     public ErrorLogPurger(
-        AppDbContext db, IOptions<ErrorLogRetentionOptions> opts, ILogger<ErrorLogPurger> log)
+        AppDbContext db, IOptionsMonitor<ErrorLogRetentionOptions> opts, ILogger<ErrorLogPurger> log)
     {
         _db = db;
-        _opts = opts.Value;
+        _opts = opts;
         _log = log;
     }
 
     public async Task<int> PurgeAsync(CancellationToken ct = default)
     {
-        if (!_opts.PurgeEnabled)
+        if (!_opts.CurrentValue.PurgeEnabled)
         {
             _log.LogInformation(
                 "ErrorLog purge disabled (ErrorLogRetention:PurgeEnabled=false) — keeping all rows.");

@@ -20,30 +20,31 @@ namespace SMSManagement.Modules.Identity.Auth;
 public sealed class AuthenApiClient : IAuthenApiClient
 {
     private readonly HttpClient _http;
-    private readonly AuthenApiOptions _opts;
+    private readonly IOptionsMonitor<AuthenApiOptions> _opts;
     private readonly ILogger<AuthenApiClient> _log;
 
-    public AuthenApiClient(HttpClient http, IOptions<AuthenApiOptions> opts, ILogger<AuthenApiClient> log)
+    public AuthenApiClient(HttpClient http, IOptionsMonitor<AuthenApiOptions> opts, ILogger<AuthenApiClient> log)
     {
         _http = http;
-        _opts = opts.Value;
+        _opts = opts;
         _log = log;
     }
 
     public async Task<AuthenApiResult> AuthenticateAsync(
         string username, string password, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(_opts.BaseUrl))
+        var opts = _opts.CurrentValue;
+        if (string.IsNullOrWhiteSpace(opts.BaseUrl))
             throw new AuthenApiException("AuthenAPI BaseUrl not configured.");
 
-        var url = BuildUrl(_opts.BaseUrl, _opts.AuthenticatePath);
+        var url = BuildUrl(opts.BaseUrl, opts.AuthenticatePath);
 
         using var req = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = JsonContent.Create(new { username, password })
         };
-        if (!string.IsNullOrEmpty(_opts.ApiKey))
-            req.Headers.Add("X-API-Key", _opts.ApiKey);
+        if (!string.IsNullOrEmpty(opts.ApiKey))
+            req.Headers.Add("X-API-Key", opts.ApiKey);
 
         HttpResponseMessage resp;
         try

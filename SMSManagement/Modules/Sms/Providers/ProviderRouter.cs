@@ -32,16 +32,16 @@ public sealed class ProviderRoutingOptions
 public sealed class ProviderRouter : IProviderRouter
 {
     private readonly IReadOnlyDictionary<string, ISmsProvider> _providers;
-    private readonly ProviderRoutingOptions _opts;
+    private readonly IOptionsMonitor<ProviderRoutingOptions> _opts;
     private readonly AppDbContext _db;
 
     public ProviderRouter(
         IEnumerable<ISmsProvider> providers,
-        IOptions<ProviderRoutingOptions> opts,
+        IOptionsMonitor<ProviderRoutingOptions> opts,
         AppDbContext db)
     {
         _providers = providers.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
-        _opts = opts.Value;
+        _opts = opts;
         _db = db;
     }
 
@@ -56,7 +56,7 @@ public sealed class ProviderRouter : IProviderRouter
 
     public ISmsProvider? Fallback(SmsRequest request, string failedProviderName)
     {
-        foreach (var name in _opts.FailoverChain)
+        foreach (var name in _opts.CurrentValue.FailoverChain)
         {
             if (name.Equals(failedProviderName, StringComparison.OrdinalIgnoreCase)) continue;
             if (_providers.TryGetValue(name, out var p)) return p;
@@ -75,14 +75,16 @@ public sealed class ProviderRouter : IProviderRouter
         if (!string.IsNullOrWhiteSpace(projectDefault))
             return projectDefault;
 
+        var opts = _opts.CurrentValue;
+
         // 2) Canary split — deterministic based on recipient hash so the same user
         //    always hits the same provider (no per-message flapping).
-        if (_opts is { CandidateProvider: { } cand, CandidateTrafficPercent: > 0 })
+        if (opts is { CandidateProvider: { } cand, CandidateTrafficPercent: > 0 })
         {
             var bucket = Math.Abs(request.Recipient.GetHashCode()) % 100;
-            if (bucket < _opts.CandidateTrafficPercent) return cand;
+            if (bucket < opts.CandidateTrafficPercent) return cand;
         }
 
-        return _opts.DefaultProvider;
+        return opts.DefaultProvider;
     }
 }

@@ -34,16 +34,16 @@ public sealed class CouponAllocator : ICouponAllocator
 {
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
-    private readonly CouponOptions _opts;
+    private readonly IOptionsMonitor<CouponOptions> _opts;
     private readonly ILogger<CouponAllocator> _log;
 
     public CouponAllocator(
         AppDbContext db, TimeProvider clock,
-        IOptions<CouponOptions> opts, ILogger<CouponAllocator> log)
+        IOptionsMonitor<CouponOptions> opts, ILogger<CouponAllocator> log)
     {
         _db = db;
         _clock = clock;
-        _opts = opts.Value;
+        _opts = opts;
         _log = log;
     }
 
@@ -143,11 +143,12 @@ public sealed class CouponAllocator : ICouponAllocator
         // Shared domain → /r/{runningNumber}/{token}. The running number
         // (1, 2, 3, …) is far shorter than the project Code.
         var path = $"r/{runningNumber}/{t}";
-        if (string.IsNullOrWhiteSpace(_opts.PublicBaseUrl))
+        var publicBase = _opts.CurrentValue.PublicBaseUrl;
+        if (string.IsNullOrWhiteSpace(publicBase))
         {
             _log.LogWarning("Coupon:PublicBaseUrl not configured — emitting a relative redeem path.");
             return "/" + path;
         }
-        return $"{_opts.PublicBaseUrl.TrimEnd('/')}/{path}";
+        return $"{publicBase.TrimEnd('/')}/{path}";
     }
 }

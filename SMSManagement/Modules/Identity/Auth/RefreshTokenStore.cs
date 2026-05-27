@@ -18,18 +18,18 @@ namespace SMSManagement.Modules.Identity.Auth;
 public sealed class RefreshTokenStore : IRefreshTokenStore
 {
     private readonly AppDbContext _db;
-    private readonly UserCacheAuthOptions _opts;
+    private readonly IOptionsMonitor<UserCacheAuthOptions> _opts;
     private readonly TimeProvider _clock;
     private readonly ILogger<RefreshTokenStore> _log;
 
     public RefreshTokenStore(
         AppDbContext db,
-        IOptions<UserCacheAuthOptions> opts,
+        IOptionsMonitor<UserCacheAuthOptions> opts,
         TimeProvider clock,
         ILogger<RefreshTokenStore> log)
     {
         _db = db;
-        _opts = opts.Value;
+        _opts = opts;
         _clock = clock;
         _log = log;
     }
@@ -41,7 +41,7 @@ public sealed class RefreshTokenStore : IRefreshTokenStore
         {
             Username = username.ToLowerInvariant(),
             TokenHash = Hash(raw),
-            ExpiresAt = _clock.GetUtcNow().AddDays(_opts.RememberMeDurationDays),
+            ExpiresAt = _clock.GetUtcNow().AddDays(_opts.CurrentValue.RememberMeDurationDays),
             CreatedFromIp = clientIp
         };
         _db.Set<RefreshToken>().Add(row);
@@ -79,7 +79,7 @@ public sealed class RefreshTokenStore : IRefreshTokenStore
         {
             Username = row.Username,
             TokenHash = Hash(newRaw),
-            ExpiresAt = _clock.GetUtcNow().AddDays(_opts.RememberMeDurationDays),
+            ExpiresAt = _clock.GetUtcNow().AddDays(_opts.CurrentValue.RememberMeDurationDays),
             CreatedFromIp = clientIp
         };
         _db.Set<RefreshToken>().Add(fresh);

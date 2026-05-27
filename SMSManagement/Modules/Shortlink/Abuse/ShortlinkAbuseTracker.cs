@@ -23,37 +23,40 @@ namespace SMSManagement.Modules.Shortlink.Abuse;
 public sealed class ShortlinkAbuseTracker : IShortlinkAbuseTracker
 {
     private readonly AppDbContext _db;
-    private readonly ShortlinkAbuseOptions _opts;
-    private readonly IOptions<ShortlinkOptions> _shortlinkOpts;
+    private readonly IOptionsMonitor<ShortlinkAbuseOptions> _opts;
+    private readonly IOptionsMonitor<ShortlinkOptions> _shortlinkOpts;
     private byte[]? IpSaltCache;
+    private string? IpSaltSource;
     private readonly TimeProvider _clock;
     private readonly ILogger<ShortlinkAbuseTracker> _log;
 
     public ShortlinkAbuseTracker(
         AppDbContext db,
-        IOptions<ShortlinkAbuseOptions> opts,
-        IOptions<ShortlinkOptions> shortlinkOpts,
+        IOptionsMonitor<ShortlinkAbuseOptions> opts,
+        IOptionsMonitor<ShortlinkOptions> shortlinkOpts,
         TimeProvider clock,
         ILogger<ShortlinkAbuseTracker> log)
     {
         _db = db;
-        _opts = opts.Value;
+        _opts = opts;
         _shortlinkOpts = shortlinkOpts;
         _clock = clock;
         _log = log;
     }
 
-    /// <summary>Lazy — see <c>Sha256PasswordHasher</c> for the deferral rationale.</summary>
+    /// <summary>Lazy — see <c>Sha256PasswordHasher</c> for the deferral rationale.
+    /// Cached bytes are invalidated if the configured salt changes at runtime.</summary>
     private byte[] IpSalt
     {
         get
         {
-            if (IpSaltCache is not null) return IpSaltCache;
-            var b64 = _shortlinkOpts.Value.IpHashSaltBase64;
+            var b64 = _shortlinkOpts.CurrentValue.IpHashSaltBase64;
+            if (IpSaltCache is not null && IpSaltSource == b64) return IpSaltCache;
             if (string.IsNullOrWhiteSpace(b64))
                 throw new InvalidOperationException(
                     "Shortlink:IpHashSaltBase64 is not configured. " +
                     "In Development, set Secrets:AutoGenerateInDev=true to auto-generate.");
+            IpSaltSource = b64;
             return IpSaltCache = Convert.FromBase64String(b64);
         }
     }
@@ -106,17 +109,18 @@ public sealed class ShortlinkAbuseTracker : IShortlinkAbuseTracker
         // byte[] equality + DateTimeOffset comparison defeats its translator):
         // fetch up to 200 recent failures for this IP via the IpHash index,
         // then filter by window in memory. Threshold caps the loop short.
-        var windowStart = now.AddMinutes(-_opts.WindowMinutes);
+        var opts = _opts.CurrentValue;
+        var windowStart = now.AddMinutes(-opts.WindowMinutes);
         // Order by the autoincrement Id (newest-first, SQLite-safe — it can't
         // ORDER BY a DateTimeOffset); the window filter is applied in memory.
         var recentForIp = await _db.IpAccessFailures
             .Where(f => f.IpHash == ipHash)
             .OrderByDescending(f => f.Id)
-            .Take(_opts.FailureThreshold * 10 + 50)
+            .Take(opts.FailureThreshold * 10 + 50)
             .ToListAsync(ct);
         var count = recentForIp.Count(f => f.OccurredAt >= windowStart);
 
-        if (count < _opts.FailureThreshold) return null;
+        if (count < opts.FailureThreshold) return null;
 
         // Already blocked? Refresh the last-failure timestamp; do not stack rows.
         var existing = await GetActiveBlockAsync(ipHash, ct);
@@ -141,7 +145,7 @@ public sealed class ShortlinkAbuseTracker : IShortlinkAbuseTracker
             FirstFailureAt = firstAt,
             LastFailureAt = now,
             BlockedAt = now,
-            BlockedUntil = now.AddMinutes(_opts.BlockDurationMinutes)
+            BlockedUntil = now.AddMinutes(opts.BlockDurationMinutes)
         };
         _db.BlockedIps.Add(block);
         await _db.SaveChangesAsync(ct);

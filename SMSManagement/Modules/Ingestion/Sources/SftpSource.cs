@@ -21,29 +21,30 @@ public sealed class SftpOptions
 /// </summary>
 public sealed class SftpSource : IIngestionSource
 {
-    private readonly SftpOptions _opts;
+    private readonly IOptionsMonitor<SftpOptions> _opts;
     private readonly ILogger<SftpSource> _log;
 
     public string Name => "SFTP";
 
-    public SftpSource(IOptions<SftpOptions> opts, ILogger<SftpSource> log)
+    public SftpSource(IOptionsMonitor<SftpOptions> opts, ILogger<SftpSource> log)
     {
-        _opts = opts.Value;
+        _opts = opts;
         _log = log;
     }
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, string>> ReadAsync(
         IngestionContext context, [EnumeratorCancellation] CancellationToken ct)
     {
-        using var keyStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_opts.PrivateKeyPem));
+        var opts = _opts.CurrentValue;
+        using var keyStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(opts.PrivateKeyPem));
         var keyFile = new PrivateKeyFile(keyStream);
-        using var client = new SftpClient(_opts.Host, _opts.Port, _opts.Username, keyFile);
+        using var client = new SftpClient(opts.Host, opts.Port, opts.Username, keyFile);
         client.Connect();
 
         try
         {
-            var files = client.ListDirectory(_opts.RemoteDirectory)
-                .Where(f => !f.IsDirectory && Utilities.GlobMatcher.IsMatch(f.Name, _opts.FilePattern))
+            var files = client.ListDirectory(opts.RemoteDirectory)
+                .Where(f => !f.IsDirectory && Utilities.GlobMatcher.IsMatch(f.Name, opts.FilePattern))
                 .ToList();
 
             foreach (var file in files)
@@ -61,7 +62,7 @@ public sealed class SftpSource : IIngestionSource
                     yield return row;
 
                 // Move to /archive — done after enumeration so caller controls commit timing.
-                var archive = $"{_opts.RemoteDirectory}/archive/{file.Name}";
+                var archive = $"{opts.RemoteDirectory}/archive/{file.Name}";
                 client.RenameFile(file.FullName, archive);
                 File.Delete(tempPath);
             }

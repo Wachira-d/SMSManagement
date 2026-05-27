@@ -10,15 +10,15 @@ public sealed class ProviderConfigResolver : IProviderConfigResolver
 {
     private readonly AppDbContext _db;
     private readonly FieldEncryptor _crypto;
-    private readonly IOptions<EtrackerOptions> _etrackerDefaults;
-    private readonly IOptions<InfobipOptions>  _infobipDefaults;
+    private readonly IOptionsMonitor<EtrackerOptions> _etrackerDefaults;
+    private readonly IOptionsMonitor<InfobipOptions>  _infobipDefaults;
     private readonly ILogger<ProviderConfigResolver> _log;
 
     public ProviderConfigResolver(
         AppDbContext db,
         FieldEncryptor crypto,
-        IOptions<EtrackerOptions> etrackerDefaults,
-        IOptions<InfobipOptions> infobipDefaults,
+        IOptionsMonitor<EtrackerOptions> etrackerDefaults,
+        IOptionsMonitor<InfobipOptions> infobipDefaults,
         ILogger<ProviderConfigResolver> log)
     {
         _db = db;
@@ -29,10 +29,10 @@ public sealed class ProviderConfigResolver : IProviderConfigResolver
     }
 
     public Task<EtrackerOptions> ResolveEtrackerAsync(Guid projectId, CancellationToken ct = default)
-        => MergeAsync("etracker", projectId, _etrackerDefaults.Value, Merge, ct);
+        => MergeAsync("etracker", projectId, _etrackerDefaults.CurrentValue, Merge, ct);
 
     public Task<InfobipOptions> ResolveInfobipAsync(Guid projectId, CancellationToken ct = default)
-        => MergeAsync("infobip", projectId, _infobipDefaults.Value, Merge, ct);
+        => MergeAsync("infobip", projectId, _infobipDefaults.CurrentValue, Merge, ct);
 
     // ---------- internals ----------
 

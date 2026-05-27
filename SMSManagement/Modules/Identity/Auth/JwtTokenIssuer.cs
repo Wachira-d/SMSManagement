@@ -20,44 +20,49 @@ namespace SMSManagement.Modules.Identity.Auth;
 /// </summary>
 public sealed class JwtTokenIssuer : IJwtTokenIssuer
 {
-    private readonly LocalJwtOptions _opts;
-    private readonly UserCacheAuthOptions _sessionOpts;
-    private readonly AdminOptions _adminOpts;
+    private readonly IOptionsMonitor<LocalJwtOptions> _opts;
+    private readonly IOptionsMonitor<UserCacheAuthOptions> _sessionOpts;
+    private readonly IOptionsMonitor<AdminOptions> _adminOpts;
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
     private readonly ILogger<JwtTokenIssuer> _log;
     private SigningCredentials? _signing;
+    private string? _signingKeySource;
 
     public JwtTokenIssuer(
-        IOptions<LocalJwtOptions> opts,
-        IOptions<UserCacheAuthOptions> sessionOpts,
-        IOptions<AdminOptions> adminOpts,
+        IOptionsMonitor<LocalJwtOptions> opts,
+        IOptionsMonitor<UserCacheAuthOptions> sessionOpts,
+        IOptionsMonitor<AdminOptions> adminOpts,
         AppDbContext db,
         TimeProvider clock,
         ILogger<JwtTokenIssuer> log)
     {
-        _opts = opts.Value;
-        _sessionOpts = sessionOpts.Value;
-        _adminOpts = adminOpts.Value;
+        _opts = opts;
+        _sessionOpts = sessionOpts;
+        _adminOpts = adminOpts;
         _db = db;
         _clock = clock;
         _log = log;
     }
 
-    /// <summary>Lazy — see <c>Sha256PasswordHasher</c> for the deferral rationale.</summary>
+    /// <summary>Lazy — see <c>Sha256PasswordHasher</c> for the deferral rationale.
+    /// Cached SigningCredentials are invalidated if the configured key changes
+    /// at runtime (admin rotation).</summary>
     private SigningCredentials Signing
     {
         get
         {
-            if (_signing is not null) return _signing;
-            if (string.IsNullOrWhiteSpace(_opts.SigningKeyBase64))
+            var keyB64 = _opts.CurrentValue.SigningKeyBase64;
+            if (_signing is not null && _signingKeySource == keyB64) return _signing;
+            if (string.IsNullOrWhiteSpace(keyB64))
                 throw new InvalidOperationException(
                     "Auth:LocalJwt:SigningKeyBase64 is not configured. " +
                     "In Development, set Secrets:AutoGenerateInDev=true to auto-generate.");
-            var keyBytes = Convert.FromBase64String(_opts.SigningKeyBase64);
+            var keyBytes = Convert.FromBase64String(keyB64);
             if (keyBytes.Length < 32)
                 throw new InvalidOperationException(
                     $"JWT signing key must be at least 32 bytes; got {keyBytes.Length}.");
+            _signingKeySource = keyB64;
             return _signing = new SigningCredentials(new SymmetricSecurityKey(keyBytes),
                 SecurityAlgorithms.HmacSha256);
         }
@@ -91,17 +96,19 @@ public sealed class JwtTokenIssuer : IJwtTokenIssuer
 
         // System admin: ORed across AD-group membership and the per-user DB flag.
         // Either path produces the same role=system_admin claim downstream.
-        var inAdminGroup = !string.IsNullOrWhiteSpace(_adminOpts.SystemAdminGroup)
-            && groups.Any(g => string.Equals(g, _adminOpts.SystemAdminGroup, StringComparison.OrdinalIgnoreCase));
+        var adminGroup = _adminOpts.CurrentValue.SystemAdminGroup;
+        var inAdminGroup = !string.IsNullOrWhiteSpace(adminGroup)
+            && groups.Any(g => string.Equals(g, adminGroup, StringComparison.OrdinalIgnoreCase));
         if (inAdminGroup || appUser.IsSystemAdmin)
             claims.Add(new Claim("role", "system_admin"));
 
         var now = _clock.GetUtcNow();
-        var exp = now.AddHours(_sessionOpts.SessionTimeoutHours);
+        var exp = now.AddHours(_sessionOpts.CurrentValue.SessionTimeoutHours);
+        var jwtOpts = _opts.CurrentValue;
 
         var jwt = new JwtSecurityToken(
-            issuer: _opts.Issuer,
-            audience: _opts.Audience,
+            issuer: jwtOpts.Issuer,
+            audience: jwtOpts.Audience,
             claims: claims,
             notBefore: now.UtcDateTime,
             expires: exp.UtcDateTime,
