@@ -24,20 +24,20 @@ namespace SMSManagement.Modules.Sms.Webhooks;
 public sealed class DlrController : ControllerBase
 {
     private readonly AppDbContext _db;
-    private readonly DlrWebhookOptions _secrets;
+    private readonly IOptionsMonitor<DlrWebhookOptions> _secrets;
     private readonly TimeProvider _clock;
     private readonly CampaignMetrics _metrics;
     private readonly ILogger<DlrController> _log;
 
     public DlrController(
         AppDbContext db,
-        IOptions<DlrWebhookOptions> secrets,
+        IOptionsMonitor<DlrWebhookOptions> secrets,
         TimeProvider clock,
         CampaignMetrics metrics,
         ILogger<DlrController> log)
     {
         _db = db;
-        _secrets = secrets.Value;
+        _secrets = secrets;
         _clock = clock;
         _metrics = metrics;
         _log = log;
@@ -54,7 +54,7 @@ public sealed class DlrController : ControllerBase
     [HttpPost("etracker")]
     public async Task<IActionResult> Etracker(CancellationToken ct)
     {
-        if (!TokenValid(_secrets.EtrackerDnToken))
+        if (!TokenValid(_secrets.CurrentValue.EtrackerDnToken))
         {
             _log.LogWarning("etracker DN rejected — missing or wrong token.");
             return Unauthorized();
@@ -89,7 +89,7 @@ public sealed class DlrController : ControllerBase
     [HttpPost("infobip")]
     public async Task<IActionResult> Infobip(CancellationToken ct)
     {
-        if (!TokenValid(_secrets.InfobipDnToken))
+        if (!TokenValid(_secrets.CurrentValue.InfobipDnToken))
         {
             _log.LogWarning("Infobip DN rejected — missing or wrong token.");
             return Unauthorized();
