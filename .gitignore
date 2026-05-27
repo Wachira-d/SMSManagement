@@ -372,3 +372,7 @@ dataprotection-keys/
 
 # Runtime file uploads (coupon logos etc.)
 SMSManagement/wwwroot/uploads/
+
+# Deploy-time configs with real secrets (web.config.deploy, *.production.config)
+*.deploy
+*.production.config
