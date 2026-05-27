@@ -317,7 +317,14 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error");
     app.UseHsts();
 }
-app.UseHttpsRedirection();
+// Provider DN webhooks (etracker / Infobip) frequently can't follow a 301 to
+// HTTPS — they post to port 80 once and give up on the 301 response. Skip the
+// HTTPS redirect for those paths so the receipt is processed where it lands.
+// The same exclusion is mirrored in web.config so the IIS rewrite rule doesn't
+// fire either.
+app.UseWhen(
+    ctx => !ctx.Request.Path.StartsWithSegments("/api/sms/dlr"),
+    branch => branch.UseHttpsRedirection());
 app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseStaticFiles();
 app.UseRouting();

@@ -285,8 +285,13 @@
         const base = s.webhookBaseUrl || '';
         document.getElementById('setEtDnMark').classList.toggle('d-none', !isStored(wh.EtrackerDnToken));
         document.getElementById('setIbDnMark').classList.toggle('d-none', !isStored(wh.InfobipDnToken));
-        document.getElementById('setEtDnUrl').textContent = base ? `${base}/etracker?token=<YOUR_TOKEN>` : '';
-        document.getElementById('setIbDnUrl').textContent = base ? `${base}/infobip?token=<YOUR_TOKEN>`  : '';
+        // The provider can authenticate using any one of: query param, path
+        // segment, or X-DN-Token header. Show the simplest URL form here
+        // (token in path, port 80) since providers that can't carry a query
+        // string are the reason this fallback exists.
+        const httpBase = base.replace(/^https:/i, 'http:');
+        document.getElementById('setEtDnUrl').textContent = base ? `${httpBase}/etracker/<YOUR_TOKEN>` : '';
+        document.getElementById('setIbDnUrl').textContent = base ? `${httpBase}/infobip/<YOUR_TOKEN>`  : '';
     }
     function fillSmtp(s) {
         document.getElementById('smtpHost').value     = s.Host || '';

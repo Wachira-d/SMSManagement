@@ -1,18 +1,26 @@
 namespace SMSManagement.Modules.Sms.Webhooks;
 
 /// <summary>
-/// HMAC secrets for delivery-receipt webhooks. One key per provider, base64-encoded.
-/// Loaded from Key Vault — empty value disables HMAC for that provider in development
-/// (the webhook still rejects requests without the headers).
+/// Authentication knobs for delivery-receipt webhooks. Neither etracker nor
+/// Infobip HMAC-signs its callback, so authentication is a shared secret —
+/// configured per provider — which the provider can supply in any of:
+///   - <c>?token=…</c> query parameter (or form field for POSTs)
+///   - last path segment (e.g. <c>/api/sms/dlr/etracker/THE_SECRET</c>)
+///   - <c>X-DN-Token</c> HTTP header
+/// As a last fallback, when the provider can't carry a token at all, set
+/// <c>EtrackerDnAllowedIps</c> / <c>InfobipDnAllowedIps</c> to the provider's
+/// outbound IP range — requests from those addresses are accepted without a
+/// token.
 /// </summary>
 public sealed class DlrWebhookOptions
 {
-    /// <summary>
-    /// Shared-secret token embedded in each provider's delivery-callback URL.
-    /// Neither etracker nor Infobip HMAC-signs its delivery callbacks, so
-    /// authentication is the token in the URL configured on the provider
-    /// account (…/api/sms/dlr/{provider}?token=THIS). Loaded from Key Vault.
-    /// </summary>
     public string? EtrackerDnToken { get; init; }
     public string? InfobipDnToken { get; init; }
+
+    /// <summary>Allowlist of remote IPs (exact match) that may post etracker
+    /// DNs without a token. Use for providers whose portal accepts only a bare
+    /// URL with no query string / header customisation.</summary>
+    public string[] EtrackerDnAllowedIps { get; init; } = Array.Empty<string>();
+    public string[] InfobipDnAllowedIps  { get; init; } = Array.Empty<string>();
 }
+

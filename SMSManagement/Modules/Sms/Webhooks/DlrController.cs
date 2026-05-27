@@ -46,17 +46,20 @@ public sealed class DlrController : ControllerBase
     /// <summary>
     /// etracker (MACROKIOSK) delivery notification. Unlike the HMAC-signed
     /// Infobip webhook, etracker DN is an unsigned GET/POST carrying form or
-    /// query params (msgID, msisdn, status, statusDetail). It is authenticated
-    /// by a shared-secret token embedded in the DN URL configured on the
-    /// etracker account: …/api/sms/dlr/etracker?token=THE_SECRET
+    /// query params (msgID, msisdn, status, statusDetail). Auth accepts any of
+    /// the four schemes documented on <see cref="DlrWebhookOptions"/>: query
+    /// param, path segment, header, or IP allowlist.
     /// </summary>
     [HttpGet("etracker")]
     [HttpPost("etracker")]
-    public async Task<IActionResult> Etracker(CancellationToken ct)
+    [HttpGet("etracker/{token}")]
+    [HttpPost("etracker/{token}")]
+    public async Task<IActionResult> Etracker(string? token, CancellationToken ct)
     {
-        if (!TokenValid(_secrets.CurrentValue.EtrackerDnToken))
+        var opts = _secrets.CurrentValue;
+        if (!IsAuthorised(opts.EtrackerDnToken, opts.EtrackerDnAllowedIps, token))
         {
-            _log.LogWarning("etracker DN rejected — missing or wrong token.");
+            _log.LogWarning("etracker DN rejected — missing/wrong token and IP not allowlisted.");
             return Unauthorized();
         }
 
@@ -83,15 +86,17 @@ public sealed class DlrController : ControllerBase
     /// <summary>
     /// Infobip delivery report. Infobip POSTs an unsigned JSON body
     /// (<c>{ "results": [ { "messageId", "status": { "groupName" } } ] }</c>)
-    /// to the configured notify URL — authenticated, like the etracker DN, by
-    /// a shared-secret token in the URL: …/api/sms/dlr/infobip?token=THE_SECRET
+    /// to the configured notify URL — same auth options as etracker (query
+    /// param, path segment, header, or IP allowlist).
     /// </summary>
     [HttpPost("infobip")]
-    public async Task<IActionResult> Infobip(CancellationToken ct)
+    [HttpPost("infobip/{token}")]
+    public async Task<IActionResult> Infobip(string? token, CancellationToken ct)
     {
-        if (!TokenValid(_secrets.CurrentValue.InfobipDnToken))
+        var opts = _secrets.CurrentValue;
+        if (!IsAuthorised(opts.InfobipDnToken, opts.InfobipDnAllowedIps, token))
         {
-            _log.LogWarning("Infobip DN rejected — missing or wrong token.");
+            _log.LogWarning("Infobip DN rejected — missing/wrong token and IP not allowlisted.");
             return Unauthorized();
         }
 
@@ -114,13 +119,31 @@ public sealed class DlrController : ControllerBase
 
     // ---- helpers ----
 
-    /// <summary>Constant-time comparison of the URL <c>token</c> param against
-    /// the configured DN secret for the provider.</summary>
-    private bool TokenValid(string? configured)
+    /// <summary>
+    /// Accepts the request if EITHER a valid token is supplied (in query
+    /// param, last path segment, or X-DN-Token header) OR the remote IP is
+    /// in the provider's allowlist. Token comparison is constant-time.
+    /// </summary>
+    private bool IsAuthorised(string? configuredToken, string[] allowedIps, string? routeToken)
     {
-        if (string.IsNullOrWhiteSpace(configured)) return false;
-        var supplied = Param("token");
-        if (string.IsNullOrEmpty(supplied)) return false;
+        if (TokenMatches(configuredToken, routeToken)) return true;
+        if (TokenMatches(configuredToken, Param("token"))) return true;
+        if (Request.Headers.TryGetValue("X-DN-Token", out var hv)
+            && TokenMatches(configuredToken, hv.ToString())) return true;
+
+        if (allowedIps.Length > 0)
+        {
+            var remote = HttpContext.Connection.RemoteIpAddress?.ToString();
+            if (!string.IsNullOrEmpty(remote)
+                && allowedIps.Any(ip => string.Equals(ip, remote, StringComparison.Ordinal)))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool TokenMatches(string? configured, string? supplied)
+    {
+        if (string.IsNullOrWhiteSpace(configured) || string.IsNullOrEmpty(supplied)) return false;
         return CryptographicOperations.FixedTimeEquals(
             Encoding.UTF8.GetBytes(supplied), Encoding.UTF8.GetBytes(configured));
     }
