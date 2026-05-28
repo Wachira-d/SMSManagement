@@ -25,7 +25,7 @@ public sealed class DeliveryStatusReconcilerTests : IClassFixture<CampaignWebApp
     {
         public string ProviderName { get; init; } = "etracker";
         public bool Enabled { get; set; } = true;
-        public StatusQueryResult Reply { get; set; } = new(SmsStatus.Delivered, null);
+        public StatusQueryResult Reply { get; set; } = new(SmsStatus.Delivered, null, "DELIVERED");
         public int CallCount;
 
         public bool IsEnabled(Guid projectId) => Enabled;
@@ -85,7 +85,7 @@ public sealed class DeliveryStatusReconcilerTests : IClassFixture<CampaignWebApp
     public async Task Flips_stale_Sent_to_Delivered_when_provider_confirms()
     {
         var (rec, db, stub) = Build();
-        stub.Reply = new(SmsStatus.Delivered, null);
+        stub.Reply = new(SmsStatus.Delivered, null, "DELIVERED");
 
         var msg = MakeMessage(SeedProject(db), sentAgo: TimeSpan.FromMinutes(30));
         db.SmsMessages.Add(msg);
@@ -120,7 +120,7 @@ public sealed class DeliveryStatusReconcilerTests : IClassFixture<CampaignWebApp
     {
         var (rec, db, stub) = Build();
         // Provider returns "still in flight" — must not overwrite Delivered.
-        stub.Reply = new(SmsStatus.Sent, null);
+        stub.Reply = new(SmsStatus.Sent, null, "ACCEPTED");
         var msg = MakeMessage(SeedProject(db), status: SmsStatus.Delivered, sentAgo: TimeSpan.FromMinutes(30));
         msg.DeliveredAt = DateTimeOffset.UtcNow.AddMinutes(-5);
         db.SmsMessages.Add(msg);
@@ -180,5 +180,50 @@ public sealed class DeliveryStatusReconcilerTests : IClassFixture<CampaignWebApp
         var (rec, _, _) = Build();
         var result = await rec.ReconcileMessageAsync(Guid.NewGuid(), CancellationToken.None);
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Stamps_DnReceivedAt_StatusDetail_StatusSource_on_pull()
+    {
+        var (rec, db, stub) = Build();
+        stub.Reply = new(SmsStatus.Failed,
+            ErrorCode: "DN_UNDELIVERED", StatusDetail: "UNDELIVERED: phone off");
+
+        var msg = MakeMessage(SeedProject(db), sentAgo: TimeSpan.FromMinutes(30));
+        db.SmsMessages.Add(msg);
+        await db.SaveChangesAsync();
+
+        await rec.ReconcileStaleAsync(TimeSpan.FromMinutes(10), 100, CancellationToken.None);
+
+        var refreshed = await db.SmsMessages.AsNoTracking().FirstAsync(m => m.Id == msg.Id);
+        refreshed.Status.Should().Be(SmsStatus.Failed);
+        refreshed.DnReceivedAt.Should().NotBeNull();
+        refreshed.StatusDetail.Should().Be("UNDELIVERED: phone off");
+        refreshed.StatusSource.Should().Be("pull");
+        refreshed.ErrorCode.Should().Be("DN_UNDELIVERED");
+        // Failed messages do NOT get DeliveredAt — that's reserved for Delivered.
+        refreshed.DeliveredAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Stamps_DnReceivedAt_even_when_status_unchanged()
+    {
+        // Provider says "still in flight" (same as current Sent). Status doesn't
+        // change but the DnReceivedAt / StatusDetail trail must be recorded so
+        // the report shows "we did ask the provider at this time".
+        var (rec, db, stub) = Build();
+        stub.Reply = new(SmsStatus.Sent, null, "ACCEPTED");
+
+        var msg = MakeMessage(SeedProject(db), sentAgo: TimeSpan.FromMinutes(30));
+        db.SmsMessages.Add(msg);
+        await db.SaveChangesAsync();
+
+        await rec.ReconcileStaleAsync(TimeSpan.FromMinutes(10), 100, CancellationToken.None);
+
+        var refreshed = await db.SmsMessages.AsNoTracking().FirstAsync(m => m.Id == msg.Id);
+        refreshed.Status.Should().Be(SmsStatus.Sent);          // unchanged
+        refreshed.DnReceivedAt.Should().NotBeNull();           // but stamped
+        refreshed.StatusDetail.Should().Be("ACCEPTED");
+        refreshed.StatusSource.Should().Be("pull");
     }
 }

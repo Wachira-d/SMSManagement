@@ -45,7 +45,7 @@ public sealed class EtrackerStatusQuery : IProviderStatusQuery
     {
         var opts = await _configResolver.ResolveEtrackerAsync(projectId, ct);
         if (string.IsNullOrWhiteSpace(opts.QueryUrl))
-            return new StatusQueryResult(null, null);
+            return new StatusQueryResult(null, null, null);
 
         var url = opts.QueryUrl
             .Replace("{msgId}", Uri.EscapeDataString(providerMessageId))
@@ -62,19 +62,19 @@ public sealed class EtrackerStatusQuery : IProviderStatusQuery
                 _log.LogWarning(
                     "etracker status-query HTTP {Status} for msgId={MsgId} body={Body}",
                     (int)resp.StatusCode, providerMessageId, Trunc(body));
-                return new StatusQueryResult(null, null);
+                return new StatusQueryResult(null, null, null);
             }
         }
         catch (Exception ex)
         {
             _log.LogWarning(ex,
                 "etracker status-query failed for msgId={MsgId}", providerMessageId);
-            return new StatusQueryResult(null, null);
+            return new StatusQueryResult(null, null, null);
         }
 
         var (statusWord, _) = EtrackerSmsProvider.ParseEtrackerResponse(body);
         if (string.IsNullOrWhiteSpace(statusWord))
-            return new StatusQueryResult(null, null);
+            return new StatusQueryResult(null, null, null);
 
         // Etracker returns either a DN word (DELIVERED / UNDELIVERED / …) or a
         // mesapi status code (200 / 4xx). The DN words map directly to our
@@ -84,7 +84,10 @@ public sealed class EtrackerStatusQuery : IProviderStatusQuery
         var errorCode = mapped is SmsStatus.Failed or SmsStatus.Rejected or SmsStatus.Expired
             ? $"DN_{statusWord.ToUpperInvariant()}"
             : null;
-        return new StatusQueryResult(mapped, errorCode);
+        // mesapi pull responses carry only the status word — no separate
+        // detail field. The word itself goes into StatusDetail so the report
+        // shows the raw provider reason (DELIVERED / UNDELIVERED / …).
+        return new StatusQueryResult(mapped, errorCode, statusWord.ToUpperInvariant());
     }
 
     private static string Trunc(string s) => s.Length > 200 ? s[..200] + "…" : s;

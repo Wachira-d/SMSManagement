@@ -42,7 +42,7 @@ public sealed class InfobipStatusQuery : IProviderStatusQuery
         Guid projectId, string providerMessageId, CancellationToken ct)
     {
         var opts = await _configResolver.ResolveInfobipAsync(projectId, ct);
-        if (!opts.QueryEnabled) return new StatusQueryResult(null, null);
+        if (!opts.QueryEnabled) return new StatusQueryResult(null, null, null);
 
         var url = $"{opts.BaseUrl.TrimEnd('/')}/sms/1/reports"
                 + $"?messageId={Uri.EscapeDataString(providerMessageId)}&limit=1";
@@ -60,32 +60,32 @@ public sealed class InfobipStatusQuery : IProviderStatusQuery
                 _log.LogWarning(
                     "Infobip status-query HTTP {Status} for msgId={MsgId} body={Body}",
                     (int)resp.StatusCode, providerMessageId, Trunc(body));
-                return new StatusQueryResult(null, null);
+                return new StatusQueryResult(null, null, null);
             }
 
             using var doc = JsonDocument.Parse(body);
             if (!doc.RootElement.TryGetProperty("results", out var results)
                 || results.ValueKind != JsonValueKind.Array
                 || results.GetArrayLength() == 0)
-                return new StatusQueryResult(null, null);
+                return new StatusQueryResult(null, null, null);
 
             var first = results[0];
             var group = first.TryGetProperty("status", out var st)
                 && st.TryGetProperty("groupName", out var gn) ? gn.GetString() : null;
             if (string.IsNullOrWhiteSpace(group))
-                return new StatusQueryResult(null, null);
+                return new StatusQueryResult(null, null, null);
 
             var mapped = DlrStatusMap.Map(group);
             var errorCode = mapped is SmsStatus.Failed or SmsStatus.Rejected or SmsStatus.Expired
                 ? $"DN_{group.ToUpperInvariant()}"
                 : null;
-            return new StatusQueryResult(mapped, errorCode);
+            return new StatusQueryResult(mapped, errorCode, group.ToUpperInvariant());
         }
         catch (Exception ex)
         {
             _log.LogWarning(ex,
                 "Infobip status-query failed for msgId={MsgId}", providerMessageId);
-            return new StatusQueryResult(null, null);
+            return new StatusQueryResult(null, null, null);
         }
     }
 

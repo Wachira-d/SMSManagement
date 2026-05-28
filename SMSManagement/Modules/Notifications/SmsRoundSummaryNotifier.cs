@@ -72,7 +72,7 @@ public sealed class SmsRoundSummaryNotifier : ISmsRoundSummaryNotifier
         // Past MaxWait we summarise whatever state the round is in.
         var expired = _clock.GetUtcNow() - batch.IngestedAt > MaxWait;
 
-        var report = await _report.BuildAsync(batch.Id, ct);
+        var report = await _report.BuildAsync(batch.Id, ct: ct);
         if (report is null)
         {
             // The round produced no recipients (e.g. all rows rejected, or a

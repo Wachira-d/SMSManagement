@@ -162,8 +162,15 @@ public sealed class DeliveryStatusReconciler : IDeliveryStatusReconciler
 
         var result = await query.QueryAsync(msg.ProjectId, msg.ProviderMessageId!, ct);
         if (result.Status is null) return false;
-        if (result.Status == msg.Status) return false;
 
+        // Stamp the DN-received timestamp + detail on every successful pull,
+        // even if the status didn't change — gives the operator a "we asked
+        // and the provider said still-in-flight at this time" trail.
+        msg.DnReceivedAt = now;
+        if (result.StatusDetail is not null) msg.StatusDetail = result.StatusDetail;
+        msg.StatusSource = "pull";
+
+        if (result.Status == msg.Status) return false;
         // Mirror DlrController.ApplyAsync: don't downgrade Delivered.
         if (msg.Status == SmsStatus.Delivered && result.Status != SmsStatus.Delivered)
             return false;

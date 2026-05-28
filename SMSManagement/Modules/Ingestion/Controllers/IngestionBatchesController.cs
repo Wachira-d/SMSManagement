@@ -337,7 +337,8 @@ public sealed class IngestionBatchesController : ControllerBase
         Guid projectId, Guid batchId,
         [FromServices] Modules.Notifications.IRoundReportService reports,
         [FromServices] IDeliveryStatusReconciler reconciler,
-        CancellationToken ct)
+        [FromQuery] bool expand = false,
+        CancellationToken ct = default)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
         var exists = await _db.IngestionBatches
@@ -349,7 +350,9 @@ public sealed class IngestionBatchesController : ControllerBase
         await reconciler.ReconcileProjectAsync(
             projectId, minAge: TimeSpan.FromMinutes(10), maxMessages: 2000, ct);
 
-        var report = await reports.BuildAsync(batchId, ct);
+        // ?expand=true emits one row per SMS (reminders / retries visible);
+        // default keeps the latest-only view to match the round-summary email.
+        var report = await reports.BuildAsync(batchId, expandSms: expand, ct: ct);
         if (report is null)
             return NotFound(new { Message = "This round produced no recipients to report." });
         return File(report.Csv, "text/csv", $"sms-round-{batchId:N}.csv");

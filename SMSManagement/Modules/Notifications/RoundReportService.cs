@@ -22,8 +22,14 @@ public interface IRoundReportService
     /// Builds the per-recipient CSV report for one ingestion batch — the mapped
     /// source columns joined with the SMS outcome and shortlink click activity.
     /// Returns null when the batch produced no workflow instances.
+    ///
+    /// When <paramref name="expandSms"/> is true the report emits one row per
+    /// SMS attempt rather than one row per recipient — useful for workflows
+    /// that send reminders or retry, where the latest-only view hides the
+    /// timeline. The default (false) is backwards-compatible.
     /// </summary>
-    Task<RoundReport?> BuildAsync(Guid batchId, CancellationToken ct = default);
+    Task<RoundReport?> BuildAsync(
+        Guid batchId, bool expandSms = false, CancellationToken ct = default);
 }
 
 public sealed class RoundReportService : IRoundReportService
@@ -46,21 +52,26 @@ public sealed class RoundReportService : IRoundReportService
     private sealed record Sms(
         Guid InstanceId, string Provider, string? SenderId, SmsStatus Status,
         short Attempts, DateTimeOffset CreatedAt, DateTimeOffset? SentAt,
-        DateTimeOffset? DeliveredAt, string? ErrorCode, string? ProviderMessageId,
-        string? RawProviderResponse, byte[] EncryptedBody);
+        DateTimeOffset? DeliveredAt, DateTimeOffset? DnReceivedAt,
+        string? ErrorCode, string? StatusDetail, string? StatusSource,
+        string? ProviderMessageId, string? RawProviderResponse, byte[] EncryptedBody);
 
     private sealed record Click(Guid ShortlinkId, DateTimeOffset ClickedAt);
 
     private sealed record Row(
         string MaskedPhone, WorkflowState State,
         IReadOnlyDictionary<string, string> Source,
-        int SmsCount, string? Provider, string? SenderId, SmsStatus? SmsStatus,
+        int SmsCount, int SmsIndex,
+        string? Provider, string? SenderId, SmsStatus? SmsStatus,
         short Attempts, DateTimeOffset? SentAt, DateTimeOffset? DeliveredAt,
-        string? ErrorCode, string? ProviderMessageId, string? ProviderResponse,
+        DateTimeOffset? DnReceivedAt,
+        string? ErrorCode, string? StatusDetail, string? StatusSource,
+        string? ProviderMessageId, string? ProviderResponse,
         string Body, string? ShortlinkUrl, string? ShortlinkTarget,
         int ClickCount, DateTimeOffset? FirstClickedAt);
 
-    public async Task<RoundReport?> BuildAsync(Guid batchId, CancellationToken ct = default)
+    public async Task<RoundReport?> BuildAsync(
+        Guid batchId, bool expandSms = false, CancellationToken ct = default)
     {
         // IgnoreQueryFilters: serves the background notifier (no user) and an
         // already-access-checked controller alike.
@@ -80,8 +91,9 @@ public sealed class RoundReportService : IRoundReportService
             .Where(m => m.WorkflowInstanceId != null && ids.Contains(m.WorkflowInstanceId.Value))
             .Select(m => new Sms(
                 m.WorkflowInstanceId!.Value, m.Provider, m.SenderId, m.Status, m.Attempts,
-                m.CreatedAt, m.SentAt, m.DeliveredAt, m.ErrorCode, m.ProviderMessageId,
-                m.RawProviderResponse, m.EncryptedBody))
+                m.CreatedAt, m.SentAt, m.DeliveredAt, m.DnReceivedAt,
+                m.ErrorCode, m.StatusDetail, m.StatusSource,
+                m.ProviderMessageId, m.RawProviderResponse, m.EncryptedBody))
             .ToListAsync(ct);
         var anyNonFinalSms = sms.Any(m => m.Status is
             SmsStatus.Queued or SmsStatus.Sending or SmsStatus.Sent);
@@ -108,8 +120,11 @@ public sealed class RoundReportService : IRoundReportService
             ? _slOpts.CurrentValue.PublicBaseUrl ?? string.Empty
             : projBase).TrimEnd('/');
 
+        // Order ascending by CreatedAt so multi-SMS expansion yields rows in
+        // chronological order; the latest-only path keeps picking [0] but
+        // does so against the LAST element instead — pre-compute both views.
         var smsByInstance = sms.GroupBy(m => m.InstanceId)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(m => m.CreatedAt).ToList());
+            .ToDictionary(g => g.Key, g => g.OrderBy(m => m.CreatedAt).ToList());
         var slByInstance = shortlinks
             .Where(s => s.WorkflowInstanceId != null)
             .GroupBy(s => s.WorkflowInstanceId!.Value)
@@ -128,23 +143,47 @@ public sealed class RoundReportService : IRoundReportService
             }
             catch { src = new(); }
 
-            var msgs = smsByInstance.GetValueOrDefault(inst.Id);
-            var latest = msgs?.FirstOrDefault();
+            var msgs = smsByInstance.GetValueOrDefault(inst.Id) ?? new();
             var sl = slByInstance.GetValueOrDefault(inst.Id);
             var slUrl = sl is null ? null
                 : string.IsNullOrEmpty(baseUrl) ? sl.Slug : $"{baseUrl}/{sl.Slug}";
             DateTimeOffset? firstClick =
                 sl is not null && firstClickBySl.TryGetValue(sl.Id, out var fc) ? fc : null;
+            var slTarget = sl is null ? null : Decrypt(sl.EncryptedTargetUrl);
 
-            rows.Add(new Row(
-                inst.MaskedPhone, inst.State, src,
-                msgs?.Count ?? 0,
-                latest?.Provider, latest?.SenderId, latest?.Status,
-                latest?.Attempts ?? 0, latest?.SentAt, latest?.DeliveredAt,
-                latest?.ErrorCode, latest?.ProviderMessageId, latest?.RawProviderResponse,
-                latest is null ? string.Empty : Decrypt(latest.EncryptedBody),
-                slUrl, sl is null ? null : Decrypt(sl.EncryptedTargetUrl),
-                sl?.ClickCount ?? 0, firstClick));
+            if (msgs.Count == 0)
+            {
+                // Workflow instance with no SMS yet — still emit one row so
+                // recipients without dispatches are visible in the report.
+                rows.Add(new Row(
+                    inst.MaskedPhone, inst.State, src,
+                    SmsCount: 0, SmsIndex: 0,
+                    null, null, null, 0, null, null, null,
+                    null, null, null, null, null, string.Empty,
+                    slUrl, slTarget, sl?.ClickCount ?? 0, firstClick));
+                continue;
+            }
+
+            // expandSms=false: one row per recipient — the LATEST SMS wins
+            // (matches the existing behaviour the round-summary email uses).
+            var msgsToEmit = expandSms ? msgs : new List<Sms> { msgs[^1] };
+            for (var i = 0; i < msgsToEmit.Count; i++)
+            {
+                var m = msgsToEmit[i];
+                // Index in the per-instance list — for expandSms reflects
+                // chronological position (1-based); for latest-only it's the
+                // index of the latest message within all attempts.
+                var idx = expandSms ? i + 1 : msgs.Count;
+                rows.Add(new Row(
+                    inst.MaskedPhone, inst.State, src,
+                    SmsCount: msgs.Count, SmsIndex: idx,
+                    m.Provider, m.SenderId, m.Status,
+                    m.Attempts, m.SentAt, m.DeliveredAt, m.DnReceivedAt,
+                    m.ErrorCode, m.StatusDetail, m.StatusSource,
+                    m.ProviderMessageId, m.RawProviderResponse,
+                    Decrypt(m.EncryptedBody),
+                    slUrl, slTarget, sl?.ClickCount ?? 0, firstClick));
+            }
         }
 
         return new RoundReport(
@@ -170,12 +209,18 @@ public sealed class RoundReportService : IRoundReportService
 
         var sb = new StringBuilder();
         sb.Append('﻿');   // UTF-8 BOM — Excel opens it cleanly
+        // New DN-detail columns (DnReceivedAt, StatusDetail, StatusSource,
+        // DeliveryLatencySec, DeliveryLatency, SmsIndex) appended at the end
+        // so existing tools that read by column index keep working.
         var header = sourceCols.Select(c => "src_" + c)
             .Concat(new[]
             {
-                "Recipient", "WorkflowState", "SmsCount", "SmsStatus",
+                "Recipient", "WorkflowState", "SmsCount", "SmsIndex", "SmsStatus",
                 "SentAt", "SentDate", "SentTime",
-                "DeliveredAt", "Attempts", "Provider", "Sender",
+                "DeliveredAt", "DnReceivedAt",
+                "DeliveryLatencySec", "DeliveryLatency",
+                "StatusDetail", "StatusSource",
+                "Attempts", "Provider", "Sender",
                 "ErrorCode", "ProviderMessageId", "ProviderResponse", "MessageBody",
                 "ShortlinkUrl", "ShortlinkTarget", "Clicked", "ClickCount", "FirstClickedAt"
             });
@@ -183,12 +228,13 @@ public sealed class RoundReportService : IRoundReportService
 
         foreach (var r in rows)
         {
-            var cells = new List<string>(sourceCols.Count + 20);
+            var cells = new List<string>(sourceCols.Count + 26);
             foreach (var c in sourceCols)
                 cells.Add(Csv(r.Source.TryGetValue(c, out var v) ? v : string.Empty));
             cells.Add(Csv(r.MaskedPhone));
             cells.Add(Csv(r.State.ToString()));
             cells.Add(Csv(r.SmsCount.ToString()));
+            cells.Add(Csv(r.SmsIndex.ToString()));
             cells.Add(Csv(r.SmsStatus?.ToString()));
             // All timestamps are formatted in the operator's local timezone
             // (Asia/Bangkok). SentDate/SentTime are split from the same local
@@ -197,6 +243,14 @@ public sealed class RoundReportService : IRoundReportService
             cells.Add(Csv(LocalTime.Format(r.SentAt, "yyyy-MM-dd")));
             cells.Add(Csv(LocalTime.Format(r.SentAt, "HH:mm:ss")));
             cells.Add(Csv(LocalTime.Format(r.DeliveredAt)));
+            cells.Add(Csv(LocalTime.Format(r.DnReceivedAt)));
+            var latency = r.SentAt is not null && r.DeliveredAt is not null
+                ? (r.DeliveredAt.Value - r.SentAt.Value)
+                : (TimeSpan?)null;
+            cells.Add(Csv(latency is null ? "" : ((long)latency.Value.TotalSeconds).ToString()));
+            cells.Add(Csv(FormatLatency(latency)));
+            cells.Add(Csv(r.StatusDetail));
+            cells.Add(Csv(r.StatusSource));
             cells.Add(Csv(r.Attempts.ToString()));
             cells.Add(Csv(r.Provider));
             cells.Add(Csv(r.SenderId));
@@ -219,6 +273,17 @@ public sealed class RoundReportService : IRoundReportService
         try { return _crypto.Decrypt(cipher); }
         catch { return "(decrypt failed)"; }
     }
+
+    /// <summary>Human-readable latency for the CSV — magnitude chosen by size
+    /// so 12 seconds reads as "12s" and 95 seconds as "1m 35s".</summary>
+    private static string FormatLatency(TimeSpan? t) => t switch
+    {
+        null                                  => string.Empty,
+        { TotalSeconds: < 10 }   => $"{t.Value.TotalSeconds:F1}s",
+        { TotalSeconds: < 60 }   => $"{(int)t.Value.TotalSeconds}s",
+        { TotalMinutes: < 60 }   => $"{t.Value.Minutes}m {t.Value.Seconds}s",
+        _                                     => $"{(int)t.Value.TotalHours}h {t.Value.Minutes}m"
+    };
 
     private static string Csv(string? v)
     {

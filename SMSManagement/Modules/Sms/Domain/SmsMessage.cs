@@ -55,6 +55,24 @@ public sealed class SmsMessage
     /// re-asked on every report download).</summary>
     public DateTimeOffset? LastStatusQueryAt { get; set; }
 
+    /// <summary>When we received any delivery notification — push OR pull —
+    /// regardless of the resulting status. Differs from <see cref="DeliveredAt"/>
+    /// in that a Failed/Rejected DN also stamps this column, so a timeline
+    /// for non-Delivered messages exists.</summary>
+    public DateTimeOffset? DnReceivedAt { get; set; }
+
+    /// <summary>Verbatim status word + carrier detail from the provider's last
+    /// DN (e.g. <c>DELIVERED: 11:05:23 +0700</c> or <c>UNDELIVERED: phone
+    /// off</c>). Informational column for the operator; the machine-readable
+    /// failure category lives in <see cref="ErrorCode"/>.</summary>
+    public string? StatusDetail { get; set; }
+
+    /// <summary>Which path most recently wrote <see cref="Status"/>:
+    /// <c>webhook</c> for the push DN, <c>pull</c> for the reconciler's
+    /// status query. Useful for diagnosing DN reliability — a high ratio of
+    /// <c>pull</c> means the provider's DN webhook is dropping.</summary>
+    public string? StatusSource { get; set; }
+
     /// <summary>Verbatim provider response from the last dispatch attempt
     /// (etracker gateway body / Infobip payload). Diagnostic only — surfaced
     /// in the SMS detail view so operators can see why a send was rejected.</summary>

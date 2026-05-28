@@ -78,10 +78,15 @@ public sealed class DlrController : ControllerBase
             ? $"DN_{status.ToUpperInvariant()}"
               + (string.IsNullOrWhiteSpace(detail) ? "" : $": {detail}")
             : null;
+        // StatusDetail is informational for ALL statuses (incl. DELIVERED) so
+        // the operator sees the raw provider text — "DELIVERED: 11:05:23" etc.
+        var statusDetail = string.IsNullOrWhiteSpace(detail)
+            ? status.ToUpperInvariant()
+            : $"{status.ToUpperInvariant()}: {detail}";
 
         _log.LogInformation("etracker DN msgID={MsgId} status={Status} -> {Mapped}",
             msgId, status, mapped);
-        await ApplyAsync("etracker", msgId, mapped, code, ct);
+        await ApplyAsync("etracker", msgId, mapped, code, statusDetail, ct);
         return Ok();
     }
 
@@ -115,7 +120,8 @@ public sealed class DlrController : ControllerBase
                         && st.TryGetProperty("groupName", out var gn) ? gn.GetString() : null;
             if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(group)) continue;
             _log.LogInformation("Infobip DN messageId={MsgId} group={Group}", id, group);
-            await ApplyAsync("infobip", id, DlrStatusMap.Map(group), null, ct);
+            await ApplyAsync("infobip", id, DlrStatusMap.Map(group), null,
+                statusDetail: group.ToUpperInvariant(), ct);
         }
         return Ok();
     }
@@ -173,7 +179,7 @@ public sealed class DlrController : ControllerBase
 
     private async Task ApplyAsync(
         string provider, string providerMessageId, SmsStatus newStatus,
-        string? errorCode, CancellationToken ct)
+        string? errorCode, string? statusDetail, CancellationToken ct)
     {
         // IgnoreQueryFilters: the DLR webhook is an anonymous (token-verified)
         // provider callback — it has no user context, so the project-scope
@@ -191,19 +197,28 @@ public sealed class DlrController : ControllerBase
             return;
         }
 
+        // Stamp the "we received a DN" trail on every webhook hit, even for
+        // late/duplicate receipts — gives the report a non-null DnReceivedAt
+        // for Failed/Rejected rows that aren't otherwise timestamped.
+        var now = _clock.GetUtcNow();
+        msg.DnReceivedAt = now;
+        if (statusDetail is not null) msg.StatusDetail = statusDetail;
+        msg.StatusSource = "webhook";
+
         // Delivered is terminal — a late ACCEPTED/PROCESSING receipt (DNs can
         // arrive out of order) must not downgrade it.
         if (msg.Status == SmsStatus.Delivered && newStatus != SmsStatus.Delivered)
         {
             _log.LogInformation("DLR {Status} for already-delivered {Provider}/{Id} — ignored.",
                 newStatus, provider, providerMessageId);
+            await _db.SaveChangesAsync(ct);
             return;
         }
 
         msg.Status = newStatus;
         if (newStatus == SmsStatus.Delivered)
         {
-            msg.DeliveredAt = _clock.GetUtcNow();
+            msg.DeliveredAt = now;
             _metrics.SmsDelivered.Add(1, KeyValuePair.Create<string, object?>("provider", provider));
         }
         else if (newStatus is SmsStatus.Failed or SmsStatus.Rejected)

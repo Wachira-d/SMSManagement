@@ -72,7 +72,7 @@ public sealed class IngestionBatchNotifierTests
 
     private sealed class StubReport : IRoundReportService
     {
-        public Task<RoundReport?> BuildAsync(Guid batchId, CancellationToken ct = default)
+        public Task<RoundReport?> BuildAsync(Guid batchId, bool expandSms = false, CancellationToken ct = default)
             => Task.FromResult<RoundReport?>(null);
     }
 

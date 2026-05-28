@@ -127,8 +127,9 @@ public sealed class SmsController : ControllerBase
             .Select(x => new
             {
                 x.Id, x.Provider, x.SenderId, x.Status, x.MaskedTo, x.Attempts,
-                x.CreatedAt, x.ScheduledFor, x.SentAt, x.DeliveredAt,
-                x.ProviderMessageId, x.ErrorCode, x.RawProviderResponse, x.EncryptedBody
+                x.CreatedAt, x.ScheduledFor, x.SentAt, x.DeliveredAt, x.DnReceivedAt,
+                x.ProviderMessageId, x.ErrorCode, x.StatusDetail, x.StatusSource,
+                x.RawProviderResponse, x.EncryptedBody
             })
             .FirstOrDefaultAsync(ct);
         if (m is null) return NotFound();
@@ -142,8 +143,9 @@ public sealed class SmsController : ControllerBase
         return Ok(new
         {
             m.Id, m.Provider, m.SenderId, m.Status, m.MaskedTo, m.Attempts,
-            m.CreatedAt, m.ScheduledFor, m.SentAt, m.DeliveredAt,
-            m.ProviderMessageId, m.ErrorCode, m.RawProviderResponse,
+            m.CreatedAt, m.ScheduledFor, m.SentAt, m.DeliveredAt, m.DnReceivedAt,
+            m.ProviderMessageId, m.ErrorCode, m.StatusDetail, m.StatusSource,
+            m.RawProviderResponse,
             Body = body
         });
     }
@@ -220,7 +222,8 @@ public sealed class SmsController : ControllerBase
             .Select(x => new
             {
                 x.CreatedAt, x.MaskedTo, x.Provider, x.SenderId, x.Status,
-                x.Attempts, x.SentAt, x.DeliveredAt, x.ErrorCode,
+                x.Attempts, x.SentAt, x.DeliveredAt, x.DnReceivedAt,
+                x.ErrorCode, x.StatusDetail, x.StatusSource,
                 x.ProviderMessageId, x.RawProviderResponse, x.EncryptedBody
             })
             .ToListAsync(ct);
@@ -228,12 +231,17 @@ public sealed class SmsController : ControllerBase
         var sb = new System.Text.StringBuilder();
         sb.Append('﻿');   // UTF-8 BOM so Excel opens it cleanly
         sb.AppendLine("CreatedAt,Recipient,Provider,Sender,Status,Attempts,"
-                    + "SentAt,DeliveredAt,ErrorCode,ProviderMessageId,ProviderResponse,Body");
+                    + "SentAt,DeliveredAt,DnReceivedAt,DeliveryLatencySec,DeliveryLatency,"
+                    + "StatusDetail,StatusSource,"
+                    + "ErrorCode,ProviderMessageId,ProviderResponse,Body");
         foreach (var r in rows)
         {
             string body;
             try { body = _crypto.Decrypt(r.EncryptedBody); }
             catch { body = "(decrypt failed)"; }
+            var latency = r.SentAt is not null && r.DeliveredAt is not null
+                ? (r.DeliveredAt.Value - r.SentAt.Value)
+                : (TimeSpan?)null;
             sb.AppendLine(string.Join(',', new[]
             {
                 Csv(LocalTime.Format(r.CreatedAt)),
@@ -244,6 +252,11 @@ public sealed class SmsController : ControllerBase
                 Csv(r.Attempts.ToString()),
                 Csv(LocalTime.Format(r.SentAt)),
                 Csv(LocalTime.Format(r.DeliveredAt)),
+                Csv(LocalTime.Format(r.DnReceivedAt)),
+                Csv(latency is null ? "" : ((long)latency.Value.TotalSeconds).ToString()),
+                Csv(FormatLatency(latency)),
+                Csv(r.StatusDetail),
+                Csv(r.StatusSource),
                 Csv(r.ErrorCode),
                 Csv(r.ProviderMessageId),
                 Csv(r.RawProviderResponse),
@@ -261,4 +274,15 @@ public sealed class SmsController : ControllerBase
             ? "\"" + v.Replace("\"", "\"\"") + "\""
             : v;
     }
+
+    /// <summary>Human-readable latency for the CSV — magnitude chosen by size
+    /// so 12 seconds reads as "12s" and 95 seconds as "1m 35s".</summary>
+    private static string FormatLatency(TimeSpan? t) => t switch
+    {
+        null                                  => string.Empty,
+        { TotalSeconds: < 10 }   => $"{t.Value.TotalSeconds:F1}s",
+        { TotalSeconds: < 60 }   => $"{(int)t.Value.TotalSeconds}s",
+        { TotalMinutes: < 60 }   => $"{t.Value.Minutes}m {t.Value.Seconds}s",
+        _                                     => $"{(int)t.Value.TotalHours}h {t.Value.Minutes}m"
+    };
 }

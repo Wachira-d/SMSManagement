@@ -85,7 +85,7 @@ public sealed class IngestionBatchNotifier : IIngestionBatchNotifier
         EmailAttachment[]? attachments = null;
         try
         {
-            var report = await _report.BuildAsync(batch.Id, ct);
+            var report = await _report.BuildAsync(batch.Id, ct: ct);
             if (report is not null && report.Recipients > 0)
                 attachments = new[] { new EmailAttachment(
                     $"ingestion-{batch.Id:N}.csv", "text/csv", report.Csv) };
