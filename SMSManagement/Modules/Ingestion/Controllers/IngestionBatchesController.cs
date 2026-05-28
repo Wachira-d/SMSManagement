@@ -345,10 +345,11 @@ public sealed class IngestionBatchesController : ControllerBase
             .AnyAsync(b => b.Id == batchId && b.ProjectId == projectId, ct);
         if (!exists) return NotFound();
 
-        // Pull DN for any stale-Sent messages in this project before
-        // assembling the per-recipient report — same throttle as elsewhere.
-        await reconciler.ReconcileProjectAsync(
-            projectId, minAge: TimeSpan.FromMinutes(10), maxMessages: 2000, ct);
+        // Force-pull DN for every still-Sent SMS in this batch before
+        // assembling the CSV — bypasses minAge + cooldown so even a
+        // just-sent message gets queried. The user explicitly asked for
+        // this report, so cost-of-provider-call > cost-of-stale-data.
+        await reconciler.ForceReconcileBatchAsync(projectId, batchId, ct);
 
         // ?expand=true emits one row per SMS (reminders / retries visible);
         // default keeps the latest-only view to match the round-summary email.
@@ -356,5 +357,28 @@ public sealed class IngestionBatchesController : ControllerBase
         if (report is null)
             return NotFound(new { Message = "This round produced no recipients to report." });
         return File(report.Csv, "text/csv", $"sms-round-{batchId:N}.csv");
+    }
+
+    /// <summary>
+    /// On-demand force-pull the latest delivery status from the provider for
+    /// every still-Sent SMS in this round. Bypasses the 1-min minAge filter
+    /// and the per-message cooldown — operator clicked a button, they want
+    /// the truth NOW. Only useful when the provider's pull-status API is
+    /// configured (see <c>EtrackerOptions.QueryUrl</c>); otherwise the
+    /// reconciler skips the provider and returns 0.
+    /// </summary>
+    [HttpPost("{batchId:guid}/refresh-status")]
+    public async Task<IActionResult> RefreshStatus(
+        Guid projectId, Guid batchId,
+        [FromServices] IDeliveryStatusReconciler reconciler,
+        CancellationToken ct)
+    {
+        await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
+        var exists = await _db.IngestionBatches
+            .AnyAsync(b => b.Id == batchId && b.ProjectId == projectId, ct);
+        if (!exists) return NotFound();
+
+        var changed = await reconciler.ForceReconcileBatchAsync(projectId, batchId, ct);
+        return Ok(new { Changed = changed });
     }
 }

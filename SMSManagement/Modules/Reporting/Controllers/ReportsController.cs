@@ -25,7 +25,7 @@ public sealed class ReportsController : ControllerBase
     /// that wasn't covered here.</summary>
     private Task RefreshAsync(Guid projectId, CancellationToken ct)
         => _reconciler.ReconcileProjectAsync(
-            projectId, minAge: TimeSpan.FromMinutes(10), maxMessages: 2000, ct);
+            projectId, minAge: TimeSpan.FromMinutes(1), maxMessages: 2000, ct);
 
     // ---- JSON endpoints ----
 
@@ -173,7 +173,7 @@ public sealed class GlobalReportsController : ControllerBase
         // Cross-project sweep: refresh up to 5 000 stale-Sent messages
         // anywhere in the system before producing a global performance roll-up.
         await _reconciler.ReconcileStaleAsync(
-            minAge: TimeSpan.FromMinutes(10), maxMessages: 5000, ct);
+            minAge: TimeSpan.FromMinutes(1), maxMessages: 5000, ct);
         var rows = await _svc.ProviderPerformanceAsync(new DateRange(from, to), ct);
         var ms = new MemoryStream();
         await _svc.ExportCsvAsync(rows, ms, ct);

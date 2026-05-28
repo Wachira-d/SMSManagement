@@ -28,4 +28,11 @@ public interface IDeliveryStatusReconciler
     /// on the SMS detail screen. Returns null if the message isn't in a state
     /// that warrants a query (Delivered/Failed/Rejected are terminal).</summary>
     Task<bool?> ReconcileMessageAsync(Guid messageId, CancellationToken ct);
+
+    /// <summary>Force-refresh every still-Sent SMS attached to one ingestion
+    /// batch — bypasses both the per-message cooldown and the "too young"
+    /// minAge filter that normally throttle automatic refresh. Wired to the
+    /// "Refresh status" button on the batch detail modal so an operator can
+    /// see the latest state on demand even for a just-sent message.</summary>
+    Task<int> ForceReconcileBatchAsync(Guid projectId, Guid batchId, CancellationToken ct);
 }

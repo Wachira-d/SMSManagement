@@ -720,6 +720,12 @@ window.showRunDetail = async function (batchId) {
                    href="${api_proj}/ingestion-batches/${esc(batchId)}/report.csv"
                    target="_blank" class="btn btn-sm btn-outline-secondary">
                    <i class="bi bi-download"></i> ดาวน์โหลดรายงานรอบนี้ (CSV)</a>
+                <button id="refreshDnBtn-${esc(batchId)}" type="button"
+                        class="btn btn-sm btn-outline-secondary"
+                        title="ดึงสถานะล่าสุดจาก provider สำหรับทุก SMS ที่ยัง Sent (ใช้เมื่อ DN webhook ไม่กลับมา)">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh status
+                </button>
+                <span id="refreshDnResult-${esc(batchId)}" class="small text-muted"></span>
                 <div class="form-check form-check-inline small mb-0">
                     <input id="reportExpand-${esc(batchId)}" type="checkbox"
                            class="form-check-input" />
@@ -821,6 +827,34 @@ window.showRunDetail = async function (batchId) {
             const base = dl.getAttribute('href').split('?')[0];
             expand.addEventListener('change', () => {
                 dl.setAttribute('href', expand.checked ? `${base}?expand=true` : base);
+            });
+        }
+
+        // "Refresh status" force-pulls DN from the provider for every Sent
+        // message in this batch (bypasses minAge + cooldown). The endpoint
+        // returns { changed: N } so we can surface "N updated" inline next
+        // to the button — useful for confirming the click had effect.
+        const rfBtn = document.getElementById(`refreshDnBtn-${batchId}`);
+        const rfOut = document.getElementById(`refreshDnResult-${batchId}`);
+        if (rfBtn && rfOut) {
+            rfBtn.addEventListener('click', async () => {
+                rfBtn.disabled = true;
+                rfOut.textContent = 'กำลังถาม provider…';
+                rfOut.className = 'small text-muted';
+                try {
+                    const r = await api.post(
+                        `${api_proj}/ingestion-batches/${batchId}/refresh-status`, {});
+                    rfOut.textContent = r.changed > 0
+                        ? `อัปเดตสถานะ ${r.changed} ข้อความ — กดดาวน์โหลดอีกครั้งเพื่อดู`
+                        : 'ไม่มีการเปลี่ยนแปลง (provider บอกสถานะเดิม หรือ pull API ยังไม่ตั้งค่า)';
+                    rfOut.className = r.changed > 0
+                        ? 'small text-success' : 'small text-muted';
+                } catch (e) {
+                    rfOut.textContent = e.message;
+                    rfOut.className = 'small text-danger';
+                } finally {
+                    rfBtn.disabled = false;
+                }
             });
         }
     } catch (e) {

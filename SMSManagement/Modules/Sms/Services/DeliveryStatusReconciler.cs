@@ -116,6 +116,25 @@ public sealed class DeliveryStatusReconciler : IDeliveryStatusReconciler
         return changed;
     }
 
+    public async Task<int> ForceReconcileBatchAsync(
+        Guid projectId, Guid batchId, CancellationToken ct)
+    {
+        // Pick every Sent message in the batch regardless of age/cooldown —
+        // operator clicked "Refresh status now", they want the truth, not
+        // the throttled view.
+        var candidates = await _db.SmsMessages
+            .IgnoreQueryFilters()
+            .Where(m => m.ProjectId == projectId
+                     && m.Status == SmsStatus.Sent
+                     && m.ProviderMessageId != null
+                     && m.WorkflowInstanceId != null
+                     && _db.WorkflowInstances.Any(w => w.Id == m.WorkflowInstanceId
+                                                    && w.IngestionBatchId == batchId))
+            .ToListAsync(ct);
+
+        return await ProcessAsync(candidates, ct);
+    }
+
     private async Task<int> ProcessAsync(List<SmsMessage> candidates, CancellationToken ct)
     {
         if (candidates.Count == 0) return 0;
