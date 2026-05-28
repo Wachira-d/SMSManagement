@@ -115,7 +115,12 @@ public sealed class AdminSettingsController : ControllerBase
                 Webhooks = MaskSecrets(new
                 {
                     _dlr.Value.EtrackerDnToken,
-                    _dlr.Value.InfobipDnToken
+                    _dlr.Value.InfobipDnToken,
+                    // Non-secret — operator must see what they configured.
+                    _dlr.Value.EtrackerDnAllowedIps,
+                    _dlr.Value.InfobipDnAllowedIps,
+                    _dlr.Value.EtrackerDnAllowAnonymous,
+                    _dlr.Value.InfobipDnAllowAnonymous
                 }),
                 WebhookBaseUrl = $"{Request.Scheme}://{Request.Host}/api/sms/dlr"
             },

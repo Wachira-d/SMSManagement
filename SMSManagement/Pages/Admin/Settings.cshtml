@@ -48,17 +48,41 @@
                                        placeholder="paste a long random secret (leave blank to keep current)"
                                        autocomplete="new-password" />
                                 <div class="form-text">
-                                    Set this token, then on the MacroKiosk portal point the
-                                    Delivery Notification URL at:
-                                    <code id="setEtDnUrl">…</code>
+                                    Use whichever scheme the MacroKiosk portal supports — any
+                                    one is enough. URLs run on port 80 (HTTP) or 443 (HTTPS).
+                                    <ul class="mb-1 ps-3">
+                                        <li>Token in path: <code id="setEtDnUrl">…</code></li>
+                                        <li>Token in query: <code id="setEtDnUrlQ">…</code></li>
+                                        <li>Header: <code>X-DN-Token: &lt;YOUR_TOKEN&gt;</code> on <code id="setEtDnUrlH">…</code></li>
+                                    </ul>
                                 </div>
-                                <div class="mt-1">
-                                    <button id="btnEtDnTest" type="button"
-                                            class="btn btn-outline-secondary btn-sm">
-                                        <i class="bi bi-plug"></i> Test DN endpoint
-                                    </button>
-                                    <pre id="etDnTestResult" class="small mt-2 d-none"></pre>
-                                </div></div>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small">Allowed source IPs
+                                    <span class="text-muted">(optional, one per line)</span></label>
+                                <textarea id="setEtIps" rows="2" class="form-control form-control-sm"
+                                          placeholder="203.0.113.10&#10;203.0.113.11"></textarea>
+                                <div class="form-text">
+                                    Requests from these IPs are accepted without a token.
+                                    Leave blank if the provider sends a token.
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="form-check">
+                                    <input id="setEtAnon" type="checkbox" class="form-check-input" />
+                                    <label class="form-check-label small text-danger" for="setEtAnon">
+                                        Accept DN without any authentication
+                                        <span class="text-muted">(danger — anyone can post status updates)</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <button id="btnEtDnTest" type="button"
+                                        class="btn btn-outline-secondary btn-sm">
+                                    <i class="bi bi-plug"></i> Test DN endpoint
+                                </button>
+                                <pre id="etDnTestResult" class="small mt-2 d-none"></pre>
+                            </div>
                             <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
                         </form>
                     </div>
@@ -84,16 +108,41 @@
                                        placeholder="paste a long random secret (leave blank to keep current)"
                                        autocomplete="new-password" />
                                 <div class="form-text">
-                                    Point the Infobip delivery-report URL at:
-                                    <code id="setIbDnUrl">…</code>
+                                    Use whichever scheme the Infobip portal supports — any
+                                    one is enough. URLs run on port 80 (HTTP) or 443 (HTTPS).
+                                    <ul class="mb-1 ps-3">
+                                        <li>Token in path: <code id="setIbDnUrl">…</code></li>
+                                        <li>Token in query: <code id="setIbDnUrlQ">…</code></li>
+                                        <li>Header: <code>X-DN-Token: &lt;YOUR_TOKEN&gt;</code> on <code id="setIbDnUrlH">…</code></li>
+                                    </ul>
                                 </div>
-                                <div class="mt-1">
-                                    <button id="btnIbDnTest" type="button"
-                                            class="btn btn-outline-secondary btn-sm">
-                                        <i class="bi bi-plug"></i> Test DN endpoint
-                                    </button>
-                                    <pre id="ibDnTestResult" class="small mt-2 d-none"></pre>
-                                </div></div>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small">Allowed source IPs
+                                    <span class="text-muted">(optional, one per line)</span></label>
+                                <textarea id="setIbIps" rows="2" class="form-control form-control-sm"
+                                          placeholder="203.0.113.10&#10;203.0.113.11"></textarea>
+                                <div class="form-text">
+                                    Requests from these IPs are accepted without a token.
+                                    Leave blank if the provider sends a token.
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="form-check">
+                                    <input id="setIbAnon" type="checkbox" class="form-check-input" />
+                                    <label class="form-check-label small text-danger" for="setIbAnon">
+                                        Accept DN without any authentication
+                                        <span class="text-muted">(danger — anyone can post status updates)</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <button id="btnIbDnTest" type="button"
+                                        class="btn btn-outline-secondary btn-sm">
+                                    <i class="bi bi-plug"></i> Test DN endpoint
+                                </button>
+                                <pre id="ibDnTestResult" class="small mt-2 d-none"></pre>
+                            </div>
                             <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
                         </form>
                     </div>
@@ -285,13 +334,42 @@
         const base = s.webhookBaseUrl || '';
         document.getElementById('setEtDnMark').classList.toggle('d-none', !isStored(wh.EtrackerDnToken));
         document.getElementById('setIbDnMark').classList.toggle('d-none', !isStored(wh.InfobipDnToken));
-        // The provider can authenticate using any one of: query param, path
-        // segment, or X-DN-Token header. Show the simplest URL form here
-        // (token in path, port 80) since providers that can't carry a query
-        // string are the reason this fallback exists.
+        // The provider can authenticate via any of: token-in-path, query, or
+        // X-DN-Token header — or just be on the IP allowlist / anonymous flag.
+        // Show all URL variants on plain HTTP (port 80) since the redirect to
+        // HTTPS is skipped for /api/sms/dlr; the operator can also use HTTPS.
         const httpBase = base.replace(/^https:/i, 'http:');
-        document.getElementById('setEtDnUrl').textContent = base ? `${httpBase}/etracker/<YOUR_TOKEN>` : '';
-        document.getElementById('setIbDnUrl').textContent = base ? `${httpBase}/infobip/<YOUR_TOKEN>`  : '';
+        if (base) {
+            document.getElementById('setEtDnUrl').textContent  = `${httpBase}/etracker/<YOUR_TOKEN>`;
+            document.getElementById('setEtDnUrlQ').textContent = `${httpBase}/etracker?token=<YOUR_TOKEN>`;
+            document.getElementById('setEtDnUrlH').textContent = `${httpBase}/etracker`;
+            document.getElementById('setIbDnUrl').textContent  = `${httpBase}/infobip/<YOUR_TOKEN>`;
+            document.getElementById('setIbDnUrlQ').textContent = `${httpBase}/infobip?token=<YOUR_TOKEN>`;
+            document.getElementById('setIbDnUrlH').textContent = `${httpBase}/infobip`;
+        }
+        document.getElementById('setEtIps').value  = (wh.EtrackerDnAllowedIps || []).join('\n');
+        document.getElementById('setIbIps').value  = (wh.InfobipDnAllowedIps  || []).join('\n');
+        document.getElementById('setEtAnon').checked = !!wh.EtrackerDnAllowAnonymous;
+        document.getElementById('setIbAnon').checked = !!wh.InfobipDnAllowAnonymous;
+    }
+
+    // Split a textarea (one IP per line), drop blanks, and reject anything
+    // that isn't a syntactically-valid IPv4 / IPv6 literal — the backend's
+    // allowlist does exact string match, so typos here would silently let
+    // nothing through.
+    function parseIps(raw) {
+        const ips = [];
+        const errors = [];
+        for (const line of (raw || '').split(/\r?\n/)) {
+            const ip = line.trim();
+            if (!ip) continue;
+            const v4 = /^(\d{1,3}\.){3}\d{1,3}$/;
+            const v6 = /^[0-9a-fA-F:]+$/;
+            if (v4.test(ip) && ip.split('.').every(o => +o >= 0 && +o <= 255)) ips.push(ip);
+            else if (v6.test(ip) && ip.includes(':')) ips.push(ip);
+            else errors.push(ip);
+        }
+        return { ips, errors };
     }
     function fillSmtp(s) {
         document.getElementById('smtpHost').value     = s.Host || '';
@@ -350,11 +428,18 @@
 
     document.getElementById('formSetEtracker').addEventListener('submit', async (ev) => {
         ev.preventDefault();
+        const ips = parseIps(document.getElementById('setEtIps').value);
+        if (ips.errors.length) {
+            toast(`Not valid IP(s): ${ips.errors.join(', ')}`, 'danger');
+            return;
+        }
         const items = [
             { key: 'Sms:Providers:Etracker:BaseUrl',         category: 'Sms', value: document.getElementById('setEtBase').value },
             { key: 'Sms:Providers:Etracker:Username',        category: 'Sms', value: document.getElementById('setEtUser').value },
             { key: 'Sms:Providers:Etracker:DefaultSenderId', category: 'Sms', value: document.getElementById('setEtSender').value },
-            { key: 'Sms:Providers:Etracker:DefaultType',     category: 'Sms', value: document.getElementById('setEtType').value }
+            { key: 'Sms:Providers:Etracker:DefaultType',     category: 'Sms', value: document.getElementById('setEtType').value },
+            { key: 'Sms:Webhooks:EtrackerDnAllowedIps',      category: 'Sms', value: ips.ips },
+            { key: 'Sms:Webhooks:EtrackerDnAllowAnonymous',  category: 'Sms', value: document.getElementById('setEtAnon').checked }
         ];
         if (nonBlank(document.getElementById('setEtPwd').value))
             items.push({ key: 'Sms:Providers:Etracker:Password', category: 'Sms',
@@ -370,9 +455,16 @@
 
     document.getElementById('formSetInfobip').addEventListener('submit', async (ev) => {
         ev.preventDefault();
+        const ips = parseIps(document.getElementById('setIbIps').value);
+        if (ips.errors.length) {
+            toast(`Not valid IP(s): ${ips.errors.join(', ')}`, 'danger');
+            return;
+        }
         const items = [
             { key: 'Sms:Providers:Infobip:BaseUrl',         category: 'Sms', value: document.getElementById('setIbBase').value },
-            { key: 'Sms:Providers:Infobip:DefaultSenderId', category: 'Sms', value: document.getElementById('setIbSender').value }
+            { key: 'Sms:Providers:Infobip:DefaultSenderId', category: 'Sms', value: document.getElementById('setIbSender').value },
+            { key: 'Sms:Webhooks:InfobipDnAllowedIps',      category: 'Sms', value: ips.ips },
+            { key: 'Sms:Webhooks:InfobipDnAllowAnonymous',  category: 'Sms', value: document.getElementById('setIbAnon').checked }
         ];
         if (nonBlank(document.getElementById('setIbKey').value))
             items.push({ key: 'Sms:Providers:Infobip:ApiKey', category: 'Sms',

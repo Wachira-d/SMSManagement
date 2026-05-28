@@ -22,5 +22,13 @@ public sealed class DlrWebhookOptions
     /// URL with no query string / header customisation.</summary>
     public string[] EtrackerDnAllowedIps { get; init; } = Array.Empty<string>();
     public string[] InfobipDnAllowedIps  { get; init; } = Array.Empty<string>();
+
+    /// <summary>Last-resort escape hatch: accept the DN webhook unconditionally
+    /// — no token, no IP check. Only intended for providers whose portal
+    /// literally cannot carry a secret or be pinned to known IPs. Enabling
+    /// this lets anyone on the internet post status updates for messages whose
+    /// provider-side ID they can guess. Default: false.</summary>
+    public bool EtrackerDnAllowAnonymous { get; init; }
+    public bool InfobipDnAllowAnonymous  { get; init; }
 }
 

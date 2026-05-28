@@ -57,7 +57,8 @@ public sealed class DlrController : ControllerBase
     public async Task<IActionResult> Etracker(string? token, CancellationToken ct)
     {
         var opts = _secrets.CurrentValue;
-        if (!IsAuthorised(opts.EtrackerDnToken, opts.EtrackerDnAllowedIps, token))
+        if (!IsAuthorised(opts.EtrackerDnToken, opts.EtrackerDnAllowedIps,
+                          opts.EtrackerDnAllowAnonymous, token))
         {
             _log.LogWarning("etracker DN rejected — missing/wrong token and IP not allowlisted.");
             return Unauthorized();
@@ -94,7 +95,8 @@ public sealed class DlrController : ControllerBase
     public async Task<IActionResult> Infobip(string? token, CancellationToken ct)
     {
         var opts = _secrets.CurrentValue;
-        if (!IsAuthorised(opts.InfobipDnToken, opts.InfobipDnAllowedIps, token))
+        if (!IsAuthorised(opts.InfobipDnToken, opts.InfobipDnAllowedIps,
+                          opts.InfobipDnAllowAnonymous, token))
         {
             _log.LogWarning("Infobip DN rejected — missing/wrong token and IP not allowlisted.");
             return Unauthorized();
@@ -120,12 +122,20 @@ public sealed class DlrController : ControllerBase
     // ---- helpers ----
 
     /// <summary>
-    /// Accepts the request if EITHER a valid token is supplied (in query
-    /// param, last path segment, or X-DN-Token header) OR the remote IP is
-    /// in the provider's allowlist. Token comparison is constant-time.
+    /// Accepts the request if ANY of the following holds (cheapest first):
+    /// <list type="number">
+    ///   <item>anonymous mode is enabled for the provider,</item>
+    ///   <item>a valid token is supplied in the route, query/form, or
+    ///         X-DN-Token header,</item>
+    ///   <item>the remote IP matches the provider's allowlist.</item>
+    /// </list>
+    /// Token comparison is constant-time.
     /// </summary>
-    private bool IsAuthorised(string? configuredToken, string[] allowedIps, string? routeToken)
+    private bool IsAuthorised(
+        string? configuredToken, string[] allowedIps, bool allowAnonymous,
+        string? routeToken)
     {
+        if (allowAnonymous) return true;
         if (TokenMatches(configuredToken, routeToken)) return true;
         if (TokenMatches(configuredToken, Param("token"))) return true;
         if (Request.Headers.TryGetValue("X-DN-Token", out var hv)
