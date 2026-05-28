@@ -136,32 +136,56 @@ public sealed class ProjectSmsConfigController : ControllerBase
         if (provider == "etracker")
         {
             var opts = DeserializeOrNull<EtrackerOptions>(row.EncryptedConfig);
+            // Existing ciphertext is unreadable — the AES-GCM key was rotated
+            // or restored from a different backup. Surface this explicitly so
+            // the UI can prompt for re-entry; otherwise a silent empty
+            // password is the next thing that ships to the gateway (→ 400).
+            if (opts is null)
+                return Ok(new
+                {
+                    Provider = provider,
+                    HasOverride = true,
+                    DecryptFailed = true,
+                    row.UpdatedAt,
+                    row.UpdatedByUserId
+                });
+
             return Ok(new
             {
                 Provider = provider,
                 HasOverride = true,
                 row.UpdatedAt,
                 row.UpdatedByUserId,
-                BaseUrl = opts?.BaseUrl,
-                Username = opts?.Username,
-                PasswordSet = !string.IsNullOrEmpty(opts?.Password),
-                DefaultSenderId = opts?.DefaultSenderId,
-                ServiceId = opts?.ServiceId,
-                DefaultType = opts?.DefaultType
+                BaseUrl = opts.BaseUrl,
+                Username = opts.Username,
+                PasswordSet = !string.IsNullOrEmpty(opts.Password),
+                DefaultSenderId = opts.DefaultSenderId,
+                ServiceId = opts.ServiceId,
+                DefaultType = opts.DefaultType
             });
         }
         else // infobip
         {
             var opts = DeserializeOrNull<InfobipOptions>(row.EncryptedConfig);
+            if (opts is null)
+                return Ok(new
+                {
+                    Provider = provider,
+                    HasOverride = true,
+                    DecryptFailed = true,
+                    row.UpdatedAt,
+                    row.UpdatedByUserId
+                });
+
             return Ok(new
             {
                 Provider = provider,
                 HasOverride = true,
                 row.UpdatedAt,
                 row.UpdatedByUserId,
-                BaseUrl = opts?.BaseUrl,
-                ApiKeySet = !string.IsNullOrEmpty(opts?.ApiKey),
-                DefaultSenderId = opts?.DefaultSenderId
+                BaseUrl = opts.BaseUrl,
+                ApiKeySet = !string.IsNullOrEmpty(opts.ApiKey),
+                DefaultSenderId = opts.DefaultSenderId
             });
         }
     }
@@ -175,6 +199,19 @@ public sealed class ProjectSmsConfigController : ControllerBase
         // Read existing so we don't clobber an already-stored password when the
         // caller leaves the field blank ("don't change").
         var (row, existing) = await LoadExistingAsync<EtrackerOptions>(projectId, "etracker", ct);
+
+        // Existing row is present but its ciphertext is undecryptable (key
+        // rotated). Saving with a blank password would persist "" — the next
+        // send call then ships an empty pass to the gateway and gets back 400.
+        // Force the operator to re-enter, with an explicit error so the UI can
+        // surface the cause instead of toasting a generic message.
+        if (row is not null && existing is null && string.IsNullOrWhiteSpace(dto.Password))
+            return BadRequest(new
+            {
+                Message = "Previous credentials cannot be decrypted (encryption key "
+                        + "rotated). Re-enter the password (and any other secrets) "
+                        + "to restore — the saved blob is unreadable."
+            });
 
         var merged = new EtrackerOptions
         {
@@ -201,6 +238,15 @@ public sealed class ProjectSmsConfigController : ControllerBase
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Admin, ct);
 
         var (row, existing) = await LoadExistingAsync<InfobipOptions>(projectId, "infobip", ct);
+
+        // Same undecryptable-existing guard as etracker — see above.
+        if (row is not null && existing is null && string.IsNullOrWhiteSpace(dto.ApiKey))
+            return BadRequest(new
+            {
+                Message = "Previous credentials cannot be decrypted (encryption key "
+                        + "rotated). Re-enter the API key to restore — the saved "
+                        + "blob is unreadable."
+            });
 
         var merged = new InfobipOptions
         {

@@ -177,7 +177,20 @@ public sealed class IngestionSettingsController : ControllerBase
             .FirstOrDefaultAsync(s => s.Id == settingsId && s.ProjectId == projectId, ct);
         if (row is null) return NotFound();
 
-        var configJson = _crypto.Decrypt(row.EncryptedConfig);
+        // Same encryption-key-rotated guard as the SMS provider config:
+        // decrypt fail = "saved blob is unreadable, re-enter to restore".
+        string configJson;
+        try { configJson = _crypto.Decrypt(row.EncryptedConfig); }
+        catch
+        {
+            return Ok(new
+            {
+                Ok = false,
+                Message = "Saved source credentials cannot be decrypted "
+                        + "(encryption key rotated). Re-enter the source "
+                        + "config to restore."
+            });
+        }
         var result = await SourceConnectionTester.TestAsync(row.SourceType, configJson, ct);
         return Ok(new { result.Ok, result.Message });
     }

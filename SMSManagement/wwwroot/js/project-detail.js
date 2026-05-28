@@ -3190,18 +3190,45 @@ async function loadProviderConfig(provider) {
             document.getElementById('etServid').value  = r.serviceId ?? '';
             document.getElementById('etType').value    = r.defaultType ?? '';
             document.getElementById('etPwdMark').classList.toggle('d-none', !r.passwordSet);
-            document.getElementById('etStatus').textContent = r.hasOverride
-                ? `Override active · updated ${fmtDate(r.updatedAt)}`
-                : 'No override — using global defaults.';
+            renderProviderStatus('etStatus', 'etPwd', 'etracker', r);
         } else {
             document.getElementById('ibBaseUrl').value = r.baseUrl ?? '';
             document.getElementById('ibSender').value  = r.defaultSenderId ?? '';
             document.getElementById('ibKeyMark').classList.toggle('d-none', !r.apiKeySet);
-            document.getElementById('ibStatus').textContent = r.hasOverride
-                ? `Override active · updated ${fmtDate(r.updatedAt)}`
-                : 'No override — using global defaults.';
+            renderProviderStatus('ibStatus', 'ibKey', 'infobip', r);
         }
     } catch (e) { toast(e.message, 'danger'); }
+}
+
+// Surface decrypt failures inline so the operator sees the cause of an
+// otherwise-cryptic ETRACKER_400 / 401 the next time they hit Send. When the
+// stored ciphertext can't be read with the current key, the GET response
+// flags `decryptFailed: true`; show a red banner and force the secret field
+// to be re-entered before save will succeed.
+function renderProviderStatus(statusId, secretId, provider, r) {
+    const status = document.getElementById(statusId);
+    const secret = document.getElementById(secretId);
+    if (!status) return;
+    if (r.decryptFailed) {
+        status.innerHTML = '<span class="text-danger fw-semibold">'
+            + '⚠ Previous credentials cannot be decrypted '
+            + '(encryption key rotated). Re-enter the password to restore.'
+            + '</span>';
+        if (secret) {
+            secret.required = true;
+            secret.placeholder = 're-enter (previous saved value is unreadable)';
+            secret.classList.add('is-invalid');
+        }
+    } else {
+        status.textContent = r.hasOverride
+            ? `Override active · updated ${fmtDate(r.updatedAt)}`
+            : 'No override — using global defaults.';
+        if (secret) {
+            secret.required = false;
+            secret.placeholder = 'leave blank to keep current';
+            secret.classList.remove('is-invalid');
+        }
+    }
 }
 
 document.getElementById('formProvEtracker').addEventListener('submit', async (ev) => {
