@@ -32,14 +32,24 @@ public sealed class Project
     public string? NotificationSubjectPrefix { get; set; }
 
     // ---- Per-event notification toggles ----
-    // Default true (notify on everything) so a freshly-created project gets
-    // visibility into ingestion outcomes without extra setup.
+    // Operators want one email per round, sent after every DN has settled —
+    // not a separate "we received your file" email before the SMS even goes
+    // out. The success / partial ingest toggles therefore default to FALSE
+    // so a freshly-created project is quiet until the SMS round summary
+    // arrives. Ingest *failure* still defaults to true: if parsing failed,
+    // no workflows ever start, so the round summary will never fire and we'd
+    // otherwise lose the alert entirely.
 
-    /// <summary>Send an email when an ingestion batch completes with 0 rejected rows.</summary>
-    public bool NotifyOnIngestSuccess { get; set; } = true;
-    /// <summary>Send an email when an ingestion batch completes with some rejected rows.</summary>
-    public bool NotifyOnIngestPartial { get; set; } = true;
-    /// <summary>Send an email when an ingestion batch fails outright (status=Failed or 0 accepted).</summary>
+    /// <summary>Send an email when an ingestion batch completes with 0 rejected rows.
+    /// Default false — the SMS round summary covers the same data with actual
+    /// delivery status attached.</summary>
+    public bool NotifyOnIngestSuccess { get; set; }
+    /// <summary>Send an email when an ingestion batch completes with some rejected rows.
+    /// Default false — the SMS round summary surfaces the partial outcome.</summary>
+    public bool NotifyOnIngestPartial { get; set; }
+    /// <summary>Send an email when an ingestion batch fails outright (status=Failed or 0 accepted).
+    /// Default true — the round summary won't fire when there's nothing to summarise,
+    /// so this is the only alert path for parse failures.</summary>
     public bool NotifyOnIngestFailure { get; set; } = true;
 
     /// <summary>Send an email when every SMS produced by an ingestion batch has
