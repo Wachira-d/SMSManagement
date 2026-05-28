@@ -715,9 +715,20 @@ window.showRunDetail = async function (batchId) {
                        class="text-danger text-decoration-none">ตก ${ing.rejectedRows} (ดูเหตุผล)</a>`
                 : '')
             + `</div>
-            <div class="mt-2"><a href="${api_proj}/ingestion-batches/${esc(batchId)}/report.csv"
-                 target="_blank" class="btn btn-sm btn-outline-secondary">
-                 <i class="bi bi-download"></i> ดาวน์โหลดรายงานรอบนี้ (CSV)</a></div>
+            <div class="mt-2 d-flex align-items-center gap-2 flex-wrap">
+                <a id="reportDlBtn-${esc(batchId)}"
+                   href="${api_proj}/ingestion-batches/${esc(batchId)}/report.csv"
+                   target="_blank" class="btn btn-sm btn-outline-secondary">
+                   <i class="bi bi-download"></i> ดาวน์โหลดรายงานรอบนี้ (CSV)</a>
+                <div class="form-check form-check-inline small mb-0">
+                    <input id="reportExpand-${esc(batchId)}" type="checkbox"
+                           class="form-check-input" />
+                    <label class="form-check-label" for="reportExpand-${esc(batchId)}">
+                        แสดงทุก SMS attempt
+                        <span class="text-muted">(default: เฉพาะล่าสุด — 1 แถว/เบอร์)</span>
+                    </label>
+                </div>
+            </div>
             </div></div>`;
 
         const insts = d.instances || [];
@@ -800,6 +811,18 @@ window.showRunDetail = async function (batchId) {
         });
         html += '</div>';
         body.innerHTML = html;
+
+        // Wire the "expand all SMS attempts" toggle to the download URL.
+        // Default off so a 10-recipient run yields exactly 10 rows; on emits
+        // one row per SMS so reminders / retries are visible chronologically.
+        const dl = document.getElementById(`reportDlBtn-${batchId}`);
+        const expand = document.getElementById(`reportExpand-${batchId}`);
+        if (dl && expand) {
+            const base = dl.getAttribute('href').split('?')[0];
+            expand.addEventListener('change', () => {
+                dl.setAttribute('href', expand.checked ? `${base}?expand=true` : base);
+            });
+        }
     } catch (e) {
         body.innerHTML = `<div class="text-danger">${esc(e.message)}</div>`;
     }
