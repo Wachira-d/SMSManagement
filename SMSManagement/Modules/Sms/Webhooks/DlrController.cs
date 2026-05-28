@@ -84,9 +84,21 @@ public sealed class DlrController : ControllerBase
             ? status.ToUpperInvariant()
             : $"{status.ToUpperInvariant()}: {detail}";
 
-        _log.LogInformation("etracker DN msgID={MsgId} status={Status} -> {Mapped}",
-            msgId, status, mapped);
-        await ApplyAsync("etracker", msgId, mapped, code, statusDetail, ct);
+        // Capture every param etracker sent (query + form) verbatim. Different
+        // MacroKiosk accounts include different extras — carrier timestamp,
+        // operator id, charge units — and we want the operator to see them
+        // even before we add typed columns for each.
+        var raw = CaptureAllParams();
+        // Best-effort: pull a carrier-side timestamp out of the captured
+        // payload. MacroKiosk variants use one of these field names.
+        var carrierAt = ExtractCarrierTimestamp(raw,
+            "Received", "Done", "Sent", "DLR_TIMESTAMP",
+            "deliveredAt", "deliveryTime", "doneAt");
+
+        _log.LogInformation("etracker DN msgID={MsgId} status={Status} -> {Mapped} carrierAt={CarrierAt}",
+            msgId, status, mapped, carrierAt);
+        await ApplyAsync("etracker", msgId, mapped, code, statusDetail,
+            carrierAt, SerialiseRaw(raw), ct);
         return Ok();
     }
 
@@ -119,9 +131,23 @@ public sealed class DlrController : ControllerBase
             var group = r.TryGetProperty("status", out var st)
                         && st.TryGetProperty("groupName", out var gn) ? gn.GetString() : null;
             if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(group)) continue;
-            _log.LogInformation("Infobip DN messageId={MsgId} group={Group}", id, group);
+
+            // Infobip carries the carrier-side timestamp as ISO-8601 in
+            // doneAt; sentAt is a fallback for pre-delivery events.
+            DateTimeOffset? carrierAt = null;
+            if (r.TryGetProperty("doneAt", out var dn) && dn.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(dn.GetString(), out var parsedDone))
+                carrierAt = parsedDone;
+            else if (r.TryGetProperty("sentAt", out var sn) && sn.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(sn.GetString(), out var parsedSent))
+                carrierAt = parsedSent;
+
+            _log.LogInformation("Infobip DN messageId={MsgId} group={Group} carrierAt={CarrierAt}",
+                id, group, carrierAt);
             await ApplyAsync("infobip", id, DlrStatusMap.Map(group), null,
-                statusDetail: group.ToUpperInvariant(), ct);
+                statusDetail: group.ToUpperInvariant(),
+                carrierDeliveredAt: carrierAt,
+                rawPayload: r.GetRawText(), ct);
         }
         return Ok();
     }
@@ -177,9 +203,55 @@ public sealed class DlrController : ControllerBase
         return null;
     }
 
+    /// <summary>Snapshots every query and form parameter the provider sent.
+    /// Reserved auth/token fields are excluded so the captured payload never
+    /// records the shared secret.</summary>
+    private Dictionary<string, string> CaptureAllParams()
+    {
+        var bag = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in Request.Query)
+        {
+            if (string.Equals(kv.Key, "token", StringComparison.OrdinalIgnoreCase)) continue;
+            bag[kv.Key] = kv.Value.ToString();
+        }
+        if (Request.HasFormContentType)
+            foreach (var kv in Request.Form)
+            {
+                if (string.Equals(kv.Key, "token", StringComparison.OrdinalIgnoreCase)) continue;
+                bag[kv.Key] = kv.Value.ToString();
+            }
+        return bag;
+    }
+
+    /// <summary>Try the given field names in order; the first one that parses
+    /// as a date wins. MacroKiosk variants use different names (Received /
+    /// Done / DLR_TIMESTAMP / …) — capture them all so the operator can see
+    /// "ลูกค้าได้รับจริง" instead of just "เราได้รับ DN ตอนกี่โมง".</summary>
+    private static DateTimeOffset? ExtractCarrierTimestamp(
+        IReadOnlyDictionary<string, string> raw, params string[] candidateFields)
+    {
+        foreach (var f in candidateFields)
+            if (raw.TryGetValue(f, out var v)
+                && !string.IsNullOrWhiteSpace(v)
+                && DateTimeOffset.TryParse(v, out var parsed))
+                return parsed;
+        return null;
+    }
+
+    private static string SerialiseRaw(Dictionary<string, string> raw)
+    {
+        var json = JsonSerializer.Serialize(raw);
+        // Cap at 4 KB — keeps the column small without losing realistic
+        // payloads. Truncation is signalled with a sentinel so an operator
+        // viewing the field knows to consult logs for the rest.
+        return json.Length > 4096 ? json[..4096] + "\"…(truncated)\"" : json;
+    }
+
     private async Task ApplyAsync(
         string provider, string providerMessageId, SmsStatus newStatus,
-        string? errorCode, string? statusDetail, CancellationToken ct)
+        string? errorCode, string? statusDetail,
+        DateTimeOffset? carrierDeliveredAt, string? rawPayload,
+        CancellationToken ct)
     {
         // IgnoreQueryFilters: the DLR webhook is an anonymous (token-verified)
         // provider callback — it has no user context, so the project-scope
@@ -204,6 +276,8 @@ public sealed class DlrController : ControllerBase
         msg.DnReceivedAt = now;
         if (statusDetail is not null) msg.StatusDetail = statusDetail;
         msg.StatusSource = "webhook";
+        if (carrierDeliveredAt is not null) msg.CarrierDeliveredAt = carrierDeliveredAt;
+        if (rawPayload is not null) msg.DnRawPayload = rawPayload;
 
         // Delivered is terminal — a late ACCEPTED/PROCESSING receipt (DNs can
         // arrive out of order) must not downgrade it.
@@ -218,7 +292,11 @@ public sealed class DlrController : ControllerBase
         msg.Status = newStatus;
         if (newStatus == SmsStatus.Delivered)
         {
-            msg.DeliveredAt = now;
+            // Prefer the carrier-side timestamp when the provider sent one —
+            // it's the actual handset-arrival time, which is what the
+            // operator (and customer) cares about. Fall back to wall-clock
+            // now only when the provider didn't include a timestamp.
+            msg.DeliveredAt = carrierDeliveredAt ?? now;
             _metrics.SmsDelivered.Add(1, KeyValuePair.Create<string, object?>("provider", provider));
         }
         else if (newStatus is SmsStatus.Failed or SmsStatus.Rejected)

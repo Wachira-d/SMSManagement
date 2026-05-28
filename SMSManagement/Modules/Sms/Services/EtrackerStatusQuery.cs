@@ -85,9 +85,12 @@ public sealed class EtrackerStatusQuery : IProviderStatusQuery
             ? $"DN_{statusWord.ToUpperInvariant()}"
             : null;
         // mesapi pull responses carry only the status word — no separate
-        // detail field. The word itself goes into StatusDetail so the report
-        // shows the raw provider reason (DELIVERED / UNDELIVERED / …).
-        return new StatusQueryResult(mapped, errorCode, statusWord.ToUpperInvariant());
+        // detail field, and crucially no carrier-side timestamp. The DN
+        // webhook is the only path that can populate CarrierDeliveredAt for
+        // this provider; capture the response body verbatim so an operator
+        // can still inspect it.
+        return new StatusQueryResult(mapped, errorCode, statusWord.ToUpperInvariant(),
+            CarrierDeliveredAt: null, RawPayload: body.Length > 4096 ? body[..4096] : body);
     }
 
     private static string Trunc(string s) => s.Length > 200 ? s[..200] + "…" : s;

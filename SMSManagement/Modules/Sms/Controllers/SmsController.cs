@@ -127,7 +127,8 @@ public sealed class SmsController : ControllerBase
             .Select(x => new
             {
                 x.Id, x.Provider, x.SenderId, x.Status, x.MaskedTo, x.Attempts,
-                x.CreatedAt, x.ScheduledFor, x.SentAt, x.DeliveredAt, x.DnReceivedAt,
+                x.CreatedAt, x.ScheduledFor, x.SentAt, x.DeliveredAt,
+                x.CarrierDeliveredAt, x.DnReceivedAt, x.DnRawPayload,
                 x.ProviderMessageId, x.ErrorCode, x.StatusDetail, x.StatusSource,
                 x.RawProviderResponse, x.EncryptedBody
             })
@@ -143,7 +144,8 @@ public sealed class SmsController : ControllerBase
         return Ok(new
         {
             m.Id, m.Provider, m.SenderId, m.Status, m.MaskedTo, m.Attempts,
-            m.CreatedAt, m.ScheduledFor, m.SentAt, m.DeliveredAt, m.DnReceivedAt,
+            m.CreatedAt, m.ScheduledFor, m.SentAt, m.DeliveredAt,
+            m.CarrierDeliveredAt, m.DnReceivedAt, m.DnRawPayload,
             m.ProviderMessageId, m.ErrorCode, m.StatusDetail, m.StatusSource,
             m.RawProviderResponse,
             Body = body
@@ -222,7 +224,8 @@ public sealed class SmsController : ControllerBase
             .Select(x => new
             {
                 x.CreatedAt, x.MaskedTo, x.Provider, x.SenderId, x.Status,
-                x.Attempts, x.SentAt, x.DeliveredAt, x.DnReceivedAt,
+                x.Attempts, x.SentAt, x.DeliveredAt, x.CarrierDeliveredAt,
+                x.DnReceivedAt, x.DnRawPayload,
                 x.ErrorCode, x.StatusDetail, x.StatusSource,
                 x.ProviderMessageId, x.RawProviderResponse, x.EncryptedBody
             })
@@ -231,16 +234,21 @@ public sealed class SmsController : ControllerBase
         var sb = new System.Text.StringBuilder();
         sb.Append('﻿');   // UTF-8 BOM so Excel opens it cleanly
         sb.AppendLine("CreatedAt,Recipient,Provider,Sender,Status,Attempts,"
-                    + "SentAt,DeliveredAt,DnReceivedAt,DeliveryLatencySec,DeliveryLatency,"
+                    + "SentAt,DeliveredAt,CarrierDeliveredAt,DnReceivedAt,"
+                    + "DeliveryLatencySec,DeliveryLatency,"
                     + "StatusDetail,StatusSource,"
-                    + "ErrorCode,ProviderMessageId,ProviderResponse,Body");
+                    + "ErrorCode,ProviderMessageId,ProviderResponse,Body,DnRawPayload");
         foreach (var r in rows)
         {
             string body;
             try { body = _crypto.Decrypt(r.EncryptedBody); }
             catch { body = "(decrypt failed)"; }
-            var latency = r.SentAt is not null && r.DeliveredAt is not null
-                ? (r.DeliveredAt.Value - r.SentAt.Value)
+            // Latency uses carrier-side delivery time when available (the
+            // moment the handset actually received the SMS) so the column
+            // reflects real-world performance not our DN-processing time.
+            var deliveryTime = r.CarrierDeliveredAt ?? r.DeliveredAt;
+            var latency = r.SentAt is not null && deliveryTime is not null
+                ? (deliveryTime.Value - r.SentAt.Value)
                 : (TimeSpan?)null;
             sb.AppendLine(string.Join(',', new[]
             {
@@ -252,6 +260,7 @@ public sealed class SmsController : ControllerBase
                 Csv(r.Attempts.ToString()),
                 Csv(LocalTime.Format(r.SentAt)),
                 Csv(LocalTime.Format(r.DeliveredAt)),
+                Csv(LocalTime.Format(r.CarrierDeliveredAt)),
                 Csv(LocalTime.Format(r.DnReceivedAt)),
                 Csv(latency is null ? "" : ((long)latency.Value.TotalSeconds).ToString()),
                 Csv(FormatLatency(latency)),
@@ -260,7 +269,8 @@ public sealed class SmsController : ControllerBase
                 Csv(r.ErrorCode),
                 Csv(r.ProviderMessageId),
                 Csv(r.RawProviderResponse),
-                Csv(body)
+                Csv(body),
+                Csv(r.DnRawPayload)
             }));
         }
         return File(System.Text.Encoding.UTF8.GetBytes(sb.ToString()),

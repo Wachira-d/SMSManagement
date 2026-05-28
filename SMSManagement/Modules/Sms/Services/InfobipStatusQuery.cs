@@ -79,7 +79,17 @@ public sealed class InfobipStatusQuery : IProviderStatusQuery
             var errorCode = mapped is SmsStatus.Failed or SmsStatus.Rejected or SmsStatus.Expired
                 ? $"DN_{group.ToUpperInvariant()}"
                 : null;
-            return new StatusQueryResult(mapped, errorCode, group.ToUpperInvariant());
+            // Infobip carries the actual handset-arrival time in doneAt;
+            // sentAt is a fallback for in-flight reports.
+            DateTimeOffset? carrierAt = null;
+            if (first.TryGetProperty("doneAt", out var dn) && dn.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(dn.GetString(), out var parsedDone))
+                carrierAt = parsedDone;
+            else if (first.TryGetProperty("sentAt", out var sn) && sn.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(sn.GetString(), out var parsedSent))
+                carrierAt = parsedSent;
+            return new StatusQueryResult(mapped, errorCode, group.ToUpperInvariant(),
+                CarrierDeliveredAt: carrierAt, RawPayload: first.GetRawText());
         }
         catch (Exception ex)
         {

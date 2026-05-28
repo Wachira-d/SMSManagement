@@ -187,6 +187,9 @@ public sealed class DeliveryStatusReconciler : IDeliveryStatusReconciler
         // and the provider said still-in-flight at this time" trail.
         msg.DnReceivedAt = now;
         if (result.StatusDetail is not null) msg.StatusDetail = result.StatusDetail;
+        if (result.CarrierDeliveredAt is not null)
+            msg.CarrierDeliveredAt = result.CarrierDeliveredAt;
+        if (result.RawPayload is not null) msg.DnRawPayload = result.RawPayload;
         msg.StatusSource = "pull";
 
         if (result.Status == msg.Status) return false;
@@ -197,7 +200,10 @@ public sealed class DeliveryStatusReconciler : IDeliveryStatusReconciler
         msg.Status = result.Status.Value;
         if (result.Status == SmsStatus.Delivered)
         {
-            msg.DeliveredAt = now;
+            // Prefer the provider's carrier timestamp over wall-clock now —
+            // matches DlrController and gives the operator the actual
+            // handset-arrival time instead of "when our poll ran".
+            msg.DeliveredAt = result.CarrierDeliveredAt ?? now;
             _metrics.SmsDelivered.Add(1,
                 KeyValuePair.Create<string, object?>("provider", msg.Provider),
                 KeyValuePair.Create<string, object?>("source", "pull"));
