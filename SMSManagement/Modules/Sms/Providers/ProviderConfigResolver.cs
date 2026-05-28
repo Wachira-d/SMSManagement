@@ -74,14 +74,19 @@ public sealed class ProviderConfigResolver : IProviderConfigResolver
         Password        = Pick(p.Password,        g.Password),
         DefaultSenderId = Pick(p.DefaultSenderId, g.DefaultSenderId),
         ServiceId       = Pick(p.ServiceId,       g.ServiceId),
-        DefaultType     = Pick(p.DefaultType,     g.DefaultType)
+        DefaultType     = Pick(p.DefaultType,     g.DefaultType),
+        QueryUrl        = Pick(p.QueryUrl,        g.QueryUrl)
     };
 
     private static InfobipOptions Merge(InfobipOptions g, InfobipOptions p) => new()
     {
         BaseUrl         = Pick(p.BaseUrl,         g.BaseUrl),
         ApiKey          = Pick(p.ApiKey,          g.ApiKey),
-        DefaultSenderId = Pick(p.DefaultSenderId, g.DefaultSenderId)
+        DefaultSenderId = Pick(p.DefaultSenderId, g.DefaultSenderId),
+        // Bool: project override only takes effect if it's true (a "false"
+        // project value still defers to the global "true" — operators
+        // configure status-pull globally).
+        QueryEnabled    = p.QueryEnabled || g.QueryEnabled
     };
 
     private static string Pick(string? primary, string fallback) =>

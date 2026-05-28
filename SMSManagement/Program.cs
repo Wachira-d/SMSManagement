@@ -403,6 +403,15 @@ if (!testingEnabled)
         worker => worker.DispatchDueAsync(CancellationToken.None),
         "* * * * *");
 
+    // Pull-status reconciler: backfill messages whose DN webhook didn't arrive.
+    // Only acts on rows that have been stuck at Sent for ≥10 minutes (so we
+    // don't race the DN) and are <24h old (older than that the carrier won't
+    // know). Per-message cooldown lives in the reconciler.
+    RecurringJob.AddOrUpdate<IDeliveryStatusReconciler>(
+        "sms-status-reconcile",
+        r => r.ReconcileStaleAsync(TimeSpan.FromMinutes(10), 5000, CancellationToken.None),
+        "*/15 * * * *");
+
     // Email a per-round SMS summary (with a CSV log attached) once every
     // SMS produced by an ingestion batch has finished sending.
     RecurringJob.AddOrUpdate<ISmsRoundSummaryNotifier>(

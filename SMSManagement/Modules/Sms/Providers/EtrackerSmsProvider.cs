@@ -23,6 +23,15 @@ public sealed class EtrackerOptions
     /// the gateway auto-detects the encoding (correct for mixed Thai/English).
     /// Only set this to force a specific encoding.</summary>
     public string DefaultType { get; set; } = string.Empty;
+
+    /// <summary>Endpoint that returns the delivery status of a previously-sent
+    /// message. The exact URL varies per MacroKiosk account (some get
+    /// <c>mesapi.aspx</c> with an action=dnquery flag, others get a dedicated
+    /// <c>dnquery.aspx</c>) — empty disables the status-pull fallback, in
+    /// which case the system relies solely on the DN webhook. Two template
+    /// tokens are substituted at call time: <c>{msgId}</c> and <c>{user}</c>.
+    /// Example: <c>https://www.etracker.cc/bulksms/dnquery.aspx?user={user}&amp;pass={pass}&amp;msgid={msgId}</c></summary>
+    public string QueryUrl { get; set; } = string.Empty;
 }
 
 /// <summary>

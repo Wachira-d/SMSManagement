@@ -49,6 +49,12 @@ public sealed class SmsMessage
     public DateTimeOffset? DeliveredAt { get; set; }
     public string? ErrorCode { get; set; }
 
+    /// <summary>Last time the delivery-status reconciler pulled this message
+    /// from the provider's query API. Used to throttle re-queries (and is
+    /// updated even when the status didn't change, so the same row isn't
+    /// re-asked on every report download).</summary>
+    public DateTimeOffset? LastStatusQueryAt { get; set; }
+
     /// <summary>Verbatim provider response from the last dispatch attempt
     /// (etracker gateway body / Infobip payload). Diagnostic only — surfaced
     /// in the SMS detail view so operators can see why a send was rejected.</summary>

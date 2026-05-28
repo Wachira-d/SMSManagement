@@ -6,6 +6,7 @@ using SMSManagement.Modules.Core.Security;
 using SMSManagement.Modules.Identity.Domain;
 using SMSManagement.Modules.Identity.Services;
 using SMSManagement.Modules.Sms.Domain;
+using SMSManagement.Modules.Sms.Services;
 using SMSManagement.Modules.Workflow.Domain;
 
 namespace SMSManagement.Modules.Ingestion.Controllers;
@@ -335,12 +336,18 @@ public sealed class IngestionBatchesController : ControllerBase
     public async Task<IActionResult> Report(
         Guid projectId, Guid batchId,
         [FromServices] Modules.Notifications.IRoundReportService reports,
+        [FromServices] IDeliveryStatusReconciler reconciler,
         CancellationToken ct)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
         var exists = await _db.IngestionBatches
             .AnyAsync(b => b.Id == batchId && b.ProjectId == projectId, ct);
         if (!exists) return NotFound();
+
+        // Pull DN for any stale-Sent messages in this project before
+        // assembling the per-recipient report — same throttle as elsewhere.
+        await reconciler.ReconcileProjectAsync(
+            projectId, minAge: TimeSpan.FromMinutes(10), maxMessages: 2000, ct);
 
         var report = await reports.BuildAsync(batchId, ct);
         if (report is null)

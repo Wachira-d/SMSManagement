@@ -18,6 +18,12 @@ public sealed class InfobipOptions
 
     /// <summary>Display sender (alpha or short code).</summary>
     public string DefaultSenderId { get; set; } = string.Empty;
+
+    /// <summary>Whether to pull <c>GET /sms/1/reports?messageId=…</c> as a
+    /// fallback when the DN webhook hasn't arrived. Off by default — the
+    /// webhook is the primary mechanism and the pull is only useful when the
+    /// callback is unreliable.</summary>
+    public bool QueryEnabled { get; set; }
 }
 
 /// <summary>

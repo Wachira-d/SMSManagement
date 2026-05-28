@@ -41,6 +41,17 @@
                                 <input id="setEtSender" class="form-control form-control-sm" /></div>
                             <div class="col-4"><label class="form-label small">Default type</label>
                                 <input id="setEtType" class="form-control form-control-sm" /></div>
+                            <div class="col-12"><label class="form-label small">Status-pull URL
+                                <span class="text-muted">(optional, backfills missing DN)</span></label>
+                                <input id="setEtQuery" class="form-control form-control-sm"
+                                    placeholder="https://www.etracker.cc/bulksms/dnquery.aspx?user={user}&amp;pass={pass}&amp;msgid={msgId}" />
+                                <div class="form-text">
+                                    Endpoint that returns delivery status for a previously-sent
+                                    message. The reconciler substitutes <code>{user}</code>,
+                                    <code>{pass}</code>, <code>{msgId}</code> at call time.
+                                    Leave blank to rely solely on the DN webhook.
+                                </div>
+                            </div>
                             <div class="col-12"><hr class="my-1" />
                                 <label class="form-label small">Delivery notification (DN) token
                                     <span id="setEtDnMark" class="badge text-bg-secondary d-none">stored</span></label>
@@ -101,6 +112,15 @@
                                        placeholder="leave blank to keep current" autocomplete="new-password" /></div>
                             <div class="col-12"><label class="form-label small">Default sender ID</label>
                                 <input id="setIbSender" class="form-control form-control-sm" /></div>
+                            <div class="col-12">
+                                <div class="form-check">
+                                    <input id="setIbQuery" type="checkbox" class="form-check-input" />
+                                    <label class="form-check-label small" for="setIbQuery">
+                                        Pull status from Infobip when DN is missing
+                                        <span class="text-muted">(uses <code>GET /sms/1/reports?messageId=…</code>)</span>
+                                    </label>
+                                </div>
+                            </div>
                             <div class="col-12"><hr class="my-1" />
                                 <label class="form-label small">Delivery report (DN) token
                                     <span id="setIbDnMark" class="badge text-bg-secondary d-none">stored</span></label>
@@ -322,9 +342,11 @@
         document.getElementById('setEtUser').value   = s.etracker.Username || '';
         document.getElementById('setEtSender').value = s.etracker.DefaultSenderId || '';
         document.getElementById('setEtType').value   = s.etracker.DefaultType || '';
+        document.getElementById('setEtQuery').value  = s.etracker.QueryUrl || '';
         document.getElementById('setEtPwdMark').classList.toggle('d-none', !isStored(s.etracker.Password));
         document.getElementById('setIbBase').value   = s.infobip.BaseUrl || '';
         document.getElementById('setIbSender').value = s.infobip.DefaultSenderId || '';
+        document.getElementById('setIbQuery').checked = !!s.infobip.QueryEnabled;
         document.getElementById('setIbKeyMark').classList.toggle('d-none', !isStored(s.infobip.ApiKey));
 
         // Delivery-notification tokens (secret — only the "stored" badge is
@@ -438,6 +460,7 @@
             { key: 'Sms:Providers:Etracker:Username',        category: 'Sms', value: document.getElementById('setEtUser').value },
             { key: 'Sms:Providers:Etracker:DefaultSenderId', category: 'Sms', value: document.getElementById('setEtSender').value },
             { key: 'Sms:Providers:Etracker:DefaultType',     category: 'Sms', value: document.getElementById('setEtType').value },
+            { key: 'Sms:Providers:Etracker:QueryUrl',        category: 'Sms', value: document.getElementById('setEtQuery').value },
             { key: 'Sms:Webhooks:EtrackerDnAllowedIps',      category: 'Sms', value: ips.ips },
             { key: 'Sms:Webhooks:EtrackerDnAllowAnonymous',  category: 'Sms', value: document.getElementById('setEtAnon').checked }
         ];
@@ -463,6 +486,7 @@
         const items = [
             { key: 'Sms:Providers:Infobip:BaseUrl',         category: 'Sms', value: document.getElementById('setIbBase').value },
             { key: 'Sms:Providers:Infobip:DefaultSenderId', category: 'Sms', value: document.getElementById('setIbSender').value },
+            { key: 'Sms:Providers:Infobip:QueryEnabled',    category: 'Sms', value: document.getElementById('setIbQuery').checked },
             { key: 'Sms:Webhooks:InfobipDnAllowedIps',      category: 'Sms', value: ips.ips },
             { key: 'Sms:Webhooks:InfobipDnAllowAnonymous',  category: 'Sms', value: document.getElementById('setIbAnon').checked }
         ];

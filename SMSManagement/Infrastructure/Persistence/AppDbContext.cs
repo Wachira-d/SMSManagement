@@ -191,6 +191,10 @@ public sealed class AppDbContext : DbContext
         {
             e.HasIndex(x => x.DedupKey).IsUnique();
             e.HasIndex(x => new { x.Status, x.ScheduledFor });
+            // Reconciler scans for messages that are still "Sent" and old
+            // enough to expect a DN — a (Status, SentAt) index makes this a
+            // seekable scan instead of a full table scan.
+            e.HasIndex(x => new { x.Status, x.SentAt });
             e.HasIndex(x => x.WorkflowInstanceId);
             e.HasIndex(x => x.ProjectId);
             e.Property(x => x.Status).HasConversion<int>();

@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using SMSManagement.Infrastructure.Persistence;
 using SMSManagement.Modules.Core.Observability;
 using SMSManagement.Modules.Sms.Domain;
+using SMSManagement.Modules.Sms.Services;
 
 namespace SMSManagement.Modules.Sms.Webhooks;
 
@@ -71,7 +72,7 @@ public sealed class DlrController : ControllerBase
         if (string.IsNullOrEmpty(msgId) || string.IsNullOrEmpty(status))
             return BadRequest("msgID and status are required.");
 
-        var mapped = MapStatus(status);
+        var mapped = DlrStatusMap.Map(status);
         // Carry the failure reason into ErrorCode for non-delivered receipts.
         var code = mapped is SmsStatus.Failed or SmsStatus.Rejected or SmsStatus.Expired
             ? $"DN_{status.ToUpperInvariant()}"
@@ -114,7 +115,7 @@ public sealed class DlrController : ControllerBase
                         && st.TryGetProperty("groupName", out var gn) ? gn.GetString() : null;
             if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(group)) continue;
             _log.LogInformation("Infobip DN messageId={MsgId} group={Group}", id, group);
-            await ApplyAsync("infobip", id, MapStatus(group), null, ct);
+            await ApplyAsync("infobip", id, DlrStatusMap.Map(group), null, ct);
         }
         return Ok();
     }
@@ -213,15 +214,4 @@ public sealed class DlrController : ControllerBase
         await _db.SaveChangesAsync(ct);
     }
 
-    // Common map across providers. etracker DN words: DELIVERED, UNDELIVERED,
-    // ACCEPTED, PROCESSING (spec 4.3). Infobip uses group names.
-    private static SmsStatus MapStatus(string raw) => raw.ToUpperInvariant() switch
-    {
-        "DELIVERED" or "DELIVERED_TO_HANDSET" => SmsStatus.Delivered,
-        "ACCEPTED" or "PROCESSING" or "PENDING" or "PENDING_ENROUTE" => SmsStatus.Sent,
-        "EXPIRED" => SmsStatus.Expired,
-        "REJECTED" => SmsStatus.Rejected,
-        "UNDELIVERED" or "UNDELIVERABLE" or "FAILED" => SmsStatus.Failed,
-        _ => SmsStatus.Sent
-    };
 }

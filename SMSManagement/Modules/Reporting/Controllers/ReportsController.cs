@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SMSManagement.Modules.Reporting.Domain;
 using SMSManagement.Modules.Reporting.Services;
+using SMSManagement.Modules.Sms.Services;
 
 namespace SMSManagement.Modules.Reporting.Controllers;
 
@@ -11,7 +12,20 @@ namespace SMSManagement.Modules.Reporting.Controllers;
 public sealed class ReportsController : ControllerBase
 {
     private readonly IReportingService _svc;
-    public ReportsController(IReportingService svc) => _svc = svc;
+    private readonly IDeliveryStatusReconciler _reconciler;
+    public ReportsController(IReportingService svc, IDeliveryStatusReconciler reconciler)
+    {
+        _svc = svc;
+        _reconciler = reconciler;
+    }
+
+    /// <summary>Refresh status of every stale-Sent message in the project
+    /// before producing a report that counts/lists delivery status. Bounded
+    /// at 2 000 messages per call — the recurring job picks up anything older
+    /// that wasn't covered here.</summary>
+    private Task RefreshAsync(Guid projectId, CancellationToken ct)
+        => _reconciler.ReconcileProjectAsync(
+            projectId, minAge: TimeSpan.FromMinutes(10), maxMessages: 2000, ct);
 
     // ---- JSON endpoints ----
 
@@ -53,15 +67,19 @@ public sealed class ReportsController : ControllerBase
     // ---- CSV exports — one per report ----
 
     [HttpGet("sms-campaign/export.csv")]
-    public Task<IActionResult> SmsCampaignCsv(Guid projectId,
+    public async Task<IActionResult> SmsCampaignCsv(Guid projectId,
         [FromQuery] DateTimeOffset from, [FromQuery] DateTimeOffset to, CancellationToken ct)
-        => ExportAsync(_svc.SmsCampaignAsync(projectId, new DateRange(from, to), ct),
+    {
+        await RefreshAsync(projectId, ct);
+        return await ExportAsync(_svc.SmsCampaignAsync(projectId, new DateRange(from, to), ct),
             $"sms-campaign-{projectId}.csv", ct);
+    }
 
     [HttpGet("delivery-funnel/export.csv")]
     public async Task<IActionResult> FunnelCsv(Guid projectId,
         [FromQuery] DateTimeOffset from, [FromQuery] DateTimeOffset to, CancellationToken ct)
     {
+        await RefreshAsync(projectId, ct);
         var row = await _svc.DeliveryFunnelAsync(projectId, new DateRange(from, to), ct);
         return await ExportRowsAsync(new[] { row }, $"delivery-funnel-{projectId}.csv", ct);
     }
@@ -118,7 +136,12 @@ public sealed class ReportsController : ControllerBase
 public sealed class GlobalReportsController : ControllerBase
 {
     private readonly IReportingService _svc;
-    public GlobalReportsController(IReportingService svc) => _svc = svc;
+    private readonly IDeliveryStatusReconciler _reconciler;
+    public GlobalReportsController(IReportingService svc, IDeliveryStatusReconciler reconciler)
+    {
+        _svc = svc;
+        _reconciler = reconciler;
+    }
 
     [HttpGet("provider-performance")]
     public async Task<IActionResult> ProviderPerformance(
@@ -147,6 +170,10 @@ public sealed class GlobalReportsController : ControllerBase
     public async Task<IActionResult> ProviderPerformanceCsv(
         [FromQuery] DateTimeOffset from, [FromQuery] DateTimeOffset to, CancellationToken ct)
     {
+        // Cross-project sweep: refresh up to 5 000 stale-Sent messages
+        // anywhere in the system before producing a global performance roll-up.
+        await _reconciler.ReconcileStaleAsync(
+            minAge: TimeSpan.FromMinutes(10), maxMessages: 5000, ct);
         var rows = await _svc.ProviderPerformanceAsync(new DateRange(from, to), ct);
         var ms = new MemoryStream();
         await _svc.ExportCsvAsync(rows, ms, ct);

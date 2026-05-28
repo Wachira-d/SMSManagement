@@ -111,6 +111,17 @@ public static class ModuleRegistration
         services.AddScoped<IScheduledSmsDispatcher, ScheduledSmsDispatcher>();
         services.Configure<DlrWebhookOptions>(cfg.GetSection("Sms:Webhooks"));
 
+        // ---------- Delivery-status reconciler (pull-status fallback) ----------
+        // Same resilience pipeline as the send providers — pull-status hits the
+        // same gateway and shouldn't fail differently.
+        services.AddHttpClient<EtrackerStatusQuery>()
+            .AddStandardResilienceHandler(ConfigureResilience);
+        services.AddHttpClient<InfobipStatusQuery>()
+            .AddStandardResilienceHandler(ConfigureResilience);
+        services.AddScoped<IProviderStatusQuery>(sp => sp.GetRequiredService<EtrackerStatusQuery>());
+        services.AddScoped<IProviderStatusQuery>(sp => sp.GetRequiredService<InfobipStatusQuery>());
+        services.AddScoped<IDeliveryStatusReconciler, DeliveryStatusReconciler>();
+
         // ---------- Shortlink ----------
         services.Configure<ShortlinkOptions>(cfg.GetSection("Shortlink"));
         services.Configure<ShortlinkAbuseOptions>(cfg.GetSection("Shortlink:Abuse"));

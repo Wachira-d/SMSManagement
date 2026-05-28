@@ -101,13 +101,15 @@ public sealed class AdminSettingsController : ControllerBase
                     _etracker.Value.Username,
                     _etracker.Value.Password,
                     _etracker.Value.DefaultSenderId,
-                    _etracker.Value.DefaultType
+                    _etracker.Value.DefaultType,
+                    _etracker.Value.QueryUrl
                 }),
                 Infobip = MaskSecrets(new
                 {
                     _infobip.Value.BaseUrl,
                     _infobip.Value.ApiKey,
-                    _infobip.Value.DefaultSenderId
+                    _infobip.Value.DefaultSenderId,
+                    _infobip.Value.QueryEnabled
                 }),
                 // Delivery-receipt webhooks. The provider posts back to one of
                 // these URLs with the configured token — exposing the URL +

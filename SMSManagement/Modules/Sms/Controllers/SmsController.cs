@@ -202,10 +202,17 @@ public sealed class SmsController : ControllerBase
     [HttpGet("export.csv")]
     public async Task<IActionResult> Export(
         Guid projectId,
+        [FromServices] IDeliveryStatusReconciler reconciler,
         [FromQuery] string? status = null,
         CancellationToken ct = default)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
+
+        // Refresh any stale-Sent messages before snapshotting the export —
+        // a no-op for providers without QueryUrl configured; bounded to the
+        // last 24h so an old project doesn't trigger a huge fan-out.
+        await reconciler.ReconcileProjectAsync(
+            projectId, minAge: TimeSpan.FromMinutes(10), maxMessages: 2000, ct);
 
         var rows = await FilteredHistory(projectId, status)
             .OrderByDescending(x => x.CreatedAt)
