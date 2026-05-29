@@ -1,0 +1,218 @@
+@page
+@model SMSManagement.Pages.Admin.DnLogsModel
+@{ ViewData["Title"] = "DN logs"; }
+
+<h1 class="h3 mb-3">DN logs</h1>
+<p class="text-muted small">
+    Structured audit trail of every delivery notification — both the
+    provider's webhook pushes (<code>source=webhook</code>) and the
+    reconciler's status pulls (<code>source=pull</code>). Use this when the
+    <code>CarrierDeliveredAt</code> column is blank, when DNs aren't arriving,
+    or to verify a specific <code>msgID</code> went through. Click a row to
+    inspect the raw payload + field names the provider actually sent.
+</p>
+
+<div class="row g-2 mb-3 align-items-end">
+    <div class="col-auto">
+        <label class="form-label small">From</label>
+        <input type="date" id="fromDate" class="form-control form-control-sm" />
+    </div>
+    <div class="col-auto">
+        <label class="form-label small">To</label>
+        <input type="date" id="toDate" class="form-control form-control-sm" />
+    </div>
+    <div class="col-auto">
+        <label class="form-label small">Provider</label>
+        <select id="providerFilter" class="form-select form-select-sm">
+            <option value="">All providers</option>
+            <option value="etracker">etracker</option>
+            <option value="infobip">infobip</option>
+        </select>
+    </div>
+    <div class="col-auto">
+        <label class="form-label small">Source</label>
+        <select id="sourceFilter" class="form-select form-select-sm">
+            <option value="">All sources</option>
+            <option value="webhook">webhook (push)</option>
+            <option value="pull">pull (reconciler)</option>
+        </select>
+    </div>
+    <div class="col-auto">
+        <label class="form-label small">Outcome</label>
+        <select id="outcomeFilter" class="form-select form-select-sm">
+            <option value="">All outcomes</option>
+            <option value="accepted">accepted</option>
+            <option value="ignored-stale">ignored-stale</option>
+            <option value="no-change">no-change</option>
+            <option value="no-data">no-data</option>
+            <option value="unknown-message">unknown-message</option>
+            <option value="parse-error">parse-error</option>
+            <option value="unauthorized">unauthorized</option>
+        </select>
+    </div>
+    <div class="col-auto">
+        <label class="form-label small">msgID (provider)</label>
+        <input type="text" id="msgIdFilter" class="form-control form-control-sm"
+               placeholder="e.g. 37586920116" />
+    </div>
+    <div class="col-auto">
+        <button id="btnSearch" class="btn btn-primary btn-sm">Search</button>
+        <button id="btnExport" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-download"></i> Export CSV</button>
+    </div>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-sm">
+        <thead><tr>
+            <th>When</th><th>Provider</th><th>Source</th><th>Outcome</th>
+            <th>msgID</th><th>Status</th><th>Carrier delivered</th>
+            <th>Remote IP</th><th>Fields</th>
+        </tr></thead>
+        <tbody id="dnBody"><tr><td colspan="9" class="text-muted">Loading…</td></tr></tbody>
+    </table>
+</div>
+
+<div class="d-flex align-items-center gap-2 mb-4">
+    <button id="btnPrev" class="btn btn-outline-secondary btn-sm" disabled>&laquo; Prev</button>
+    <button id="btnNext" class="btn btn-outline-secondary btn-sm" disabled>Next &raquo;</button>
+    <span id="pageInfo" class="small text-muted"></span>
+    <span class="ms-auto small text-muted">
+        Rows / page
+        <select id="pageSize" class="form-select form-select-sm d-inline-block w-auto ms-1">
+            <option>25</option><option selected>50</option><option>100</option><option>200</option>
+        </select>
+    </span>
+</div>
+
+<div class="modal fade" id="dnModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">DN detail</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <dl id="dnSummary" class="row mb-3 small"></dl>
+                <h6 class="small text-muted mb-1">Raw payload</h6>
+                <pre id="dnRaw" class="small bg-light p-2" style="max-height:50vh;overflow:auto"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+(function () {
+    const to = new Date();
+    const from = new Date(); from.setDate(from.getDate() - 7);
+    document.getElementById('fromDate').value = from.toISOString().slice(0,10);
+    document.getElementById('toDate').value   = to.toISOString().slice(0,10);
+})();
+
+let dnPage = 1;
+
+// Outcome colour-coding — drives the row badge so an operator can scan a
+// hundred entries and tell at a glance what's healthy vs investigable.
+function outcomeBadge(o) {
+    const cls = {
+        'accepted':         'bg-success',
+        'no-change':        'bg-secondary',
+        'ignored-stale':    'bg-secondary',
+        'no-data':          'bg-secondary',
+        'unknown-message':  'bg-warning text-dark',
+        'parse-error':      'bg-danger',
+        'unauthorized':     'bg-danger'
+    }[o] || 'bg-secondary';
+    return `<span class="badge ${cls}">${esc(o)}</span>`;
+}
+
+async function load() {
+    const qs = filterQs();
+    qs.set('page', dnPage);
+    qs.set('pageSize', document.getElementById('pageSize').value);
+
+    try {
+        const data = await api.get('/api/admin/dn-logs?' + qs);
+        const rows = data.items || [];
+        const body = document.getElementById('dnBody');
+
+        const info = document.getElementById('pageInfo');
+        info.textContent = data.total === 0
+            ? 'No DN entries'
+            : `Page ${data.page} of ${data.totalPages} — ${data.total} entr${data.total === 1 ? 'y' : 'ies'}`;
+        document.getElementById('btnPrev').disabled = data.page <= 1;
+        document.getElementById('btnNext').disabled = data.page >= data.totalPages;
+
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="9" class="text-muted">No DN entries in this range.</td></tr>';
+            return;
+        }
+        window._dnRows = Object.fromEntries(rows.map(r => [r.id, r]));
+        body.innerHTML = rows.map(r => `
+            <tr style="cursor:pointer" onclick="showDn(${r.id})">
+                <td class="small">${fmtDate(r.createdAt)}</td>
+                <td class="small">${esc(r.provider||'')}</td>
+                <td class="small">${esc(r.source||'')}</td>
+                <td>${outcomeBadge(r.outcome||'')}</td>
+                <td class="small"><code>${esc(r.providerMessageId||'—')}</code></td>
+                <td class="small">${esc(r.status||'')}${r.mappedStatus ? ` <span class="text-muted">→ ${esc(r.mappedStatus)}</span>` : ''}</td>
+                <td class="small">${r.carrierDeliveredAt ? fmtDate(r.carrierDeliveredAt) : '<span class="text-muted">—</span>'}</td>
+                <td class="small">${esc(r.remoteIp||'')}</td>
+                <td class="small text-truncate" style="max-width:280px">${esc(r.fieldKeys||'')}</td>
+            </tr>`).join('');
+    } catch (e) { toast(e.message, 'danger'); }
+}
+
+window.showDn = function (id) {
+    const r = window._dnRows[id];
+    if (!r) return;
+    // Render a labelled summary up top (timestamp / msgId / outcome / status
+    // / carrier / remote IP / notes) then the verbatim raw payload below so
+    // the operator can copy it out for the vendor.
+    const summary = document.getElementById('dnSummary');
+    const item = (k, v) => v == null || v === '' ? ''
+        : `<dt class="col-sm-3">${esc(k)}</dt><dd class="col-sm-9">${v}</dd>`;
+    summary.innerHTML = [
+        item('When',       fmtDate(r.createdAt)),
+        item('Provider',   esc(r.provider)),
+        item('Source',     esc(r.source)),
+        item('Outcome',    outcomeBadge(r.outcome||'')),
+        item('msgID',      `<code>${esc(r.providerMessageId||'')}</code>`),
+        item('Status',     esc(r.status) + (r.mappedStatus ? ` → ${esc(r.mappedStatus)}` : '')),
+        item('Carrier delivered', r.carrierDeliveredAt ? fmtDate(r.carrierDeliveredAt) : '<span class="text-muted">none</span>'),
+        item('Remote IP',  esc(r.remoteIp)),
+        item('Field keys', `<code>${esc(r.fieldKeys||'')}</code>`),
+        item('Notes',      esc(r.notes))
+    ].join('');
+    // Pretty-print JSON payloads; fall back to raw text otherwise.
+    let raw = r.rawPayload || '';
+    try { raw = JSON.stringify(JSON.parse(raw), null, 2); } catch { /* leave as-is */ }
+    document.getElementById('dnRaw').textContent = raw;
+    new bootstrap.Modal(document.getElementById('dnModal')).show();
+};
+
+function filterQs() {
+    const qs = new URLSearchParams({
+        from: document.getElementById('fromDate').value + 'T00:00:00Z',
+        to:   document.getElementById('toDate').value + 'T23:59:59Z'
+    });
+    const p = document.getElementById('providerFilter').value;
+    const s = document.getElementById('sourceFilter').value;
+    const o = document.getElementById('outcomeFilter').value;
+    const m = document.getElementById('msgIdFilter').value;
+    if (p) qs.set('provider', p);
+    if (s) qs.set('source', s);
+    if (o) qs.set('outcome', o);
+    if (m) qs.set('msgId', m);
+    return qs;
+}
+
+document.getElementById('btnSearch').addEventListener('click', () => { dnPage = 1; load(); });
+document.getElementById('btnExport').addEventListener('click', () => {
+    window.open('/api/admin/dn-logs/export.csv?' + filterQs(), '_blank');
+});
+document.getElementById('pageSize').addEventListener('change', () => { dnPage = 1; load(); });
+document.getElementById('btnPrev').addEventListener('click', () => { if (dnPage > 1) { dnPage--; load(); } });
+document.getElementById('btnNext').addEventListener('click', () => { dnPage++; load(); });
+load();
+</script>
+}
