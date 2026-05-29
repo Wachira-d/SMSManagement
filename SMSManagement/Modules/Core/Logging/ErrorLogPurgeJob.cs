@@ -42,12 +42,20 @@ public sealed class ErrorLogPurger : IErrorLogPurger
         }
 
         var cutoff = DateTimeOffset.UtcNow.AddDays(-RetentionDays);
-        var deleted = await _db.ErrorLogs
+        var deletedErrors = await _db.ErrorLogs
             .Where(e => e.CreatedAt < cutoff)
             .ExecuteDeleteAsync(ct);
-        if (deleted > 0)
-            _log.LogInformation("ErrorLog purge: removed {Count} rows older than {Days} days.",
-                deleted, RetentionDays);
-        return deleted;
+        // DN log volume is much higher than error logs (1+ row per SMS) but
+        // the same retention window applies — sharing the toggle keeps ops
+        // configuration simple.
+        var deletedDn = await _db.DnLogs
+            .Where(e => e.CreatedAt < cutoff)
+            .ExecuteDeleteAsync(ct);
+        var total = deletedErrors + deletedDn;
+        if (total > 0)
+            _log.LogInformation(
+                "Log purge: removed {Errors} ErrorLogs and {Dn} DnLogs rows older than {Days} days.",
+                deletedErrors, deletedDn, RetentionDays);
+        return total;
     }
 }

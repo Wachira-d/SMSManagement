@@ -180,7 +180,23 @@ public sealed class DeliveryStatusReconciler : IDeliveryStatusReconciler
         msg.LastStatusQueryAt = now;
 
         var result = await query.QueryAsync(msg.ProjectId, msg.ProviderMessageId!, ct);
-        if (result.Status is null) return false;
+        if (result.Status is null)
+        {
+            // Provider couldn't tell — log so the operator can see the pull
+            // happened (and why it didn't yield an update) without grepping
+            // structured logs.
+            _db.DnLogs.Add(new Webhooks.DnLog
+            {
+                CreatedAt = now,
+                Provider = msg.Provider,
+                Source = "pull",
+                ProviderMessageId = msg.ProviderMessageId,
+                Outcome = "no-data",
+                RawPayload = result.RawPayload,
+                Notes = "provider returned no parseable status"
+            });
+            return false;
+        }
 
         // Stamp the DN-received timestamp + detail on every successful pull,
         // even if the status didn't change — gives the operator a "we asked
@@ -192,10 +208,25 @@ public sealed class DeliveryStatusReconciler : IDeliveryStatusReconciler
         if (result.RawPayload is not null) msg.DnRawPayload = result.RawPayload;
         msg.StatusSource = "pull";
 
-        if (result.Status == msg.Status) return false;
-        // Mirror DlrController.ApplyAsync: don't downgrade Delivered.
-        if (msg.Status == SmsStatus.Delivered && result.Status != SmsStatus.Delivered)
-            return false;
+        var changed = result.Status != msg.Status
+                      && !(msg.Status == SmsStatus.Delivered && result.Status != SmsStatus.Delivered);
+
+        // Log every successful pull, whether or not the status moved — the
+        // audit trail is more useful than the count of state-changes.
+        _db.DnLogs.Add(new Webhooks.DnLog
+        {
+            CreatedAt = now,
+            Provider = msg.Provider,
+            Source = "pull",
+            ProviderMessageId = msg.ProviderMessageId,
+            Outcome = changed ? "accepted" : "no-change",
+            Status = result.StatusDetail,
+            MappedStatus = result.Status.ToString(),
+            CarrierDeliveredAt = result.CarrierDeliveredAt,
+            RawPayload = result.RawPayload
+        });
+
+        if (!changed) return false;
 
         msg.Status = result.Status.Value;
         if (result.Status == SmsStatus.Delivered)

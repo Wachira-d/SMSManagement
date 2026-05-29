@@ -45,6 +45,7 @@ public sealed class AppDbContext : DbContext
 
     public DbSet<SmsMessage> SmsMessages => Set<SmsMessage>();
     public DbSet<ProjectSmsProviderConfig> ProjectSmsProviderConfigs => Set<ProjectSmsProviderConfig>();
+    public DbSet<Modules.Sms.Webhooks.DnLog> DnLogs => Set<Modules.Sms.Webhooks.DnLog>();
 
     public DbSet<CouponBrand> CouponBrands => Set<CouponBrand>();
     public DbSet<CouponBatch> CouponBatches => Set<CouponBatch>();
@@ -215,6 +216,23 @@ public sealed class AppDbContext : DbContext
             e.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
                 .OnDelete(DeleteBehavior.Restrict);
             e.HasQueryFilter(x => Projects.Any(p => p.Id == x.ProjectId));
+        });
+
+        b.Entity<Modules.Sms.Webhooks.DnLog>(e =>
+        {
+            // CreatedAt index drives the recency view + the daily purge.
+            e.HasIndex(x => x.CreatedAt);
+            // Lookup by msgId answers "show me every DN for this message".
+            e.HasIndex(x => x.ProviderMessageId);
+            e.Property(x => x.Provider).HasMaxLength(32);
+            e.Property(x => x.Source).HasMaxLength(16);
+            e.Property(x => x.Outcome).HasMaxLength(32);
+            e.Property(x => x.Status).HasMaxLength(64);
+            e.Property(x => x.MappedStatus).HasMaxLength(32);
+            e.Property(x => x.ProviderMessageId).HasMaxLength(128);
+            e.Property(x => x.RemoteIp).HasMaxLength(64);
+            e.Property(x => x.FieldKeys).HasMaxLength(1024);
+            e.Property(x => x.Notes).HasMaxLength(500);
         });
 
         // ---------- Coupon ----------
