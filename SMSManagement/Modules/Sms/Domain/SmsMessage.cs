@@ -73,14 +73,6 @@ public sealed class SmsMessage
     /// <c>pull</c> means the provider's DN webhook is dropping.</summary>
     public string? StatusSource { get; set; }
 
-    /// <summary>Carrier-reported delivery timestamp parsed from the DN
-    /// payload — when the handset actually received the SMS, not when our
-    /// system received the DN. Null if the provider didn't include one
-    /// (etracker pull responses, some Infobip payloads). Differs from
-    /// <see cref="DeliveredAt"/> which is stamped at our wall-clock now;
-    /// the gap between the two is provider/network delay.</summary>
-    public DateTimeOffset? CarrierDeliveredAt { get; set; }
-
     /// <summary>Verbatim DN payload (query string for etracker, the
     /// individual result JSON for Infobip) so an operator can inspect what
     /// the provider actually sent — including timestamp / operator / charge

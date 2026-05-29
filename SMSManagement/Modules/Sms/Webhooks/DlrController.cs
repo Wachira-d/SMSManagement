@@ -63,7 +63,7 @@ public sealed class DlrController : ControllerBase
         {
             _log.LogWarning("etracker DN rejected — missing/wrong token and IP not allowlisted.");
             await WriteDnLogAsync("etracker", "webhook", null, "unauthorized",
-                null, null, null, null, null,
+                null, null, null, null,
                 Notes: "missing/wrong token and IP not in allowlist", ct);
             return Unauthorized();
         }
@@ -76,7 +76,7 @@ public sealed class DlrController : ControllerBase
         if (string.IsNullOrEmpty(msgId) || string.IsNullOrEmpty(status))
         {
             await WriteDnLogAsync("etracker", "webhook", msgId, "parse-error",
-                status, null, null,
+                status, null,
                 SerialiseRaw(rawForBadRequest), string.Join(",", rawForBadRequest.Keys),
                 Notes: "msgID or status missing", ct);
             return BadRequest("msgID and status are required.");
@@ -95,30 +95,24 @@ public sealed class DlrController : ControllerBase
             : $"{status.ToUpperInvariant()}: {detail}";
 
         // Capture every param etracker sent (query + form) verbatim. Different
-        // MacroKiosk accounts include different extras — carrier timestamp,
-        // operator id, charge units — and we want the operator to see them
-        // even before we add typed columns for each.
+        // MacroKiosk accounts include different extras — operator id, charge
+        // units — and we want the operator to see them so they can verify
+        // what the provider actually shipped.
         var raw = rawForBadRequest;
-        // Best-effort: pull a carrier-side timestamp out of the captured
-        // payload. MacroKiosk variants use one of these field names.
-        var carrierAt = ExtractCarrierTimestamp(raw,
-            "Received", "Done", "Sent", "DLR_TIMESTAMP",
-            "deliveredAt", "deliveryTime", "doneAt");
 
-        // Log the FULL field list at info level — operators tracking down a
-        // missing CarrierDeliveredAt can look here to see exactly which keys
-        // etracker sent (and whether any of them carry a timestamp we should
-        // be parsing). Sensitive token already stripped by CaptureAllParams.
+        // Log the FULL field list at info level — operators can grep here to
+        // see exactly which keys etracker sent for any given msgID.
+        // Sensitive token already stripped by CaptureAllParams.
         _log.LogInformation(
-            "etracker DN msgID={MsgId} status={Status} -> {Mapped} carrierAt={CarrierAt} fields=[{Fields}]",
-            msgId, status, mapped, carrierAt, string.Join(",", raw.Keys));
+            "etracker DN msgID={MsgId} status={Status} -> {Mapped} fields=[{Fields}]",
+            msgId, status, mapped, string.Join(",", raw.Keys));
 
         var rawJson = SerialiseRaw(raw);
         var outcome = await ApplyAsync("etracker", msgId, mapped, code, statusDetail,
-            carrierAt, rawJson, ct);
+            rawJson, ct);
 
         await WriteDnLogAsync("etracker", "webhook", msgId, outcome,
-            status, mapped.ToString(), carrierAt,
+            status, mapped.ToString(),
             rawJson, string.Join(",", raw.Keys), Notes: null, ct);
         return Ok();
     }
@@ -139,7 +133,7 @@ public sealed class DlrController : ControllerBase
         {
             _log.LogWarning("Infobip DN rejected — missing/wrong token and IP not allowlisted.");
             await WriteDnLogAsync("infobip", "webhook", null, "unauthorized",
-                null, null, null, null, null,
+                null, null, null, null,
                 Notes: "missing/wrong token and IP not in allowlist", ct);
             return Unauthorized();
         }
@@ -149,7 +143,7 @@ public sealed class DlrController : ControllerBase
             || results.ValueKind != JsonValueKind.Array)
         {
             await WriteDnLogAsync("infobip", "webhook", null, "parse-error",
-                null, null, null, null, null,
+                null, null, null, null,
                 Notes: "missing results[] in body", ct);
             return BadRequest("results array required.");
         }
@@ -162,36 +156,24 @@ public sealed class DlrController : ControllerBase
             if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(group))
             {
                 await WriteDnLogAsync("infobip", "webhook", id, "parse-error",
-                    null, null, null, r.GetRawText(), null,
+                    null, null, r.GetRawText(), null,
                     Notes: "messageId or status.groupName missing", ct);
                 continue;
             }
 
-            // Infobip carries the carrier-side timestamp as ISO-8601 in
-            // doneAt; sentAt is a fallback for pre-delivery events.
-            DateTimeOffset? carrierAt = null;
-            if (r.TryGetProperty("doneAt", out var dn) && dn.ValueKind == JsonValueKind.String
-                && DateTimeOffset.TryParse(dn.GetString(), out var parsedDone))
-                carrierAt = parsedDone;
-            else if (r.TryGetProperty("sentAt", out var sn) && sn.ValueKind == JsonValueKind.String
-                && DateTimeOffset.TryParse(sn.GetString(), out var parsedSent))
-                carrierAt = parsedSent;
-
-            _log.LogInformation("Infobip DN messageId={MsgId} group={Group} carrierAt={CarrierAt}",
-                id, group, carrierAt);
+            _log.LogInformation("Infobip DN messageId={MsgId} group={Group}", id, group);
             var mapped = DlrStatusMap.Map(group);
             var rawJson = r.GetRawText();
             var outcome = await ApplyAsync("infobip", id, mapped, null,
                 statusDetail: group.ToUpperInvariant(),
-                carrierDeliveredAt: carrierAt,
                 rawPayload: rawJson, ct);
 
             // Top-level field names from this result object — useful for
-            // diagnosing missing carrierAt across Infobip API versions.
+            // diagnosing Infobip API-version differences.
             var keys = new List<string>();
             foreach (var p in r.EnumerateObject()) keys.Add(p.Name);
             await WriteDnLogAsync("infobip", "webhook", id, outcome,
-                group, mapped.ToString(), carrierAt,
+                group, mapped.ToString(),
                 rawJson, string.Join(",", keys), Notes: null, ct);
         }
         return Ok();
@@ -268,44 +250,6 @@ public sealed class DlrController : ControllerBase
         return bag;
     }
 
-    /// <summary>Try the given field names in order; the first one that parses
-    /// as a date wins. MacroKiosk variants use different names (Received /
-    /// Done / DLR_TIMESTAMP / …) — capture them all so the operator can see
-    /// "ลูกค้าได้รับจริง" instead of just "เราได้รับ DN ตอนกี่โมง".
-    /// As a final fallback, scan EVERY field for anything that parses as a
-    /// datetime — handles accounts that use a field name we haven't seen
-    /// before. Obvious non-timestamp keys (msgID, status, msisdn, …) are
-    /// excluded so a numeric msgID isn't mistaken for a Unix epoch.</summary>
-    private static DateTimeOffset? ExtractCarrierTimestamp(
-        IReadOnlyDictionary<string, string> raw, params string[] candidateFields)
-    {
-        // First: try named fields (these always win — most accurate).
-        foreach (var f in candidateFields)
-            if (raw.TryGetValue(f, out var v)
-                && !string.IsNullOrWhiteSpace(v)
-                && DateTimeOffset.TryParse(v, out var parsed))
-                return parsed;
-
-        // Fallback: blind scan. Skip identifier / status fields and pure-digit
-        // values (msgIDs, msisdns) so we don't pick up something that isn't a
-        // timestamp. First parseable hit wins.
-        var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "status", "statusDetail", "msgID", "msisdn", "description",
-            "errorCode", "operatorID", "MsgID", "Status", "Description",
-            "from", "to", "sender", "recipient"
-        };
-        foreach (var kv in raw)
-        {
-            if (skip.Contains(kv.Key)) continue;
-            var v = kv.Value;
-            if (string.IsNullOrWhiteSpace(v)) continue;
-            if (v.All(char.IsDigit)) continue; // pure number = id, not date
-            if (DateTimeOffset.TryParse(v, out var parsed)) return parsed;
-        }
-        return null;
-    }
-
     private static string SerialiseRaw(Dictionary<string, string> raw)
     {
         var json = JsonSerializer.Serialize(raw);
@@ -323,7 +267,7 @@ public sealed class DlrController : ControllerBase
     private async Task<string> ApplyAsync(
         string provider, string providerMessageId, SmsStatus newStatus,
         string? errorCode, string? statusDetail,
-        DateTimeOffset? carrierDeliveredAt, string? rawPayload,
+        string? rawPayload,
         CancellationToken ct)
     {
         // IgnoreQueryFilters: the DLR webhook is an anonymous (token-verified)
@@ -349,7 +293,6 @@ public sealed class DlrController : ControllerBase
         msg.DnReceivedAt = now;
         if (statusDetail is not null) msg.StatusDetail = statusDetail;
         msg.StatusSource = "webhook";
-        if (carrierDeliveredAt is not null) msg.CarrierDeliveredAt = carrierDeliveredAt;
         if (rawPayload is not null) msg.DnRawPayload = rawPayload;
 
         // Delivered is terminal — a late ACCEPTED/PROCESSING receipt (DNs can
@@ -365,11 +308,7 @@ public sealed class DlrController : ControllerBase
         msg.Status = newStatus;
         if (newStatus == SmsStatus.Delivered)
         {
-            // Prefer the carrier-side timestamp when the provider sent one —
-            // it's the actual handset-arrival time, which is what the
-            // operator (and customer) cares about. Fall back to wall-clock
-            // now only when the provider didn't include a timestamp.
-            msg.DeliveredAt = carrierDeliveredAt ?? now;
+            msg.DeliveredAt = now;
             _metrics.SmsDelivered.Add(1, KeyValuePair.Create<string, object?>("provider", provider));
         }
         else if (newStatus is SmsStatus.Failed or SmsStatus.Rejected)
@@ -387,7 +326,7 @@ public sealed class DlrController : ControllerBase
     /// Serilog but never throws so it can't break the webhook handler.</summary>
     private async Task WriteDnLogAsync(
         string provider, string source, string? providerMessageId, string outcome,
-        string? status, string? mappedStatus, DateTimeOffset? carrierAt,
+        string? status, string? mappedStatus,
         string? rawPayload, string? fieldKeys, string? Notes, CancellationToken ct)
     {
         try
@@ -401,7 +340,6 @@ public sealed class DlrController : ControllerBase
                 Outcome = outcome,
                 Status = status,
                 MappedStatus = mappedStatus,
-                CarrierDeliveredAt = carrierAt,
                 RawPayload = rawPayload,
                 FieldKeys = fieldKeys,
                 RemoteIp = HttpContext.Connection.RemoteIpAddress?.ToString(),

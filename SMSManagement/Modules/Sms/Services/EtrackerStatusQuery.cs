@@ -84,13 +84,11 @@ public sealed class EtrackerStatusQuery : IProviderStatusQuery
         var errorCode = mapped is SmsStatus.Failed or SmsStatus.Rejected or SmsStatus.Expired
             ? $"DN_{statusWord.ToUpperInvariant()}"
             : null;
-        // mesapi pull responses carry only the status word — no separate
-        // detail field, and crucially no carrier-side timestamp. The DN
-        // webhook is the only path that can populate CarrierDeliveredAt for
-        // this provider; capture the response body verbatim so an operator
-        // can still inspect it.
+        // mesapi pull responses carry only the status word. Capture the
+        // response body verbatim so an operator can still inspect it via
+        // SmsMessage.DnRawPayload / DnLogs.RawPayload.
         return new StatusQueryResult(mapped, errorCode, statusWord.ToUpperInvariant(),
-            CarrierDeliveredAt: null, RawPayload: body.Length > 4096 ? body[..4096] : body);
+            RawPayload: body.Length > 4096 ? body[..4096] : body);
     }
 
     private static string Trunc(string s) => s.Length > 200 ? s[..200] + "…" : s;

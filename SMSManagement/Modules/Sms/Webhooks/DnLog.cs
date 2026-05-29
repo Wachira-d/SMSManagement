@@ -36,9 +36,6 @@ public sealed class DnLog
     /// internal interpretation of <see cref="Status"/>.</summary>
     public string? MappedStatus { get; set; }
 
-    /// <summary>Carrier-side delivery timestamp parsed from the payload.</summary>
-    public DateTimeOffset? CarrierDeliveredAt { get; set; }
-
     /// <summary>Verbatim provider payload (query string for etracker, the
     /// per-result JSON for Infobip). Capped at 4 KB.</summary>
     public string? RawPayload { get; set; }

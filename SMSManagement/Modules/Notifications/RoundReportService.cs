@@ -53,7 +53,7 @@ public sealed class RoundReportService : IRoundReportService
         Guid InstanceId, string Provider, string? SenderId, SmsStatus Status,
         short Attempts, DateTimeOffset CreatedAt, DateTimeOffset? SentAt,
         DateTimeOffset? DeliveredAt, DateTimeOffset? DnReceivedAt,
-        DateTimeOffset? CarrierDeliveredAt, string? DnRawPayload,
+        string? DnRawPayload,
         string? ErrorCode, string? StatusDetail, string? StatusSource,
         string? ProviderMessageId, string? RawProviderResponse, byte[] EncryptedBody);
 
@@ -66,7 +66,7 @@ public sealed class RoundReportService : IRoundReportService
         string? Provider, string? SenderId, SmsStatus? SmsStatus,
         short Attempts, DateTimeOffset? SentAt, DateTimeOffset? DeliveredAt,
         DateTimeOffset? DnReceivedAt,
-        DateTimeOffset? CarrierDeliveredAt, string? DnRawPayload,
+        string? DnRawPayload,
         string? ErrorCode, string? StatusDetail, string? StatusSource,
         string? ProviderMessageId, string? ProviderResponse,
         string Body, string? ShortlinkUrl, string? ShortlinkTarget,
@@ -94,7 +94,7 @@ public sealed class RoundReportService : IRoundReportService
             .Select(m => new Sms(
                 m.WorkflowInstanceId!.Value, m.Provider, m.SenderId, m.Status, m.Attempts,
                 m.CreatedAt, m.SentAt, m.DeliveredAt, m.DnReceivedAt,
-                m.CarrierDeliveredAt, m.DnRawPayload,
+                m.DnRawPayload,
                 m.ErrorCode, m.StatusDetail, m.StatusSource,
                 m.ProviderMessageId, m.RawProviderResponse, m.EncryptedBody))
             .ToListAsync(ct);
@@ -162,7 +162,7 @@ public sealed class RoundReportService : IRoundReportService
                     inst.MaskedPhone, inst.State, src,
                     SmsCount: 0, SmsIndex: 0,
                     null, null, null, 0, null, null, null,
-                    null, null,
+                    null,
                     null, null, null, null, null, string.Empty,
                     slUrl, slTarget, sl?.ClickCount ?? 0, firstClick));
                 continue;
@@ -183,7 +183,7 @@ public sealed class RoundReportService : IRoundReportService
                     SmsCount: msgs.Count, SmsIndex: idx,
                     m.Provider, m.SenderId, m.Status,
                     m.Attempts, m.SentAt, m.DeliveredAt, m.DnReceivedAt,
-                    m.CarrierDeliveredAt, m.DnRawPayload,
+                    m.DnRawPayload,
                     m.ErrorCode, m.StatusDetail, m.StatusSource,
                     m.ProviderMessageId, m.RawProviderResponse,
                     Decrypt(m.EncryptedBody),
@@ -215,15 +215,15 @@ public sealed class RoundReportService : IRoundReportService
         var sb = new StringBuilder();
         sb.Append('﻿');   // UTF-8 BOM — Excel opens it cleanly
         // New DN-detail columns (DnReceivedAt, StatusDetail, StatusSource,
-        // DeliveryLatencySec, DeliveryLatency, SmsIndex, CarrierDeliveredAt,
-        // DnRawPayload) appended at the end so existing tools that read by
-        // column index keep working.
+        // DeliveryLatencySec, DeliveryLatency, SmsIndex, DnRawPayload)
+        // appended at the end so existing tools that read by column index
+        // keep working.
         var header = sourceCols.Select(c => "src_" + c)
             .Concat(new[]
             {
                 "Recipient", "WorkflowState", "SmsCount", "SmsIndex", "SmsStatus",
                 "SentAt", "SentDate", "SentTime",
-                "DeliveredAt", "CarrierDeliveredAt", "DnReceivedAt",
+                "DeliveredAt", "DnReceivedAt",
                 "DeliveryLatencySec", "DeliveryLatency",
                 "StatusDetail", "StatusSource",
                 "Attempts", "Provider", "Sender",
@@ -250,15 +250,9 @@ public sealed class RoundReportService : IRoundReportService
             cells.Add(Csv(LocalTime.Format(r.SentAt, "yyyy-MM-dd")));
             cells.Add(Csv(LocalTime.Format(r.SentAt, "HH:mm:ss")));
             cells.Add(Csv(LocalTime.Format(r.DeliveredAt)));
-            cells.Add(Csv(LocalTime.Format(r.CarrierDeliveredAt)));
             cells.Add(Csv(LocalTime.Format(r.DnReceivedAt)));
-            // Latency measured carrier-side when we have it (the time the
-            // customer actually got the SMS minus the time we sent it),
-            // otherwise from our wall-clock DeliveredAt — same column,
-            // best-available value.
-            var deliveryTime = r.CarrierDeliveredAt ?? r.DeliveredAt;
-            var latency = r.SentAt is not null && deliveryTime is not null
-                ? (deliveryTime.Value - r.SentAt.Value)
+            var latency = r.SentAt is not null && r.DeliveredAt is not null
+                ? (r.DeliveredAt.Value - r.SentAt.Value)
                 : (TimeSpan?)null;
             cells.Add(Csv(latency is null ? "" : ((long)latency.Value.TotalSeconds).ToString()));
             cells.Add(Csv(FormatLatency(latency)));

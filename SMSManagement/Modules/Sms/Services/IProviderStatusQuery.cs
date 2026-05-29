@@ -10,14 +10,11 @@ namespace SMSManagement.Modules.Sms.Services;
 /// the provider response (e.g. <c>"DELIVERED"</c>, <c>"UNDELIVERED: phone
 /// off"</c>). Stored in <c>SmsMessage.StatusDetail</c> for every status so
 /// the report shows an informational reason regardless of success/failure.</param>
-/// <param name="CarrierDeliveredAt">Carrier-reported handset-arrival time if
-/// the provider's response includes one (Infobip's <c>doneAt</c>). Etracker
-/// pull responses don't carry a timestamp so this is null for that provider.</param>
 /// <param name="RawPayload">Verbatim provider response body, for the operator
 /// to inspect fields we don't yet have typed columns for.</param>
 public sealed record StatusQueryResult(
     SmsStatus? Status, string? ErrorCode, string? StatusDetail,
-    DateTimeOffset? CarrierDeliveredAt = null, string? RawPayload = null);
+    string? RawPayload = null);
 
 /// <summary>
 /// Per-provider client that asks "what's the current status of msgId X?" so

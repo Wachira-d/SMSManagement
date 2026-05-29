@@ -49,7 +49,7 @@ public sealed class DnLogsController : ControllerBase
             {
                 e.Id, e.CreatedAt, e.Provider, e.Source, e.ProviderMessageId,
                 e.Outcome, e.Status, e.MappedStatus,
-                e.CarrierDeliveredAt, e.FieldKeys, e.RemoteIp,
+                e.FieldKeys, e.RemoteIp,
                 e.RawPayload, e.Notes
             })
         });
@@ -70,14 +70,13 @@ public sealed class DnLogsController : ControllerBase
         var sb = new System.Text.StringBuilder();
         sb.Append('﻿');
         sb.AppendLine("CreatedAt,Provider,Source,ProviderMessageId,Outcome,Status,MappedStatus,"
-                    + "CarrierDeliveredAt,RemoteIp,FieldKeys,Notes,RawPayload");
+                    + "RemoteIp,FieldKeys,Notes,RawPayload");
         foreach (var e in rows)
             sb.AppendLine(string.Join(',', new[]
             {
                 Csv(LocalTime.Format(e.CreatedAt)), Csv(e.Provider), Csv(e.Source),
                 Csv(e.ProviderMessageId), Csv(e.Outcome), Csv(e.Status), Csv(e.MappedStatus),
-                Csv(LocalTime.Format(e.CarrierDeliveredAt)), Csv(e.RemoteIp),
-                Csv(e.FieldKeys), Csv(e.Notes), Csv(e.RawPayload)
+                Csv(e.RemoteIp), Csv(e.FieldKeys), Csv(e.Notes), Csv(e.RawPayload)
             }));
         return File(System.Text.Encoding.UTF8.GetBytes(sb.ToString()),
             "text/csv", "dn-logs.csv");

@@ -6,10 +6,10 @@
 <p class="text-muted small">
     Structured audit trail of every delivery notification — both the
     provider's webhook pushes (<code>source=webhook</code>) and the
-    reconciler's status pulls (<code>source=pull</code>). Use this when the
-    <code>CarrierDeliveredAt</code> column is blank, when DNs aren't arriving,
-    or to verify a specific <code>msgID</code> went through. Click a row to
-    inspect the raw payload + field names the provider actually sent.
+    reconciler's status pulls (<code>source=pull</code>). Use this when
+    DNs aren't arriving or to verify a specific <code>msgID</code> went
+    through. Click a row to inspect the raw payload + field names the
+    provider actually sent.
 </p>
 
 <div class="row g-2 mb-3 align-items-end">
@@ -66,10 +66,10 @@
     <table class="table table-sm">
         <thead><tr>
             <th>When</th><th>Provider</th><th>Source</th><th>Outcome</th>
-            <th>msgID</th><th>Status</th><th>Carrier delivered</th>
+            <th>msgID</th><th>Status</th>
             <th>Remote IP</th><th>Fields</th>
         </tr></thead>
-        <tbody id="dnBody"><tr><td colspan="9" class="text-muted">Loading…</td></tr></tbody>
+        <tbody id="dnBody"><tr><td colspan="8" class="text-muted">Loading…</td></tr></tbody>
     </table>
 </div>
 
@@ -143,7 +143,7 @@ async function load() {
         document.getElementById('btnNext').disabled = data.page >= data.totalPages;
 
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="9" class="text-muted">No DN entries in this range.</td></tr>';
+            body.innerHTML = '<tr><td colspan="8" class="text-muted">No DN entries in this range.</td></tr>';
             return;
         }
         window._dnRows = Object.fromEntries(rows.map(r => [r.id, r]));
@@ -155,7 +155,6 @@ async function load() {
                 <td>${outcomeBadge(r.outcome||'')}</td>
                 <td class="small"><code>${esc(r.providerMessageId||'—')}</code></td>
                 <td class="small">${esc(r.status||'')}${r.mappedStatus ? ` <span class="text-muted">→ ${esc(r.mappedStatus)}</span>` : ''}</td>
-                <td class="small">${r.carrierDeliveredAt ? fmtDate(r.carrierDeliveredAt) : '<span class="text-muted">—</span>'}</td>
                 <td class="small">${esc(r.remoteIp||'')}</td>
                 <td class="small text-truncate" style="max-width:280px">${esc(r.fieldKeys||'')}</td>
             </tr>`).join('');
@@ -178,7 +177,6 @@ window.showDn = function (id) {
         item('Outcome',    outcomeBadge(r.outcome||'')),
         item('msgID',      `<code>${esc(r.providerMessageId||'')}</code>`),
         item('Status',     esc(r.status) + (r.mappedStatus ? ` → ${esc(r.mappedStatus)}` : '')),
-        item('Carrier delivered', r.carrierDeliveredAt ? fmtDate(r.carrierDeliveredAt) : '<span class="text-muted">none</span>'),
         item('Remote IP',  esc(r.remoteIp)),
         item('Field keys', `<code>${esc(r.fieldKeys||'')}</code>`),
         item('Notes',      esc(r.notes))
