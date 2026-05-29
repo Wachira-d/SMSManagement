@@ -95,8 +95,13 @@ public sealed class DlrController : ControllerBase
             "Received", "Done", "Sent", "DLR_TIMESTAMP",
             "deliveredAt", "deliveryTime", "doneAt");
 
-        _log.LogInformation("etracker DN msgID={MsgId} status={Status} -> {Mapped} carrierAt={CarrierAt}",
-            msgId, status, mapped, carrierAt);
+        // Log the FULL field list at info level — operators tracking down a
+        // missing CarrierDeliveredAt can look here to see exactly which keys
+        // etracker sent (and whether any of them carry a timestamp we should
+        // be parsing). Sensitive token already stripped by CaptureAllParams.
+        _log.LogInformation(
+            "etracker DN msgID={MsgId} status={Status} -> {Mapped} carrierAt={CarrierAt} fields=[{Fields}]",
+            msgId, status, mapped, carrierAt, string.Join(",", raw.Keys));
         await ApplyAsync("etracker", msgId, mapped, code, statusDetail,
             carrierAt, SerialiseRaw(raw), ct);
         return Ok();
@@ -226,15 +231,38 @@ public sealed class DlrController : ControllerBase
     /// <summary>Try the given field names in order; the first one that parses
     /// as a date wins. MacroKiosk variants use different names (Received /
     /// Done / DLR_TIMESTAMP / …) — capture them all so the operator can see
-    /// "ลูกค้าได้รับจริง" instead of just "เราได้รับ DN ตอนกี่โมง".</summary>
+    /// "ลูกค้าได้รับจริง" instead of just "เราได้รับ DN ตอนกี่โมง".
+    /// As a final fallback, scan EVERY field for anything that parses as a
+    /// datetime — handles accounts that use a field name we haven't seen
+    /// before. Obvious non-timestamp keys (msgID, status, msisdn, …) are
+    /// excluded so a numeric msgID isn't mistaken for a Unix epoch.</summary>
     private static DateTimeOffset? ExtractCarrierTimestamp(
         IReadOnlyDictionary<string, string> raw, params string[] candidateFields)
     {
+        // First: try named fields (these always win — most accurate).
         foreach (var f in candidateFields)
             if (raw.TryGetValue(f, out var v)
                 && !string.IsNullOrWhiteSpace(v)
                 && DateTimeOffset.TryParse(v, out var parsed))
                 return parsed;
+
+        // Fallback: blind scan. Skip identifier / status fields and pure-digit
+        // values (msgIDs, msisdns) so we don't pick up something that isn't a
+        // timestamp. First parseable hit wins.
+        var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "status", "statusDetail", "msgID", "msisdn", "description",
+            "errorCode", "operatorID", "MsgID", "Status", "Description",
+            "from", "to", "sender", "recipient"
+        };
+        foreach (var kv in raw)
+        {
+            if (skip.Contains(kv.Key)) continue;
+            var v = kv.Value;
+            if (string.IsNullOrWhiteSpace(v)) continue;
+            if (v.All(char.IsDigit)) continue; // pure number = id, not date
+            if (DateTimeOffset.TryParse(v, out var parsed)) return parsed;
+        }
         return null;
     }
 
