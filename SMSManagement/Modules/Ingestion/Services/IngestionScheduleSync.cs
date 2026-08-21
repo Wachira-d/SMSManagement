@@ -1,4 +1,5 @@
 using Hangfire;
+using SMSManagement.Modules.Core.Time;
 using SMSManagement.Modules.Ingestion.Domain;
 
 namespace SMSManagement.Modules.Ingestion.Services;
@@ -39,10 +40,15 @@ public static class IngestionScheduleSync
             ? DefaultCron : s.PollingSchedule.Trim();
         try
         {
+            // Interpret the operator's cron in Bangkok time — that's how the
+            // Sources UI renders "Weekly Fri at 09:00" ("0 9 * * 5") back at
+            // them. Hangfire's default is UTC, which would fire the job seven
+            // hours late (4 PM Bangkok for a 9 AM row).
             RecurringJob.AddOrUpdate<IIngestionPoller>(
                 jobId,
                 p => p.PollSourceAsync(s.Id, CancellationToken.None),
-                cron);
+                cron,
+                new RecurringJobOptions { TimeZone = LocalTime.TimeZone });
         }
         catch (Exception ex)
         {
