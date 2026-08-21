@@ -16,6 +16,7 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using SMSManagement.Modules.Core.Logging;
 using SMSManagement.Modules.Core.Observability;
+using SMSManagement.Modules.Core.Time;
 using SMSManagement.Modules.Ingestion.Services;
 using SMSManagement.Modules.Notifications;
 using SMSManagement.Modules.Sms.Services;
@@ -271,6 +272,10 @@ if (!testingEnabled)
 if (!testingEnabled)
 {
     builder.Services.AddHangfire(c => c
+        // Recurring jobs persist their schedule's time-zone id and re-resolve
+        // it on every trigger. Resolving Bangkok ourselves keeps that lookup
+        // from depending on the host's TZ database — see the resolver's notes.
+        .UseTimeZoneResolver(new HangfireTimeZoneResolver())
         .UseSqlServerStorage(builder.Configuration.GetConnectionString("Default"),
             new SqlServerStorageOptions
             {
