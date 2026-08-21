@@ -271,11 +271,14 @@ if (!testingEnabled)
 // ---------- Background work: Hangfire on SQL Server ----------
 if (!testingEnabled)
 {
+    // Recurring jobs persist their schedule's time-zone id and re-resolve it on
+    // every trigger; resolving Bangkok ourselves keeps that lookup from
+    // depending on the host's TZ database — see the resolver's notes.
+    // Registered BEFORE AddHangfire on purpose: AddHangfire installs the stock
+    // resolver with TryAddSingleton, which defers to whatever is already there.
+    builder.Services.AddSingleton<ITimeZoneResolver>(new HangfireTimeZoneResolver());
+
     builder.Services.AddHangfire(c => c
-        // Recurring jobs persist their schedule's time-zone id and re-resolve
-        // it on every trigger. Resolving Bangkok ourselves keeps that lookup
-        // from depending on the host's TZ database — see the resolver's notes.
-        .UseTimeZoneResolver(new HangfireTimeZoneResolver())
         .UseSqlServerStorage(builder.Configuration.GetConnectionString("Default"),
             new SqlServerStorageOptions
             {
