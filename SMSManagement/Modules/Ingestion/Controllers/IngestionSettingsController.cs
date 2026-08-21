@@ -52,7 +52,10 @@ public sealed class IngestionSettingsController : ControllerBase
     public sealed record TestConnectionRequest(string SourceType, JsonElement Config);
 
     [HttpGet]
-    public async Task<IActionResult> List(Guid projectId, CancellationToken ct)
+    public async Task<IActionResult> List(
+        Guid projectId,
+        [FromServices] IScheduleStateReader schedules,
+        CancellationToken ct)
     {
         await _access.EnsureAsync(projectId, ProjectAccessLevel.Viewer, ct);
 
@@ -66,7 +69,31 @@ public sealed class IngestionSettingsController : ControllerBase
                 // EncryptedConfig is NOT projected — secrets stay server-side.
             })
             .ToListAsync(ct);
-        return Ok(rows);
+
+        // Attach what Hangfire actually holds for each source. A binding that
+        // looks enabled here but has no recurring job behind it is exactly the
+        // failure that went unnoticed for months, so it gets its own flag
+        // rather than being folded into a computed "next poll" string.
+        var state = schedules.GetAll();
+        var withSchedule = rows.Select(s =>
+        {
+            state.TryGetValue(IngestionScheduleSync.JobId(s.Id), out var js);
+            return new
+            {
+                s.Id, s.SourceType, s.ArchiveDirectory, s.RejectedDirectory,
+                s.Action, s.DuplicatePolicy, s.Enabled, s.PollingSchedule, s.WorkflowName,
+                Schedule = new
+                {
+                    Registered    = js?.Registered ?? false,
+                    NextExecution = js?.NextExecution,
+                    LastExecution = js?.LastExecution,
+                    LastJobState  = js?.LastJobState,
+                    TimeZoneId    = js?.TimeZoneId,
+                    Error         = js?.Error
+                }
+            };
+        });
+        return Ok(withSchedule);
     }
 
     [HttpPost]

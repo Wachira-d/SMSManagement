@@ -1291,28 +1291,104 @@ async function loadSrcWorkflows() {
     } catch { /* keep the default option only */ }
 }
 
+// Both cells below report what Hangfire holds, never a schedule re-derived
+// from the cron string. The old client-side guess printed a confident "in 6d
+// 22h" for bindings Hangfire had no job for at all, which is how a source that
+// had never polled once still looked perfectly healthy.
+function nextPollCell(s) {
+    const sc = s.schedule || {};
+    if (!s.enabled) return '<span class="text-muted">paused</span>';
+    if (!sc.registered) {
+        return '<span class="text-danger fw-semibold" title="Hangfire has no recurring job'
+             + ' for this binding, so it will never poll on its own. Press Edit then Save to'
+             + ' register it, or restart the app to re-sync every binding.">not scheduled</span>';
+    }
+    if (!sc.nextExecution) return '<span class="text-muted">—</span>';
+    const next = new Date(sc.nextExecution);
+    // The Schedule column reads as wall-clock local time, so flag a job whose
+    // stored zone isn't Bangkok — it will fire hours away from what it says.
+    const tz = sc.timeZoneId || '';
+    const tzWarn = tz && !/bangkok|se asia/i.test(tz)
+        ? ` <span class="badge bg-warning text-dark" title="Cron is evaluated in ${esc(tz)}, not Bangkok">${esc(tz)}</span>`
+        : '';
+    return `<span title="${esc(next.toLocaleString())}">in ${relTime(next)}</span>${tzWarn}`;
+}
+
+function lastPollCell(s) {
+    const sc = s.schedule || {};
+    if (!sc.registered) return '<span class="text-muted">—</span>';
+    if (sc.error) return `<span class="text-danger" title="${esc(sc.error)}">error</span>`;
+    if (!sc.lastExecution) return '<span class="text-muted">never</span>';
+    const state = sc.lastJobState || '';
+    const cls = state === 'Succeeded' ? 'text-success'
+              : state === 'Failed'    ? 'text-danger' : 'text-muted';
+    return `<span class="${cls}" title="${esc(state || 'unknown state')}">${fmtDate(sc.lastExecution)}</span>`;
+}
+
+// Every poll writes a row here, including the ones that found nothing. That
+// makes this the only place that distinguishes "the schedule never fired" from
+// "it fired and the SFTP folder was empty" — the ingestion-batches table below
+// shows just the polls that produced a file, so a silent scheduler and a quiet
+// upstream look identical there.
+// Mirrors the outcomes IngestionPoller writes: NoFiles / ConnectError from the
+// poll itself, and one of Ingested / SkippedDuplicate / IngestFailed /
+// MoveFailed per file it picked up.
+const POLL_OUTCOME_CLASS = {
+    Ingested:         'bg-success',
+    NoFiles:          'bg-secondary',
+    SkippedDuplicate: 'bg-secondary',
+    MoveFailed:       'bg-warning text-dark',
+    IngestFailed:     'bg-danger',
+    ConnectError:     'bg-danger'
+};
+
+async function loadPollLog() {
+    const body = document.getElementById('pollBody');
+    if (!body) return;
+    try {
+        const rows = await api.get(`${api_proj}/ingestion-batches/polls?take=50`);
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-3">'
+                + 'No polls recorded. If a binding above is enabled and shows a next-poll '
+                + 'time, nothing has actually run yet.</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(p => {
+            const cls = POLL_OUTCOME_CLASS[p.outcome] || 'bg-secondary';
+            return `<tr>
+                <td class="small">${fmtDate(p.polledAt)}</td>
+                <td class="small">${esc(p.sourceType || '')}</td>
+                <td><span class="badge ${cls}">${esc(p.outcome || '')}</span></td>
+                <td class="small text-truncate" style="max-width:320px">${esc(p.fileName || '')}</td>
+                <td class="small text-muted text-truncate" style="max-width:320px"
+                    title="${esc(p.message || '')}">${esc(p.message || '')}</td>
+            </tr>`;
+        }).join('');
+    } catch (e) {
+        body.innerHTML = `<tr><td colspan="5" class="text-danger small">${esc(e.message)}</td></tr>`;
+    }
+}
+
 async function loadSources() {
     loadSrcWorkflows();
+    loadPollLog();
     try {
         const rows = await api.get(`${api_proj}/ingestion-sources`);
         const body = document.getElementById('srcBody');
         const sel  = document.getElementById('upSrcSelect');
         sel.innerHTML = '<option value="">— pick from your bindings —</option>';
         if (!rows.length) {
-            body.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-4"><i class="bi bi-cloud-download fs-3 d-block"></i>No automatic sources. Click <strong>+ New</strong> to add SFTP / SharePoint / REST, or skip this tab if you only upload manually.</td></tr>';
+            body.innerHTML = '<tr><td colspan="7" class="text-muted text-center py-4"><i class="bi bi-cloud-download fs-3 d-block"></i>No automatic sources. Click <strong>+ New</strong> to add SFTP / SharePoint / REST, or skip this tab if you only upload manually.</td></tr>';
             return;
         }
         body.innerHTML = rows.map(s => {
             const cron = s.pollingSchedule || '*/5 * * * *';
             const human = humanizeCron(cron);
-            const next = s.enabled ? nextCronTime(cron) : null;
-            const nextLabel = !s.enabled ? '<span class="text-muted">paused</span>'
-                : (next ? `<span title="${esc(next.toLocaleString())}">in ${relTime(next)}</span>`
-                       : '<span class="text-muted">—</span>');
             return `<tr>
                 <td>${esc(s.sourceType)}</td>
                 <td class="small">${esc(human)}<br><code class="text-muted">${esc(cron)}</code></td>
-                <td class="small">${nextLabel}</td>
+                <td class="small">${nextPollCell(s)}</td>
+                <td class="small">${lastPollCell(s)}</td>
                 <td>${ACTION_LABEL[s.action] || s.action}</td>
                 <td>${s.enabled ? '<span class="text-success">●</span>' : '<span class="text-muted">○</span>'}</td>
                 <td>
@@ -1672,6 +1748,7 @@ async function loadBatches() {
     } catch (e) { toast(e.message, 'danger'); }
 }
 document.getElementById('btnBatchRefresh').addEventListener('click', loadBatches);
+document.getElementById('btnPollRefresh')?.addEventListener('click', loadPollLog);
 
 // Per-batch rejection sample — bounded to 50 by the pipeline. Renders the
 // raw error codes so operators can fix the data and re-upload. Same modal
@@ -1776,41 +1853,6 @@ function humanizeCron(cron) {
     if (/^\d+$/.test(m) && /^\d+$/.test(h) && dom === '*' && mon === '*' && /^[0-6]$/.test(dow))
         return `Weekly ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][Number(dow)]} at ${pad(h)}:${pad(m)}`;
     return '(custom cron)';
-}
-function nextCronTime(cron, from = new Date()) {
-    const parts = (cron || '').trim().split(/\s+/);
-    if (parts.length !== 5) return null;
-    const [m, h, dom, mon, dow] = parts;
-    const d = new Date(from); d.setSeconds(0, 0);
-    let mm;
-    if ((mm = m.match(/^\*\/(\d+)$/)) && h === '*' && dom === '*' && mon === '*' && dow === '*') {
-        const n = Number(mm[1]);
-        const next = Math.ceil((d.getMinutes() + 1) / n) * n;
-        d.setMinutes(next, 0, 0);
-        return d;
-    }
-    if (m === '0' && h === '*' && dom === '*' && mon === '*' && dow === '*') {
-        d.setHours(d.getHours() + 1, 0, 0, 0); return d;
-    }
-    if (m === '0' && (mm = h.match(/^\*\/(\d+)$/)) && dom === '*' && mon === '*' && dow === '*') {
-        const n = Number(mm[1]);
-        const next = Math.ceil((d.getHours() + 1) / n) * n;
-        if (next >= 24) { d.setDate(d.getDate() + 1); d.setHours(0, 0, 0, 0); }
-        else { d.setHours(next, 0, 0, 0); }
-        return d;
-    }
-    if (/^\d+$/.test(m) && /^\d+$/.test(h) && dom === '*' && mon === '*' && dow === '*') {
-        d.setHours(Number(h), Number(m), 0, 0);
-        if (d <= from) d.setDate(d.getDate() + 1);
-        return d;
-    }
-    if (/^\d+$/.test(m) && /^\d+$/.test(h) && dom === '*' && mon === '*' && /^[0-6]$/.test(dow)) {
-        d.setHours(Number(h), Number(m), 0, 0);
-        const targetDow = Number(dow);
-        while (d <= from || d.getDay() !== targetDow) d.setDate(d.getDate() + 1);
-        return d;
-    }
-    return null;
 }
 function pad(s) { return String(Number(s)).padStart(2, '0'); }
 function relTime(future) {

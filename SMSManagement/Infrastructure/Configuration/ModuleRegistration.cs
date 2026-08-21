@@ -134,6 +134,9 @@ public static class ModuleRegistration
         // ---------- Ingestion ----------
         services.AddScoped<IIngestionPipeline, IngestionPipeline>();
         services.AddScoped<IIngestionPoller, IngestionPoller>();
+        // Lets the Sources tab report the schedule Hangfire will actually run,
+        // instead of one re-derived from the cron string in the browser.
+        services.AddScoped<IScheduleStateReader, ScheduleStateReader>();
 
         // ---------- Error log retention ----------
         services.Configure<ErrorLogRetentionOptions>(cfg.GetSection("ErrorLogRetention"));

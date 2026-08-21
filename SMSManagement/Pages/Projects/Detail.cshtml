@@ -705,8 +705,8 @@ Rules: 10–80 characters, must be unique, only <code>A-Z a-z 0-9 _ -</code>. Ca
                     </div>
                     <div class="table-responsive">
                         <table class="table table-sm mb-0">
-                            <thead><tr><th>Type</th><th>Schedule</th><th>Next poll</th><th>Action</th><th>On</th><th></th></tr></thead>
-                            <tbody id="srcBody"><tr><td colspan="6" class="text-muted">Loading…</td></tr></tbody>
+                            <thead><tr><th>Type</th><th>Schedule</th><th>Next poll</th><th>Last poll</th><th>Action</th><th>On</th><th></th></tr></thead>
+                            <tbody id="srcBody"><tr><td colspan="7" class="text-muted">Loading…</td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -874,6 +874,24 @@ Other SFTP keys: <code>host, port, username, remoteDirectory</code>, <code>retry
                 </div>
             </div>
             <div class="col-12">
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between">
+                        <span>Poll log</span>
+                        <button id="btnPollRefresh" class="btn btn-sm btn-link p-0">Refresh now</button>
+                    </div>
+                    <div class="card-body py-2 small text-muted">
+                        Every scheduled poll lands here, including the ones that found nothing —
+                        so an empty list means the schedule genuinely never fired, while a run of
+                        <code>NoFiles</code> rows means it fired and the folder was empty. The
+                        batches table below only lists polls that produced a file.
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead><tr><th>When</th><th>Source</th><th>Outcome</th><th>File</th><th>Message</th></tr></thead>
+                            <tbody id="pollBody"><tr><td colspan="5" class="text-muted">Loading…</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
                 <div class="card">
                     <div class="card-header d-flex justify-content-between">
                         <span>Recent ingestion batches <span class="refresh-dot" title="Auto-refreshes every 10s"></span></span>
