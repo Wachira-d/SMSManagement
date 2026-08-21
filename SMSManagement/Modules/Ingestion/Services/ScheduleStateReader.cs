@@ -56,7 +56,10 @@ public sealed class ScheduleStateReader : IScheduleStateReader
             return connection.GetRecurringJobs()
                 .Where(j => j.Id is not null)
                 .ToDictionary(
-                    j => j.Id,
+                    // ! because null-state doesn't flow across the Where above,
+                    // and TreatWarningsAsErrors would turn the resulting
+                    // nullable-key warning into a build failure.
+                    j => j.Id!,
                     j => new ScheduleState(
                         Registered: true,
                         NextExecution: ToOffset(j.NextExecution),
