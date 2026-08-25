@@ -1,0 +1,81 @@
+@page
+@model SMSManagement.Pages.Admin.IndexModel
+@{ ViewData["Title"] = "Administration"; }
+
+<h1 class="h3 mb-1">Administration</h1>
+<p class="text-muted small mb-4">
+    Every admin screen, mirroring the <strong>Admin</strong> menu in the navbar.
+</p>
+
+<div class="row g-3">
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header">Administration</div>
+            <div class="list-group list-group-flush">
+                <a class="list-group-item list-group-item-action" asp-page="/Admin/Users">
+                    <div class="fw-semibold"><i class="bi bi-people"></i> Users</div>
+                    <div class="small text-muted">Accounts, roles and per-project membership.</div>
+                </a>
+                <a class="list-group-item list-group-item-action" asp-page="/Admin/AllProjects">
+                    <div class="fw-semibold"><i class="bi bi-folder"></i> All projects</div>
+                    <div class="small text-muted">Every project, including ones you aren't a member of.</div>
+                </a>
+                <a class="list-group-item list-group-item-action" asp-page="/Admin/Settings">
+                    <div class="fw-semibold"><i class="bi bi-sliders"></i> System settings</div>
+                    <div class="small text-muted">SMS providers, DN webhooks, SMTP, shortlinks, security.</div>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header">Operations</div>
+            <div class="list-group list-group-flush">
+                <a class="list-group-item list-group-item-action" asp-page="/Admin/Reports">
+                    <div class="fw-semibold"><i class="bi bi-bar-chart"></i> Global reports</div>
+                    <div class="small text-muted">Cross-project provider performance and user activity.</div>
+                </a>
+                <a class="list-group-item list-group-item-action" asp-page="/Admin/ErrorLogs">
+                    <div class="fw-semibold"><i class="bi bi-exclamation-triangle"></i> Error logs</div>
+                    <div class="small text-muted">Warning and above from every module.</div>
+                </a>
+                <a class="list-group-item list-group-item-action" asp-page="/Admin/DnLogs">
+                    <div class="fw-semibold"><i class="bi bi-inbox"></i> DN logs</div>
+                    <div class="small text-muted">Every delivery notification received, push and pull.</div>
+                </a>
+                <a class="list-group-item list-group-item-action" asp-page="/Admin/BlockedIps">
+                    <div class="fw-semibold"><i class="bi bi-shield-x"></i> Blocked IPs</div>
+                    <div class="small text-muted">Addresses blocked by shortlink abuse protection.</div>
+                </a>
+                <a class="list-group-item list-group-item-action" asp-page="/Admin/ArchivedProjects">
+                    <div class="fw-semibold"><i class="bi bi-archive"></i> Archived projects</div>
+                    <div class="small text-muted">Soft-deleted projects, restorable from here.</div>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header">Diagnostics</div>
+            <div class="list-group list-group-flush">
+                <a class="list-group-item list-group-item-action" href="/jobs" target="_blank">
+                    <div class="fw-semibold"><i class="bi bi-clock-history"></i> Hangfire dashboard</div>
+                    <div class="small text-muted">
+                        Recurring jobs with the schedule Hangfire will actually honour —
+                        the place to confirm a source binding is registered and when it last ran.
+                    </div>
+                </a>
+                <a class="list-group-item list-group-item-action" href="/metrics" target="_blank">
+                    <div class="fw-semibold"><i class="bi bi-graph-up"></i> Metrics</div>
+                    <div class="small text-muted">Prometheus scrape endpoint (<code>/metrics</code>).</div>
+                </a>
+                <a class="list-group-item list-group-item-action" href="/health/ready" target="_blank">
+                    <div class="fw-semibold"><i class="bi bi-heart-pulse"></i> Health</div>
+                    <div class="small text-muted">Readiness probe (<code>/health/ready</code>).</div>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
