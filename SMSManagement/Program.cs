@@ -22,6 +22,16 @@ using SMSManagement.Modules.Notifications;
 using SMSManagement.Modules.Sms.Services;
 using SMSManagement.Modules.Workflow.Engine;
 
+// ---------- Crash-proof logging (before anything else can fail) ----------
+// Startup failures (HTTP 500.30 under IIS) land in logs\startup-*.log even
+// when the real logger never gets built; see FileLogging.
+Log.Logger = FileLogging.CreateBootstrapLogger();
+AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+{
+    Log.Fatal(e.ExceptionObject as Exception, "Application terminated unexpectedly");
+    Log.CloseAndFlush();
+};
+
 var builder = WebApplication.CreateBuilder(args);
 
 // ---------- Test-mode flag ----------
@@ -80,6 +90,7 @@ builder.Host.UseSerilog((ctx, services, lc) => lc
     .Enrich.WithCorrelationId()
     .Enrich.With(new PiiMaskingEnricher())
     .WriteTo.Console(formatter: new Serilog.Formatting.Compact.CompactJsonFormatter())
+    .AddFileSink(ctx.Configuration, ctx.HostingEnvironment.ContentRootPath)
     .WriteTo.Conditional(
         ev => ev.Level >= Serilog.Events.LogEventLevel.Warning,
         cfg => cfg.Sink(new ErrorLogSink(services.GetRequiredService<IServiceScopeFactory>()))));
@@ -456,6 +467,7 @@ if (!testingEnabled)
 }
 
 app.Run();
+Log.CloseAndFlush();
 
 // Exposed for WebApplicationFactory in tests.
 public partial class Program { }
