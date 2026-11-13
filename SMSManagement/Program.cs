@@ -427,6 +427,14 @@ if (!testingEnabled)
         n => n.SweepAsync(CancellationToken.None),
         "*/5 * * * *");
 
+    // Backstop for EmailRelayAPI delivery webhooks that never arrived: pull
+    // the status of relay emails still in flight. No-op while the relay
+    // isn't configured, so it's safe to register unconditionally.
+    RecurringJob.AddOrUpdate<SMSManagement.Modules.Notifications.Relay.IEmailRelayReconciler>(
+        "email-relay-reconcile",
+        r => r.ReconcileAsync(CancellationToken.None),
+        "*/10 * * * *");
+
     // Daily purge of old ErrorLogs entries (default retention 30 days).
     RecurringJob.AddOrUpdate<IErrorLogPurger>(
         "error-log-purge",

@@ -13,7 +13,7 @@
 
 <ul class="nav nav-tabs mb-3" role="tablist">
     <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tab-set-sms">SMS providers</a></li>
-    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-set-smtp">SMTP</a></li>
+    <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-set-smtp">Email</a></li>
     <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-set-shortlink">Shortlink</a></li>
     <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-set-security">Security</a></li>
     <li class="nav-item"><a class="nav-link"        data-bs-toggle="tab" href="#tab-set-authen">AuthenAPI</a></li>
@@ -171,9 +171,97 @@
         </div>
     </div>
 
-    <!-- ============ SMTP ============ -->
+    <!-- ============ EMAIL (provider + EmailRelay + SMTP) ============ -->
     <div class="tab-pane fade" id="tab-set-smtp">
+        <div class="card mb-3">
+            <div class="card-header">Email provider</div>
+            <div class="card-body">
+                <form id="formSetEmailProvider" class="row g-2 align-items-end">
+                    <div class="col-md-4"><label class="form-label small">Send outbound email via</label>
+                        <select id="emailProvider" class="form-select form-select-sm">
+                            <option value="smtp">SMTP (direct)</option>
+                            <option value="relay">EmailRelayAPI</option>
+                        </select></div>
+                    <div class="col-md-2"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
+                    <div class="col-md-6 d-flex gap-1 align-items-center justify-content-end">
+                        <input id="emailTestTo" class="form-control form-control-sm"
+                               style="width:240px" placeholder="test@recipient.com" />
+                        <button id="btnEmailTest" class="btn btn-outline-secondary btn-sm" type="button"
+                                title="Sends through the active provider and records it in Email logs">
+                            <i class="bi bi-envelope-check"></i> Send test via active provider
+                        </button>
+                    </div>
+                </form>
+                <div class="small text-muted mt-2">
+                    Takes effect on the next send, with no restart. Every send is recorded in
+                    <a asp-page="/Admin/EmailLogs">Email logs</a>.
+                </div>
+                <pre id="emailTestResult" class="small mt-2 d-none"></pre>
+            </div>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-header">EmailRelayAPI</div>
+            <div class="card-body">
+                <form id="formSetRelay" class="row g-2">
+                    <div class="col-md-6"><label class="form-label small">Base URL</label>
+                        <input id="rlBase" class="form-control form-control-sm" placeholder="https://relay.example.com/" /></div>
+                    <div class="col-md-6"><label class="form-label small">API key (<code>send</code> + <code>read</code> scopes)
+                        <span id="rlKeyMark" class="badge text-bg-secondary d-none">stored</span></label>
+                        <input id="rlKey" type="password" class="form-control form-control-sm"
+                               autocomplete="new-password" placeholder="erk_… — leave blank to keep current" /></div>
+                    <div class="col-md-4"><label class="form-label small">Sender profile (optional)</label>
+                        <input id="rlProfile" class="form-control form-control-sm" placeholder="blank = client default" /></div>
+                    <div class="col-md-4"><label class="form-label small">From address (optional)</label>
+                        <input id="rlFrom" class="form-control form-control-sm" placeholder="blank = sender profile From" /></div>
+                    <div class="col-md-4"><label class="form-label small">From name (optional)</label>
+                        <input id="rlFromName" class="form-control form-control-sm" /></div>
+                    <div class="col-md-6"><label class="form-label small">Request signing secret
+                        <span id="rlSignMark" class="badge text-bg-secondary d-none">stored</span></label>
+                        <input id="rlSign" type="password" class="form-control form-control-sm"
+                               autocomplete="new-password" placeholder="only if the relay client requires signed requests" /></div>
+                    <div class="col-md-3"><label class="form-label small">Timeout (s)</label>
+                        <input id="rlTimeout" type="number" min="5" max="300" class="form-control form-control-sm" /></div>
+                    <div class="col-12"><hr class="my-2" />
+                        <div class="small fw-semibold mb-1">Delivery webhook</div>
+                        <div class="small text-muted mb-1">
+                            On the relay's client page, set <b>Webhook URL</b> to the address below and set
+                            <b>Webhook secret</b> to the same value you save here. The relay then reports
+                            <code>email.sent</code> / <code>email.failed</code> for each message.
+                        </div>
+                        <div class="input-group input-group-sm mb-2">
+                            <span class="input-group-text">Webhook URL</span>
+                            <input id="rlHookUrl" class="form-control" readonly />
+                            <button id="btnCopyHook" class="btn btn-outline-secondary" type="button"><i class="bi bi-clipboard"></i></button>
+                        </div></div>
+                    <div class="col-md-6"><label class="form-label small">Webhook secret
+                        <span id="rlHookMark" class="badge text-bg-secondary d-none">stored</span></label>
+                        <div class="input-group input-group-sm">
+                            <input id="rlHookSecret" type="password" class="form-control"
+                                   autocomplete="new-password" placeholder="leave blank to keep current" />
+                            <button id="btnGenHook" class="btn btn-outline-secondary" type="button" title="Generate a random secret">
+                                <i class="bi bi-shuffle"></i></button>
+                        </div></div>
+                    <div class="col-md-6"><label class="form-label small">Unsigned webhooks</label>
+                        <div class="form-check form-switch pt-1">
+                            <input id="rlAllowUnsigned" type="checkbox" class="form-check-input" />
+                            <label class="form-check-label small text-danger" for="rlAllowUnsigned">
+                                Accept webhooks with no signature (not recommended: anyone could forge a status)</label>
+                        </div></div>
+                    <div class="col-12 d-flex gap-2 flex-wrap">
+                        <button class="btn btn-primary btn-sm" type="submit">Save</button>
+                        <button id="btnRelayConn" class="btn btn-outline-secondary btn-sm" type="button">
+                            <i class="bi bi-plug"></i> Test connection</button>
+                        <button id="btnRelayHook" class="btn btn-outline-secondary btn-sm" type="button">
+                            <i class="bi bi-broadcast"></i> Test webhook endpoint</button>
+                    </div>
+                </form>
+                <pre id="relayTestResult" class="small mt-2 d-none"></pre>
+            </div>
+        </div>
+
         <div class="card">
+            <div class="card-header">SMTP (direct)</div>
             <div class="card-body">
                 <form id="formSetSmtp" class="row g-2">
                     <div class="col-md-6"><label class="form-label small">Host</label>
@@ -331,6 +419,7 @@
         try {
             const s = await api.get('/api/admin/settings');
             fillSms(s.sms); fillSmtp(s.smtp); fillShortlink(s.shortlink);
+            fillEmail(s.email || {}, s.emailRelay || {}, s.emailRelayWebhookUrl || '');
             fillSecurity(s.security); fillAuthen(s.authenApi);
             fillPrivacy(s.privacy);
         } catch (e) { toast(e.message, 'danger'); }
@@ -402,6 +491,19 @@
         document.getElementById('smtpFrom').value     = s.FromAddress || '';
         document.getElementById('smtpFromName').value = s.FromDisplayName || '';
         document.getElementById('smtpPickup').value   = s.PickupDirectory || '';
+    }
+    function fillEmail(e, r, hookUrl) {
+        document.getElementById('emailProvider').value = e.provider === 'relay' ? 'relay' : 'smtp';
+        document.getElementById('rlBase').value     = r.BaseUrl || '';
+        document.getElementById('rlProfile').value  = r.SenderProfile || '';
+        document.getElementById('rlFrom').value     = r.FromAddress || '';
+        document.getElementById('rlFromName').value = r.FromName || '';
+        document.getElementById('rlTimeout').value  = r.TimeoutSeconds ?? 30;
+        document.getElementById('rlAllowUnsigned').checked = !!r.AllowUnsignedWebhooks;
+        document.getElementById('rlKeyMark').classList.toggle('d-none', !isStored(r.ApiKey));
+        document.getElementById('rlSignMark').classList.toggle('d-none', !isStored(r.SigningSecret));
+        document.getElementById('rlHookMark').classList.toggle('d-none', !isStored(r.WebhookSecret));
+        document.getElementById('rlHookUrl').value = hookUrl;
     }
     function fillShortlink(s) {
         document.getElementById('slBase').value    = s.publicBaseUrl || '';
@@ -529,6 +631,81 @@
             const r = await api.post('/api/admin/settings/test/smtp', { to });
             out.textContent = JSON.stringify(r, null, 2);
         } catch (e) { out.textContent = e.message; }
+    });
+
+    function showResult(id, text) {
+        const out = document.getElementById(id);
+        out.classList.remove('d-none'); out.textContent = text;
+    }
+
+    document.getElementById('formSetEmailProvider').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        await save([{ key: 'Email:Provider', category: 'Email', value: document.getElementById('emailProvider').value }]);
+        load();
+    });
+
+    document.getElementById('btnEmailTest').addEventListener('click', async () => {
+        const to = document.getElementById('emailTestTo').value.trim();
+        if (!to) { toast('Enter a recipient.', 'warning'); return; }
+        showResult('emailTestResult', 'Sending…');
+        try {
+            const r = await api.post('/api/admin/settings/test/email', { to });
+            showResult('emailTestResult', JSON.stringify(r, null, 2));
+        } catch (e) { showResult('emailTestResult', e.message); }
+    });
+
+    document.getElementById('formSetRelay').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const base = document.getElementById('rlBase').value.trim();
+        if (base && !/^https?:\/\//i.test(base)) { toast('Base URL must start with http:// or https://', 'warning'); return; }
+        const items = [
+            { key: 'Email:Relay:BaseUrl',       category: 'Email', value: base },
+            { key: 'Email:Relay:SenderProfile', category: 'Email', value: document.getElementById('rlProfile').value.trim() },
+            { key: 'Email:Relay:FromAddress',   category: 'Email', value: document.getElementById('rlFrom').value.trim() },
+            { key: 'Email:Relay:FromName',      category: 'Email', value: document.getElementById('rlFromName').value.trim() },
+            { key: 'Email:Relay:TimeoutSeconds', category: 'Email', value: num(document.getElementById('rlTimeout').value, 30) },
+            { key: 'Email:Relay:AllowUnsignedWebhooks', category: 'Email', value: document.getElementById('rlAllowUnsigned').checked }
+        ];
+        for (const [id, key] of [['rlKey', 'ApiKey'], ['rlSign', 'SigningSecret'], ['rlHookSecret', 'WebhookSecret']]) {
+            const v = document.getElementById(id).value;
+            if (nonBlank(v)) items.push({ key: 'Email:Relay:' + key, category: 'Email', value: v.trim() });
+        }
+        await save(items);
+        for (const id of ['rlKey', 'rlSign', 'rlHookSecret']) {
+            const el = document.getElementById(id);
+            el.value = ''; el.type = 'password';
+        }
+        load();
+    });
+
+    document.getElementById('btnGenHook').addEventListener('click', () => {
+        const bytes = new Uint8Array(32);
+        crypto.getRandomValues(bytes);
+        const el = document.getElementById('rlHookSecret');
+        el.value = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+        el.type = 'text';   // shown once, so it can be copied to the relay
+        toast('Generated. Copy it into the relay client\'s Webhook secret, then click Save here.', 'info');
+    });
+
+    document.getElementById('btnCopyHook').addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(document.getElementById('rlHookUrl').value); toast('Copied.'); }
+        catch { toast('Copy failed — select the text manually.', 'warning'); }
+    });
+
+    document.getElementById('btnRelayConn').addEventListener('click', async () => {
+        showResult('relayTestResult', 'Connecting…');
+        try {
+            const r = await api.post('/api/admin/settings/test/email-relay/connection', {});
+            showResult('relayTestResult', JSON.stringify(r, null, 2));
+        } catch (e) { showResult('relayTestResult', e.message); }
+    });
+
+    document.getElementById('btnRelayHook').addEventListener('click', async () => {
+        showResult('relayTestResult', 'Posting a signed test webhook…');
+        try {
+            const r = await api.post('/api/admin/settings/test/email-relay/webhook', {});
+            showResult('relayTestResult', JSON.stringify(r, null, 2));
+        } catch (e) { showResult('relayTestResult', e.message); }
     });
 
     document.getElementById('formSetShortlink').addEventListener('submit', async (ev) => {

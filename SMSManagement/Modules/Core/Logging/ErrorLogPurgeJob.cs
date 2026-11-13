@@ -51,11 +51,18 @@ public sealed class ErrorLogPurger : IErrorLogPurger
         var deletedDn = await _db.DnLogs
             .Where(e => e.CreatedAt < cutoff)
             .ExecuteDeleteAsync(ct);
-        var total = deletedErrors + deletedDn;
+        // Email webhook calls and the outbound-email log follow the same window.
+        var deletedHooks = await _db.EmailWebhookLogs
+            .Where(e => e.CreatedAt < cutoff)
+            .ExecuteDeleteAsync(ct);
+        var deletedEmails = await _db.OutboundEmails
+            .Where(e => e.CreatedAt < cutoff)
+            .ExecuteDeleteAsync(ct);
+        var total = deletedErrors + deletedDn + deletedHooks + deletedEmails;
         if (total > 0)
             _log.LogInformation(
-                "Log purge: removed {Errors} ErrorLogs and {Dn} DnLogs rows older than {Days} days.",
-                deletedErrors, deletedDn, RetentionDays);
+                "Log purge: removed {Errors} ErrorLogs, {Dn} DnLogs, {Hooks} EmailWebhookLogs and {Emails} OutboundEmails rows older than {Days} days.",
+                deletedErrors, deletedDn, deletedHooks, deletedEmails, RetentionDays);
         return total;
     }
 }

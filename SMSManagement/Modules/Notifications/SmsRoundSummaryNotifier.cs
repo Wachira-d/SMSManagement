@@ -179,6 +179,6 @@ public sealed class SmsRoundSummaryNotifier : ISmsRoundSummaryNotifier
         var csv = new EmailAttachment(
             $"sms-round-{batch.Id:N}.csv", "text/csv", report.Csv);
 
-        return new EmailMessage(recipients, subject, html, text, new[] { csv });
+        return new EmailMessage(recipients, subject, html, text, new[] { csv }, Category: "sms-round-summary");
     }
 }

@@ -173,7 +173,7 @@ public sealed class IngestionPipeline : IIngestionPipeline
             Variant: variant), ct);
 
         // Fire-and-forget stakeholder email. Tolerant of missing recipients /
-        // SMTP misconfig (see SmtpEmailSender). Enqueued via Hangfire so SMTP
+        // email misconfig (see EmailDispatcher). Enqueued via Hangfire so email
         // latency doesn't block the API response, and so the email goes out
         // even if the current request fails after this point.
         try
@@ -384,7 +384,7 @@ public sealed class IngestionPipeline : IIngestionPipeline
                 + "<ul>" + string.Join("", shortfalls.Select(s => $"<li>{Enc(s)}</li>")) + "</ul>"
                 + "<p>โปรดเติมคูปองในชุดที่เกี่ยวข้อง แล้วนำเข้าไฟล์อีกครั้ง</p>";
             var text = $"แคมเปญถูกระงับ: คูปองไม่พอ\nผู้รับ {recipientCount} ราย\n{detail}";
-            try { await _email.SendAsync(new EmailMessage(recipients, subject, html, text), ct); }
+            try { await _email.SendAsync(new EmailMessage(recipients, subject, html, text, Category: "coupon-shortage"), ct); }
             catch (Exception ex) { _log.LogWarning(ex, "Coupon-shortage alert email failed."); }
         }
 

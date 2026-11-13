@@ -219,7 +219,8 @@ public sealed class AuthController : ControllerBase
                         HtmlBody: $"<p>A password reset was requested for this account.</p>" +
                                   $"<p><a href=\"{resetUrl}\">Set a new password</a> (link expires in 1 hour).</p>" +
                                   $"<p>If you didn't request this, ignore this email — the account is unchanged.</p>",
-                        PlainTextBody: $"Reset link (expires in 1h): {resetUrl}"), ct);
+                        PlainTextBody: $"Reset link (expires in 1h): {resetUrl}",
+                        Category: "password-reset"), ct);
                 }
                 catch (Exception ex)
                 {

@@ -11,6 +11,7 @@ using SMSManagement.Modules.Core.Logging;
 using SMSManagement.Modules.Identity.Auth;
 using SMSManagement.Modules.Identity.Services;
 using SMSManagement.Modules.Notifications;
+using SMSManagement.Modules.Notifications.Relay;
 using SMSManagement.Modules.Shortlink.Abuse;
 using SMSManagement.Modules.Shortlink.Services;
 using SMSManagement.Modules.Sms.Providers;
@@ -49,9 +50,12 @@ public sealed class AdminSettingsController : ControllerBase
     private readonly IOptionsSnapshot<InfobipOptions> _infobip;
     private readonly IOptionsSnapshot<DlrWebhookOptions> _dlr;
     private readonly IOptionsSnapshot<PrivacyOptions> _privacy;
+    private readonly IOptionsSnapshot<EmailOptions> _email;
+    private readonly IOptionsSnapshot<EmailRelayOptions> _relay;
 
     private readonly IHttpClientFactory _httpFactory;
-    private readonly IEmailSender _emailSender;
+    private readonly IEmailDispatcher _emailDispatcher;
+    private readonly EmailRelayClient _relayClient;
     private readonly ILogger<AdminSettingsController> _log;
 
     public AdminSettingsController(
@@ -67,15 +71,19 @@ public sealed class AdminSettingsController : ControllerBase
         IOptionsSnapshot<InfobipOptions> infobip,
         IOptionsSnapshot<DlrWebhookOptions> dlr,
         IOptionsSnapshot<PrivacyOptions> privacy,
+        IOptionsSnapshot<EmailOptions> email,
+        IOptionsSnapshot<EmailRelayOptions> relay,
         IHttpClientFactory httpFactory,
-        IEmailSender emailSender,
+        IEmailDispatcher emailDispatcher,
+        EmailRelayClient relayClient,
         ILogger<AdminSettingsController> log)
     {
         _db = db; _me = me; _audit = audit; _config = config;
         _admin = admin; _session = session; _authenApi = authenApi;
         _smtp = smtp; _shortlink = shortlink; _abuse = abuse;
         _etracker = etracker; _infobip = infobip; _dlr = dlr; _privacy = privacy;
-        _httpFactory = httpFactory; _emailSender = emailSender; _log = log;
+        _email = email; _relay = relay;
+        _httpFactory = httpFactory; _emailDispatcher = emailDispatcher; _relayClient = relayClient; _log = log;
     }
 
     /// <summary>
@@ -133,6 +141,26 @@ public sealed class AdminSettingsController : ControllerBase
                 _smtp.Value.FromAddress, _smtp.Value.FromDisplayName,
                 _smtp.Value.PickupDirectory
             }),
+            // Which transport carries outbound email (smtp | relay).
+            Email = new
+            {
+                Provider = string.IsNullOrWhiteSpace(_email.Value.Provider)
+                    ? EmailOptions.ProviderSmtp : _email.Value.Provider.Trim().ToLowerInvariant()
+            },
+            EmailRelay = MaskSecrets(new
+            {
+                _relay.Value.BaseUrl,
+                _relay.Value.ApiKey,
+                _relay.Value.SigningSecret,
+                _relay.Value.WebhookSecret,
+                _relay.Value.AllowUnsignedWebhooks,
+                _relay.Value.SenderProfile,
+                _relay.Value.FromAddress,
+                _relay.Value.FromName,
+                _relay.Value.TimeoutSeconds
+            }),
+            // Paste into the relay client's "Webhook URL" field.
+            EmailRelayWebhookUrl = $"https://{Request.Host}/api/email/relay/webhook",
             Shortlink = new
             {
                 _shortlink.Value.PublicBaseUrl,
@@ -433,6 +461,163 @@ public sealed class AdminSettingsController : ControllerBase
         {
             _log.LogWarning(ex, "SMTP test send failed to {To}", body.To);
             return Ok(new { Ok = false, Error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Calls the relay's <c>GET /api/v1/me</c> with the saved key — proves the
+    /// URL, the key and (if set) the request-signing secret all work, and
+    /// shows the client's scopes and quota.
+    /// </summary>
+    [HttpPost("test/email-relay/connection")]
+    public async Task<IActionResult> TestEmailRelayConnection(CancellationToken ct)
+    {
+        if (!_relayClient.IsConfigured(out var problem))
+            return Ok(new { Ok = false, Error = problem + " Fill in the relay settings, click Save, then test again." });
+
+        var started = DateTimeOffset.UtcNow;
+        try
+        {
+            var resp = await _relayClient.GetMeAsync(ct);
+            var elapsedMs = (long)(DateTimeOffset.UtcNow - started).TotalMilliseconds;
+            if (!resp.IsSuccessStatus || resp.Data is not { } me)
+            {
+                var hint = (int)resp.StatusCode switch
+                {
+                    401 => "The API key was rejected (wrong, revoked or expired), or the relay requires signed requests and the signing secret is missing/wrong.",
+                    403 => "The key is valid but not allowed — check the client's scopes and IP allowlist on the relay.",
+                    404 => "Not found — Base URL should be the relay's root (e.g. https://relay.example.com/), without /api/v1.",
+                    _ => null
+                };
+                return Ok(new { Ok = false, Status = (int)resp.StatusCode, ElapsedMs = elapsedMs, Error = resp.Describe(), Note = hint });
+            }
+
+            var scopes = me.TryGetProperty("scopes", out var sc) && sc.ValueKind == JsonValueKind.Array
+                ? sc.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToList()
+                : new List<string>();
+            var requireSigned = me.TryGetProperty("requireSignedRequests", out var rs) && rs.ValueKind == JsonValueKind.True;
+
+            var warnings = new List<string>();
+            if (scopes.Count > 0 && !scopes.Contains("send", StringComparer.OrdinalIgnoreCase))
+                warnings.Add("Key lacks the 'send' scope — sends will be refused.");
+            if (scopes.Count > 0 && !scopes.Contains("read", StringComparer.OrdinalIgnoreCase))
+                warnings.Add("Key lacks the 'read' scope — the status reconciler and Refresh button won't work; only webhooks will update status.");
+            if (requireSigned && string.IsNullOrEmpty(_relay.Value.SigningSecret))
+                warnings.Add("The relay client requires signed requests but no signing secret is saved here.");
+            if (string.IsNullOrEmpty(_relay.Value.WebhookSecret) && !_relay.Value.AllowUnsignedWebhooks)
+                warnings.Add("No webhook secret saved — delivery webhooks will be rejected until you set the same secret on both sides.");
+
+            return Ok(new
+            {
+                Ok = true,
+                Status = (int)resp.StatusCode,
+                ElapsedMs = elapsedMs,
+                Client = EmailRelayClient.Str(me, "name"),
+                SenderProfile = EmailRelayClient.Str(me, "senderProfile"),
+                DefaultFrom = EmailRelayClient.Str(me, "defaultFrom"),
+                Scopes = scopes,
+                RequireSignedRequests = requireSigned,
+                DailyQuota = me.TryGetProperty("dailyQuota", out var q) ? q.Clone() : (JsonElement?)null,
+                UsedToday = me.TryGetProperty("usedToday", out var u) ? u.Clone() : (JsonElement?)null,
+                KeyExpiresAt = EmailRelayClient.Str(me, "keyExpiresAt"),
+                Warnings = warnings
+            });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _log.LogWarning(ex, "Email relay connection test failed");
+            return Ok(new { Ok = false, Error = $"{ex.GetType().Name}: {ex.Message}",
+                Note = "Could not reach the relay — check the Base URL, DNS and firewall from this server." });
+        }
+    }
+
+    public sealed record TestEmailBody(string To);
+
+    /// <summary>
+    /// End-to-end test through whichever provider is active, recorded in the
+    /// email log like any real send. For the relay, "Queued" is success at
+    /// this point — the delivery result follows by webhook (watch /Admin/EmailLogs).
+    /// </summary>
+    [HttpPost("test/email")]
+    public async Task<IActionResult> TestEmail([FromBody] TestEmailBody body, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(body.To) || !body.To.Contains('@'))
+            return BadRequest(new { Message = "Provide a valid 'To' address." });
+
+        var row = await _emailDispatcher.SendTrackedAsync(new EmailMessage(
+            new[] { body.To.Trim() },
+            "SMS Management — email test",
+            $"<p>Email test from <b>{WebUtility.HtmlEncode(Request.Host.ToString())}</b> at {DateTimeOffset.UtcNow:u}.</p>",
+            $"Email test from {Request.Host} at {DateTimeOffset.UtcNow:u}.",
+            Category: "admin-test"), ct);
+
+        var ok = row.Status is OutboundEmailStatus.Sent or OutboundEmailStatus.Queued
+            or OutboundEmailStatus.Scheduled or OutboundEmailStatus.Sending;
+        return Ok(new
+        {
+            Ok = ok,
+            row.Id,
+            row.Provider,
+            Status = row.Status.ToString(),
+            row.RelayMessageId,
+            Error = row.LastError,
+            Note = row.Provider == EmailOptions.ProviderRelay && ok && row.Status != OutboundEmailStatus.Sent
+                ? "Accepted by the relay. The final Sent/Failed arrives by webhook — check Admin → Email logs in a few seconds."
+                : null
+        });
+    }
+
+    /// <summary>
+    /// Posts a correctly signed fake <c>email.sent</c> to our own webhook URL
+    /// — proves the endpoint is reachable from this host and the saved secret
+    /// verifies. It cannot prove the relay holds the same secret; a real test
+    /// send does that.
+    /// </summary>
+    [HttpPost("test/email-relay/webhook")]
+    public async Task<IActionResult> TestEmailRelayWebhook(CancellationToken ct)
+    {
+        var secret = _relay.Value.WebhookSecret;
+        if (string.IsNullOrEmpty(secret))
+            return Ok(new { Ok = false, Error = "Save a webhook secret first." });
+
+        var url = $"{Request.Scheme}://{Request.Host}/api/email/relay/webhook";
+        var payload = JsonSerializer.Serialize(new
+        {
+            @event = "email.sent", id = Guid.NewGuid(), status = "sent",
+            idempotencyKey = "admin-webhook-test", subject = "webhook test", attempts = 1,
+            timestamp = DateTime.UtcNow
+        });
+        var bytes = System.Text.Encoding.UTF8.GetBytes(payload);
+        var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        var http = _httpFactory.CreateClient();
+        http.Timeout = TimeSpan.FromSeconds(10);
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new ByteArrayContent(bytes) { Headers = { ContentType = new("application/json") } }
+            };
+            req.Headers.TryAddWithoutValidation("X-Relay-Event", "email.sent");
+            req.Headers.TryAddWithoutValidation("X-Relay-Timestamp", ts);
+            req.Headers.TryAddWithoutValidation("X-Relay-Signature", RelaySignature.ComputeWebhook(secret, ts, bytes));
+            using var resp = await http.SendAsync(req, ct);
+            var status = (int)resp.StatusCode;
+            return Ok(new
+            {
+                Ok = status == 200,
+                Status = status,
+                Url = url,
+                Note = status == 200
+                    ? "Webhook endpoint verified the signature (the fake message id matches nothing, as intended)."
+                    : $"Endpoint answered HTTP {status} — see Admin → Email logs → Webhook calls for the reason."
+            });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _log.LogWarning(ex, "Email relay webhook self-test failed");
+            return Ok(new { Ok = false, Url = url, Error = ex.Message,
+                Note = "This server could not reach its own public URL — the relay may not be able to either." });
         }
     }
 

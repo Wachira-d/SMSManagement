@@ -98,7 +98,7 @@ public sealed class IngestionBatchNotifier : IIngestionBatchNotifier
         }
 
         await _email.SendAsync(
-            new EmailMessage(recipients, subject, html, text, attachments), ct);
+            new EmailMessage(recipients, subject, html, text, attachments, Category: "ingestion-report"), ct);
     }
 
     public static string[] ParseRecipients(string? csv) =>

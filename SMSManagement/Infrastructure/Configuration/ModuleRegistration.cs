@@ -147,7 +147,24 @@ public static class ModuleRegistration
 
         // ---------- Notifications ----------
         services.Configure<SmtpOptions>(cfg.GetSection("Smtp"));
-        services.AddSingleton<IEmailSender, SmtpEmailSender>();
+        services.Configure<EmailOptions>(cfg.GetSection("Email"));
+        services.Configure<EmailRelayOptions>(cfg.GetSection("Email:Relay"));
+        services.AddSingleton<IEmailTransport, SmtpEmailTransport>();
+        services.AddSingleton<IEmailTransport, Modules.Notifications.Relay.EmailRelayTransport>();
+        // One dispatcher serves both interfaces: fire-and-forget callers use
+        // IEmailSender, the admin test button IEmailDispatcher.
+        services.AddSingleton<EmailDispatcher>();
+        services.AddSingleton<IEmailSender>(sp => sp.GetRequiredService<EmailDispatcher>());
+        services.AddSingleton<IEmailDispatcher>(sp => sp.GetRequiredService<EmailDispatcher>());
+        // EmailRelayClient creates its HttpClient from the factory per call
+        // (it lives in singletons). POST retries are safe: every send carries
+        // an idempotency key the relay deduplicates on.
+        services.AddSingleton<Modules.Notifications.Relay.EmailRelayClient>();
+        services.AddHttpClient(Modules.Notifications.Relay.EmailRelayClient.HttpClientName, c =>
+                c.Timeout = Timeout.InfiniteTimeSpan)  // the resilience pipeline + TimeoutSeconds own timeouts
+            .AddStandardResilienceHandler(ConfigureEmailRelayResilience);
+        services.AddScoped<Modules.Notifications.Relay.IEmailRelayReconciler,
+            Modules.Notifications.Relay.EmailRelayReconciler>();
         services.AddScoped<IIngestionBatchNotifier, IngestionBatchNotifier>();
         services.AddScoped<IRoundReportService, RoundReportService>();
         services.AddScoped<ISmsRoundSummaryNotifier, SmsRoundSummaryNotifier>();
@@ -167,6 +184,20 @@ public static class ModuleRegistration
         services.AddScoped<IReportingService, ReportingService>();
 
         return services;
+    }
+
+    /// <summary>Two retries with jittered backoff (honouring Retry-After on a
+    /// 429/503). A relay send can carry multi-MB attachments, hence the longer
+    /// per-attempt timeout than the SMS providers get.</summary>
+    private static void ConfigureEmailRelayResilience(HttpStandardResilienceOptions o)
+    {
+        o.AttemptTimeout.Timeout = TimeSpan.FromSeconds(30);
+        o.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(100);
+        o.Retry.MaxRetryAttempts = 2;
+        o.Retry.BackoffType = DelayBackoffType.Exponential;
+        o.Retry.UseJitter = true;
+        // Validation requires SamplingDuration >= 2 x AttemptTimeout.
+        o.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(60);
     }
 
     private static void ConfigureResilience(HttpStandardResilienceOptions o)

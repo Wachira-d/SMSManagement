@@ -67,6 +67,8 @@ public sealed class AppDbContext : DbContext
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<ErrorLog> ErrorLogs => Set<ErrorLog>();
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
+    public DbSet<Modules.Notifications.OutboundEmail> OutboundEmails => Set<Modules.Notifications.OutboundEmail>();
+    public DbSet<Modules.Notifications.EmailWebhookLog> EmailWebhookLogs => Set<Modules.Notifications.EmailWebhookLog>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -469,6 +471,45 @@ public sealed class AppDbContext : DbContext
             e.Property(x => x.RequestMethod).HasMaxLength(16);
             e.Property(x => x.CorrelationId).HasMaxLength(100);
             e.Property(x => x.IpAddress).HasMaxLength(64);
+        });
+
+        // ---------- Outbound email ----------
+        // Not project-scoped: email is a platform concern, and the reconciler
+        // and webhook run with no project context.
+        b.Entity<Modules.Notifications.OutboundEmail>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.CreatedAt);
+            e.HasIndex(x => x.RelayMessageId);
+            e.HasIndex(x => x.IdempotencyKey).IsUnique()
+                .HasFilter(Database.ProviderName?.Contains("Sqlite", StringComparison.Ordinal) == true
+                    ? "\"IdempotencyKey\" IS NOT NULL"
+                    : "[IdempotencyKey] IS NOT NULL");
+            // Drives the reconciler's "relay rows still in flight" scan.
+            e.HasIndex(x => new { x.Provider, x.Status });
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
+            e.Property(x => x.Provider).HasMaxLength(16);
+            e.Property(x => x.Category).HasMaxLength(64);
+            e.Property(x => x.Recipients).HasMaxLength(2000);
+            e.Property(x => x.Subject).HasMaxLength(500);
+            e.Property(x => x.StatusSource).HasMaxLength(16);
+            e.Property(x => x.RelayMessageId).HasMaxLength(64);
+            e.Property(x => x.IdempotencyKey).HasMaxLength(200);
+            e.Property(x => x.ProviderMessageId).HasMaxLength(256);
+            e.Property(x => x.LastError).HasMaxLength(2000);
+            e.Ignore(x => x.IsFinal);
+        });
+
+        b.Entity<Modules.Notifications.EmailWebhookLog>(e =>
+        {
+            e.HasIndex(x => x.CreatedAt);
+            e.HasIndex(x => x.RelayMessageId);
+            e.Property(x => x.Event).HasMaxLength(32);
+            e.Property(x => x.RelayMessageId).HasMaxLength(64);
+            e.Property(x => x.Outcome).HasMaxLength(32);
+            e.Property(x => x.RemoteIp).HasMaxLength(64);
+            e.Property(x => x.RawPayload).HasMaxLength(4096);
+            e.Property(x => x.Notes).HasMaxLength(500);
         });
     }
 }
