@@ -147,8 +147,13 @@ public sealed class IngestionBatchNotifierTests
     {
         using var db = NewDb();
         var email = new StubEmail();
+        // Success alerts are opt-in (off by default — one email per round is
+        // the norm), so enable them to exercise the subject being built.
         var (_, batchId) = await SeedAsync(db, p =>
-            p.NotificationSubjectPrefix = "[HONDA-CAMP-Q3]", accepted: 50, rejected: 0);
+        {
+            p.NotifyOnIngestSuccess = true;
+            p.NotificationSubjectPrefix = "[HONDA-CAMP-Q3]";
+        }, accepted: 50, rejected: 0);
 
         await Build(db, email).NotifyBatchCompleteAsync(batchId);
 
@@ -160,8 +165,14 @@ public sealed class IngestionBatchNotifierTests
     {
         using var db = NewDb();
         var email = new StubEmail();
+        // Opt in to the success event first, so the only thing that can stop
+        // the send is the feature flag under test. Without this the test
+        // would pass on the (off) success default and prove nothing.
         var (_, batchId) = await SeedAsync(db, p =>
-            p.EmailAlertsEnabled = false, accepted: 100, rejected: 0);
+        {
+            p.NotifyOnIngestSuccess = true;
+            p.EmailAlertsEnabled = false;
+        }, accepted: 100, rejected: 0);
 
         await Build(db, email).NotifyBatchCompleteAsync(batchId);
 
@@ -174,8 +185,10 @@ public sealed class IngestionBatchNotifierTests
         using var db = NewDb();
         var email = new StubEmail();
         var (_, batchId) = await SeedAsync(db, p =>
-            p.NotificationEmails = "ops@x.com, mgr@x.com,  ops@x.com,not-an-email",
-            accepted: 1, rejected: 0);
+        {
+            p.NotifyOnIngestSuccess = true;
+            p.NotificationEmails = "ops@x.com, mgr@x.com,  ops@x.com,not-an-email";
+        }, accepted: 1, rejected: 0);
 
         await Build(db, email).NotifyBatchCompleteAsync(batchId);
 
