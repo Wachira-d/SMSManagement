@@ -21,11 +21,18 @@ namespace SMSManagement.Modules.Notifications.Relay;
 /// </summary>
 [ApiController]
 [Route("api/email/relay/webhook")]
+[Microsoft.AspNetCore.RateLimiting.EnableRateLimiting(RateLimitPolicy)]
 public sealed class EmailRelayWebhookController : ControllerBase
 {
     /// <summary>Same tolerance as the relay's own signed-request check.</summary>
     public static readonly TimeSpan MaxSkew = TimeSpan.FromSeconds(300);
     private const int MaxBodyBytes = 64 * 1024;
+    /// <summary>Per-IP limit (Program.cs), so rejected calls can't be used to
+    /// flood EmailWebhookLogs.</summary>
+    public const string RateLimitPolicy = "email-webhook";
+    /// <summary>Unauthenticated bodies are stored only this far — enough to
+    /// diagnose, too little to be worth abusing.</summary>
+    private const int RejectedPayloadBytes = 256;
 
     private readonly AppDbContext _db;
     private readonly IOptionsMonitor<EmailRelayOptions> _opts;
@@ -62,10 +69,15 @@ public sealed class EmailRelayWebhookController : ControllerBase
         // ---- authenticate ----
         if (string.IsNullOrEmpty(sig))
         {
-            if (!o.AllowUnsignedWebhooks)
+            // Unsigned is acceptable only for a deployment with no secret at
+            // all. Once a secret is saved, a missing signature is an attack
+            // or a relay that failed to decrypt its secret, never "fine".
+            if (!o.AllowUnsignedWebhooks || !string.IsNullOrEmpty(o.WebhookSecret))
             {
                 await LogAsync("missing-signature", headerEvent, null, null, rawText,
-                    "No X-Relay-Signature. Set the relay client's webhook secret, or (not recommended) allow unsigned webhooks.", ct);
+                    string.IsNullOrEmpty(o.WebhookSecret)
+                        ? "No X-Relay-Signature. Set the same webhook secret on the relay client and here."
+                        : "No X-Relay-Signature although a webhook secret is configured — the relay may be unable to decrypt its stored secret; re-save it on the relay.", ct);
                 return Unauthorized(new { error = "missing signature" });
             }
         }
@@ -145,11 +157,15 @@ public sealed class EmailRelayWebhookController : ControllerBase
             return Ok(new { received = true, matched = false });
         }
 
-        row.RelayMessageId ??= relayId;
-        var outcome = RelayStatus.Apply(row, update with
+        var capped = update with
         {
             Error = update.Error is null ? null : EmailRelayTransport.Truncate(update.Error, 2000)
-        }, "webhook", _clock.GetUtcNow());
+        };
+        var outcome = await OutboundEmailStore.ApplyAndSaveAsync(_db, row, () =>
+        {
+            row.RelayMessageId ??= relayId;
+            return RelayStatus.Apply(row, capped, "webhook", _clock.GetUtcNow());
+        }, ct);
 
         _db.EmailWebhookLogs.Add(NewLog(outcome, evt, relayId, row.Id, rawText,
             outcome == "ignored-stale" ? $"Kept {row.Status}; relay reported {update.Status}." : null));
@@ -181,9 +197,12 @@ public sealed class EmailRelayWebhookController : ControllerBase
         string? notes, CancellationToken ct)
     {
         _log.LogWarning("Email relay webhook {Outcome}: {Notes}", outcome, notes);
+        // Rejected before authentication → keep only a short prefix.
+        var unauthenticated = outcome is "missing-signature" or "bad-signature" or "stale-timestamp" or "disabled";
         try
         {
-            _db.EmailWebhookLogs.Add(NewLog(outcome, evt, relayId, emailId, raw, notes));
+            _db.EmailWebhookLogs.Add(NewLog(outcome, evt, relayId, emailId,
+                unauthenticated ? Cap(raw, RejectedPayloadBytes)! : raw, notes));
             await _db.SaveChangesAsync(ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

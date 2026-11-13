@@ -498,7 +498,7 @@
         document.getElementById('rlProfile').value  = r.SenderProfile || '';
         document.getElementById('rlFrom').value     = r.FromAddress || '';
         document.getElementById('rlFromName').value = r.FromName || '';
-        document.getElementById('rlTimeout').value  = r.TimeoutSeconds ?? 30;
+        document.getElementById('rlTimeout').value  = r.TimeoutSeconds ?? 60;
         document.getElementById('rlAllowUnsigned').checked = !!r.AllowUnsignedWebhooks;
         document.getElementById('rlKeyMark').classList.toggle('d-none', !isStored(r.ApiKey));
         document.getElementById('rlSignMark').classList.toggle('d-none', !isStored(r.SigningSecret));
@@ -663,7 +663,7 @@
             { key: 'Email:Relay:SenderProfile', category: 'Email', value: document.getElementById('rlProfile').value.trim() },
             { key: 'Email:Relay:FromAddress',   category: 'Email', value: document.getElementById('rlFrom').value.trim() },
             { key: 'Email:Relay:FromName',      category: 'Email', value: document.getElementById('rlFromName').value.trim() },
-            { key: 'Email:Relay:TimeoutSeconds', category: 'Email', value: num(document.getElementById('rlTimeout').value, 30) },
+            { key: 'Email:Relay:TimeoutSeconds', category: 'Email', value: num(document.getElementById('rlTimeout').value, 60) },
             { key: 'Email:Relay:AllowUnsignedWebhooks', category: 'Email', value: document.getElementById('rlAllowUnsigned').checked }
         ];
         for (const [id, key] of [['rlKey', 'ApiKey'], ['rlSign', 'SigningSecret'], ['rlHookSecret', 'WebhookSecret']]) {

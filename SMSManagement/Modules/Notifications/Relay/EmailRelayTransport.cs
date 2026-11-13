@@ -78,7 +78,12 @@ public sealed class EmailRelayTransport : IEmailTransport
             // Never reached the relay (DNS, TLS, timeout). The idempotency key
             // makes a later manual resend safe even if it actually got there.
             _log.LogError(ex, "Email relay unreachable subject={Subject}", message.Subject);
-            return new EmailSendResult(OutboundEmailStatus.Failed, Error: $"{ex.GetType().Name}: {ex.Message}");
+            // A timeout can hide a send the relay did accept. There's no relay
+            // id to pull, but its webhook still matches by idempotency key and
+            // would flip this to Sent — say so rather than claim a sure failure.
+            var ambiguous = ex is TaskCanceledException or OperationCanceledException or TimeoutException;
+            return new EmailSendResult(OutboundEmailStatus.Failed, Error: $"{ex.GetType().Name}: {ex.Message}"
+                + (ambiguous ? " — no answer from the relay; it may still have accepted the email." : string.Empty));
         }
 
         if (resp.IsSuccessStatus && resp.Data is { } data)

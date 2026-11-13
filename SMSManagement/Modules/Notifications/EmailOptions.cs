@@ -56,5 +56,7 @@ public sealed class EmailRelayOptions
     public string? FromAddress { get; init; }
     public string? FromName { get; init; }
 
-    public int TimeoutSeconds { get; init; } = 30;
+    /// <summary>Cap on one call to the relay, retries included. Each attempt
+    /// is limited to 20 s, so keep this comfortably above that.</summary>
+    public int TimeoutSeconds { get; init; } = 60;
 }

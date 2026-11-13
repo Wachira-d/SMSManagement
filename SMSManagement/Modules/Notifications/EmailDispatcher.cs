@@ -81,7 +81,7 @@ public sealed class EmailDispatcher : IEmailSender, IEmailDispatcher
 
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var tracked = await TrySaveAsync(db, row, isInsert: true, ct);
+        var tracked = await TryInsertAsync(db, row, ct);
 
         EmailSendResult result;
         try
@@ -102,15 +102,31 @@ public sealed class EmailDispatcher : IEmailSender, IEmailDispatcher
 
         // The webhook may already have moved the row on (fast relay, slow
         // save) — re-read it and merge, rather than overwrite a "sent".
-        // A webhook landing in the few ms between this reload and the save
-        // below can still lose; the reconciler's next pull repairs that, so
-        // a concurrency token isn't worth the retry loop it would need.
-        if (tracked)
+        // Status is a concurrency token, so a webhook that lands at any point
+        // up to our save makes the save conflict; we then reload and merge
+        // onto what the webhook wrote (see OutboundEmailStore).
+        if (!tracked)
         {
-            try { await db.Entry(row).ReloadAsync(ct); }
-            catch (Exception ex) when (ex is not OperationCanceledException) { _log.LogWarning(ex, "Reload of email {Id} failed", row.Id); }
+            Merge(row, result);
+            return row;
         }
+        try
+        {
+            await db.Entry(row).ReloadAsync(ct);
+            await OutboundEmailStore.ApplyAndSaveAsync(db, row, () => { Merge(row, result); return 0; }, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _log.LogError(ex, "Could not update outbound email log row {Id}", row.Id);
+            Merge(row, result);
+        }
+        return row;
+    }
 
+    /// <summary>Records the transport's answer unless a webhook already
+    /// moved the row past Pending. Safe to repeat after a reload.</summary>
+    private void Merge(OutboundEmail row, EmailSendResult result)
+    {
         row.RelayMessageId ??= result.RelayMessageId;
         if (row.Status is OutboundEmailStatus.Pending)
         {
@@ -124,16 +140,13 @@ public sealed class EmailDispatcher : IEmailSender, IEmailDispatcher
         {
             row.LastError ??= Cap(result.Error, 2000);
         }
-
-        if (tracked) await TrySaveAsync(db, row, isInsert: false, ct);
-        return row;
     }
 
-    private async Task<bool> TrySaveAsync(AppDbContext db, OutboundEmail row, bool isInsert, CancellationToken ct)
+    private async Task<bool> TryInsertAsync(AppDbContext db, OutboundEmail row, CancellationToken ct)
     {
         try
         {
-            if (isInsert) db.OutboundEmails.Add(row);
+            db.OutboundEmails.Add(row);
             await db.SaveChangesAsync(ct);
             return true;
         }
@@ -141,9 +154,8 @@ public sealed class EmailDispatcher : IEmailSender, IEmailDispatcher
         {
             // A missing table (migration not yet applied) or a DB outage must
             // not stop the email itself — send it untracked.
-            _log.LogError(ex, "Could not {Op} outbound email log row {Id}; continuing untracked",
-                isInsert ? "insert" : "update", row.Id);
-            if (isInsert) db.Entry(row).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+            _log.LogError(ex, "Could not insert outbound email log row {Id}; continuing untracked", row.Id);
+            db.Entry(row).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
             return false;
         }
     }

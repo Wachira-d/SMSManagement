@@ -146,12 +146,30 @@ public sealed class EmailRelayWebhookControllerTests
     }
 
     [Fact]
-    public async Task Missing_signature_accepted_only_when_explicitly_allowed()
+    public async Task Missing_signature_accepted_only_when_allowed_and_no_secret_set()
+    {
+        var row = await SeedAsync(OutboundEmailStatus.Queued);
+        var (code, db) = await PostAsync(Payload("sent"), Opts(allowUnsigned: true, secret: null), sign: false);
+        code.Should().Be(200);
+        (await db.OutboundEmails.SingleAsync(x => x.Id == row.Id)).Status.Should().Be(OutboundEmailStatus.Sent);
+    }
+
+    [Fact]
+    public async Task Allow_unsigned_does_not_bypass_a_configured_secret()
     {
         var row = await SeedAsync(OutboundEmailStatus.Queued);
         var (code, db) = await PostAsync(Payload("sent"), Opts(allowUnsigned: true), sign: false);
-        code.Should().Be(200);
-        (await db.OutboundEmails.SingleAsync(x => x.Id == row.Id)).Status.Should().Be(OutboundEmailStatus.Sent);
+        code.Should().Be(401);
+        (await db.OutboundEmails.SingleAsync(x => x.Id == row.Id)).Status.Should().Be(OutboundEmailStatus.Queued);
+    }
+
+    [Fact]
+    public async Task Rejected_payload_is_stored_truncated()
+    {
+        await SeedAsync(OutboundEmailStatus.Queued);
+        var big = Payload("sent") + new string(' ', 2000);
+        var (_, db) = await PostAsync(big, Opts(), signatureOverride: "sha256=" + new string('0', 64));
+        (await db.EmailWebhookLogs.SingleAsync()).RawPayload!.Length.Should().BeLessThanOrEqualTo(256);
     }
 
     [Fact]

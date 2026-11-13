@@ -487,7 +487,9 @@ public sealed class AppDbContext : DbContext
                     : "[IdempotencyKey] IS NOT NULL");
             // Drives the reconciler's "relay rows still in flight" scan.
             e.HasIndex(x => new { x.Provider, x.Status });
-            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
+            // Concurrency token: send, webhook and reconciler can race on the
+            // same row; see OutboundEmailStore.
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(16).IsConcurrencyToken();
             e.Property(x => x.Provider).HasMaxLength(16);
             e.Property(x => x.Category).HasMaxLength(64);
             e.Property(x => x.Recipients).HasMaxLength(2000);

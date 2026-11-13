@@ -217,6 +217,19 @@ builder.Services.AddRateLimiter(o =>
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0
         }));
+
+    // EmailRelayAPI delivery webhook: generous for a real relay (one IP,
+    // bursts after an ingestion run) but caps anonymous junk that would
+    // otherwise fill EmailWebhookLogs.
+    o.AddPolicy(SMSManagement.Modules.Notifications.Relay.EmailRelayWebhookController.RateLimitPolicy,
+        ctx => RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 600,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
 });
 
 builder.Services.AddControllers(o =>

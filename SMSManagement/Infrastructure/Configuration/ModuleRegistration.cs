@@ -191,7 +191,9 @@ public static class ModuleRegistration
     /// per-attempt timeout than the SMS providers get.</summary>
     private static void ConfigureEmailRelayResilience(HttpStandardResilienceOptions o)
     {
-        o.AttemptTimeout.Timeout = TimeSpan.FromSeconds(30);
+        // Kept well under Email:Relay:TimeoutSeconds (default 60), the overall
+        // cap, so a slow attempt still leaves room to retry.
+        o.AttemptTimeout.Timeout = TimeSpan.FromSeconds(20);
         o.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(100);
         o.Retry.MaxRetryAttempts = 2;
         o.Retry.BackoffType = DelayBackoffType.Exponential;

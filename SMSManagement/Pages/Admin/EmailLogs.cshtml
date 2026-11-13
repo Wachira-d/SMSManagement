@@ -276,7 +276,7 @@ document.getElementById('btnRefresh').addEventListener('click', async () => {
     if (!currentId) return;
     try {
         const r = await api.post('/api/admin/email-logs/' + currentId + '/refresh', {});
-        toast('Relay: ' + r.outcome, r.outcome.startsWith('error') ? 'danger' : 'success');
+        toast('Relay: ' + esc(r.outcome), r.outcome.startsWith('error') ? 'danger' : 'success');
         const d = await api.get('/api/admin/email-logs/' + currentId);
         renderEmail(d.email, d.webhooks || []);
         loadEmails();

@@ -53,6 +53,28 @@ public sealed class EmailRelayReconcilerTests
     }
 
     [Fact]
+    public async Task Webhook_landing_during_pull_is_not_overwritten()
+    {
+        var row = await SeedAsync(OutboundEmailStatus.Queued, TimeSpan.FromMinutes(20));
+        var reconcilerDb = Db();
+        _http.Respond = _ =>
+        {
+            // The "sent" webhook commits while the relay still answers "sending".
+            var other = Db();
+            var r = other.OutboundEmails.Single(x => x.Id == row.Id);
+            RelayStatus.Apply(r, new RelayStatus.Update(OutboundEmailStatus.Sent), "webhook", _clock.Now);
+            other.SaveChanges();
+            return StubRelayHandler.Json(HttpStatusCode.OK, """{"success":true,"data":{"id":"rid-1","status":"sending"}}""");
+        };
+
+        await Build(reconcilerDb).ReconcileAsync();
+
+        var saved = await Db().OutboundEmails.SingleAsync(x => x.Id == row.Id);
+        saved.Status.Should().Be(OutboundEmailStatus.Sent);
+        saved.StatusSource.Should().Be("webhook");
+    }
+
+    [Fact]
     public async Task Skips_young_final_smtp_and_cooled_down_rows()
     {
         await SeedAsync(OutboundEmailStatus.Queued, TimeSpan.FromMinutes(1));                  // too young
